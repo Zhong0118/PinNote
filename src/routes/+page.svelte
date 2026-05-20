@@ -3,6 +3,7 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { disable, enable } from "@tauri-apps/plugin-autostart";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
@@ -11,11 +12,12 @@
   import { defaultMarkdownFilename } from "$lib/filename";
   import { loadNote, saveNote } from "$lib/noteStore";
   import { loadSettings, saveSettings, type AppSettings } from "$lib/settings";
+  import { registerGlobalShortcuts, unregisterGlobalShortcuts, toggleWindowVisibility } from "$lib/shortcuts";
+  import { openSettingsWindow } from "$lib/settingsWindow";
 
   let title = $state(defaultTitle);
   let content = $state(defaultContent);
   let sourceMode = $state(false);
-  let settingsOpen = $state(false);
   let settings = $state<AppSettings>(loadSettings());
   let status = $state("正在加载…");
   let ready = $state(false);
@@ -27,12 +29,45 @@
       status = "已就绪";
       ready = true;
     });
+
+    // Register global shortcuts
+    registerGlobalShortcuts(settings.shortcuts, {
+      toggleWindow: () => toggleWindowVisibility(),
+      newNote: () => resetNote(),
+    });
+
+    // Listen for settings changes from the settings window
+    const unlistenPromise = listen<AppSettings>("settings-changed", (event) => {
+      const next = event.payload;
+      if (next.autoStart !== settings.autoStart) {
+        void syncAutoStart(next.autoStart);
+      }
+      settings = next;
+      // Re-register global shortcuts with new bindings
+      registerGlobalShortcuts(settings.shortcuts, {
+        toggleWindow: () => toggleWindowVisibility(),
+        newNote: () => resetNote(),
+      });
+      status = "设置已同步";
+    });
+
+    return () => {
+      unregisterGlobalShortcuts();
+      unlistenPromise.then((fn) => fn());
+    };
   });
 
   $effect(() => {
     void setPin(settings.alwaysOnTop);
     saveSettings(settings);
   });
+
+  function resetNote() {
+    title = defaultTitle;
+    content = defaultContent;
+    saveNote({ title, content });
+    status = "已新建便签";
+  }
 
   function updateTitle(value: string) {
     title = value;
@@ -44,15 +79,6 @@
     content = value;
     saveNote({ title, content });
     status = "已自动保存";
-  }
-
-  function updateSettings(next: AppSettings) {
-    if (next.autoStart !== settings.autoStart) {
-      void syncAutoStart(next.autoStart);
-    }
-
-    settings = next;
-    status = "设置已保存";
   }
 
   async function syncAutoStart(value: boolean) {
@@ -76,7 +102,8 @@
   }
 
   function togglePin() {
-    updateSettings({ ...settings, alwaysOnTop: !settings.alwaysOnTop });
+    settings = { ...settings, alwaysOnTop: !settings.alwaysOnTop };
+    status = settings.alwaysOnTop ? "已置顶" : "已取消置顶";
   }
 
   async function exportMarkdown() {
@@ -137,7 +164,27 @@
   function isInteractiveElement(target: EventTarget | null) {
     return target instanceof Element && Boolean(target.closest("button, input, textarea, a"));
   }
+
+  function handleKeydown(event: KeyboardEvent) {
+    const mod = event.metaKey || event.ctrlKey;
+
+    if (mod && event.key === "s") {
+      event.preventDefault();
+      exportMarkdown();
+    } else if (mod && event.key === "t") {
+      event.preventDefault();
+      togglePin();
+    } else if (mod && event.key === ",") {
+      event.preventDefault();
+      openSettingsWindow();
+    } else if (event.ctrlKey && event.key === "/") {
+      event.preventDefault();
+      sourceMode = !sourceMode;
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <svelte:head>
   <meta name="description" content="PinNote Markdown sticky note" />
@@ -148,13 +195,11 @@
   {status}
   {sourceMode}
   {settings}
-  {settingsOpen}
   onTitleChange={updateTitle}
   onTogglePin={togglePin}
   onToggleSource={() => (sourceMode = !sourceMode)}
   onExport={exportMarkdown}
-  onToggleSettings={() => (settingsOpen = !settingsOpen)}
-  onSettingsChange={updateSettings}
+  onOpenSettings={openSettingsWindow}
   onQuit={quitApp}
   onStartDrag={startDrag}
   onStartResize={startResize}

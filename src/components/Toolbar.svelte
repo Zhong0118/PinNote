@@ -4,22 +4,20 @@
   type Props = {
     alwaysOnTop: boolean;
     sourceMode: boolean;
-    settingsOpen: boolean;
     onTogglePin: () => void;
     onToggleSource: () => void;
     onExport: () => void;
-    onToggleSettings: () => void;
+    onOpenSettings: () => void;
     onQuit: () => void;
   };
 
   let {
     alwaysOnTop,
     sourceMode,
-    settingsOpen,
     onTogglePin,
     onToggleSource,
     onExport,
-    onToggleSettings,
+    onOpenSettings,
     onQuit,
   }: Props = $props();
 </script>
@@ -51,11 +49,10 @@
     <Download size={16} strokeWidth={2.1} />
   </button>
   <button
-    class:active={settingsOpen}
     type="button"
-    title="设置"
+    title="设置 (Ctrl+,)"
     aria-label="设置"
-    onclick={onToggleSettings}
+    onclick={onOpenSettings}
   >
     <Settings size={16} strokeWidth={2.1} />
   </button>
@@ -70,7 +67,6 @@
     align-items: center;
     gap: 4px;
     cursor: default;
-    -webkit-app-region: no-drag;
   }
 
   button {
@@ -84,7 +80,6 @@
     color: color-mix(in srgb, var(--pin-text), transparent 28%);
     background: transparent;
     cursor: pointer;
-    -webkit-app-region: no-drag;
   }
 
   button:hover,

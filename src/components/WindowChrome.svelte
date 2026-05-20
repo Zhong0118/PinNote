@@ -1,5 +1,4 @@
 <script lang="ts">
-  import SettingsPanel from "./SettingsPanel.svelte";
   import Toolbar from "./Toolbar.svelte";
   import type { AppSettings } from "$lib/settings";
 
@@ -8,13 +7,11 @@
     status: string;
     sourceMode: boolean;
     settings: AppSettings;
-    settingsOpen: boolean;
     onTitleChange: (title: string) => void;
     onTogglePin: () => void;
     onToggleSource: () => void;
     onExport: () => void;
-    onToggleSettings: () => void;
-    onSettingsChange: (settings: AppSettings) => void;
+    onOpenSettings: () => void;
     onQuit: () => void;
     onStartDrag: (event: PointerEvent) => void;
     onStartResize: (event: PointerEvent) => void;
@@ -26,13 +23,11 @@
     status,
     sourceMode,
     settings,
-    settingsOpen,
     onTitleChange,
     onTogglePin,
     onToggleSource,
     onExport,
-    onToggleSettings,
-    onSettingsChange,
+    onOpenSettings,
     onQuit,
     onStartDrag,
     onStartResize,
@@ -60,24 +55,19 @@
       <Toolbar
         alwaysOnTop={settings.alwaysOnTop}
         {sourceMode}
-        {settingsOpen}
         onTogglePin={onTogglePin}
         onToggleSource={onToggleSource}
         onExport={onExport}
-        onToggleSettings={onToggleSettings}
+        onOpenSettings={onOpenSettings}
         onQuit={onQuit}
       />
     </header>
 
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_no_static_element_interactions, a11y_interactive_supports_focus -->
     <div class="status-line" role="toolbar" onpointerdown={onStartDrag}>
       <span>{sourceMode ? "Markdown source" : "Milkdown"}</span>
       <span>{status}</span>
     </div>
-
-    {#if settingsOpen}
-      <SettingsPanel {settings} onChange={onSettingsChange} />
-    {/if}
 
     <div class="editor-frame">
       {@render children()}
