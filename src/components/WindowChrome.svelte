@@ -46,8 +46,8 @@
   style:--pin-custom={settings.customColor}
 >
   <section class="note-window" aria-label="PinNote Markdown 便签">
-    <header class="dragbar" role="presentation" data-tauri-drag-region onpointerdown={onStartDrag}>
-      <div class="title-cluster" data-tauri-drag-region>
+    <header class="dragbar" role="presentation" onpointerdown={onStartDrag}>
+      <div class="title-cluster">
         <span class="brand-mark"></span>
         <input
           class="title-input"
@@ -69,7 +69,8 @@
       />
     </header>
 
-    <div class="status-line" data-tauri-drag-region>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="status-line" role="toolbar" onpointerdown={onStartDrag}>
       <span>{sourceMode ? "Markdown source" : "Milkdown"}</span>
       <span>{status}</span>
     </div>
@@ -119,18 +120,6 @@
   button,
   input {
     font: inherit;
-  }
-
-  :global([data-tauri-drag-region]) {
-    cursor: grab;
-  }
-
-  :global([data-tauri-drag-region]:active) {
-    cursor: grabbing;
-  }
-
-  :global([data-tauri-drag-region] *) {
-    cursor: inherit;
   }
 
   :global(button),
@@ -240,7 +229,6 @@
     background: color-mix(in srgb, var(--pin-header) calc(var(--pin-opacity) * 100%), transparent);
     user-select: none;
     cursor: grab;
-    -webkit-app-region: drag;
   }
 
   .dragbar:active {
@@ -252,6 +240,7 @@
     min-width: 0;
     align-items: center;
     gap: 9px;
+    cursor: grab;
   }
 
   .brand-mark {
@@ -260,6 +249,7 @@
     flex: 0 0 auto;
     border-radius: 999px;
     background: linear-gradient(180deg, var(--pin-accent), color-mix(in srgb, var(--pin-accent), #111 22%));
+    cursor: grab;
   }
 
   .title-input {
@@ -272,7 +262,6 @@
     font-size: 15px;
     font-weight: 800;
     cursor: text;
-    -webkit-app-region: no-drag;
   }
 
   .status-line {
@@ -287,7 +276,6 @@
     line-height: 24px;
     user-select: none;
     cursor: grab;
-    -webkit-app-region: drag;
   }
 
   .status-line:active {

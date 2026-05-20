@@ -11,28 +11,80 @@
   let { value, onChange }: Props = $props();
   let root = $state<HTMLDivElement>();
   let failed = $state(false);
-  let editor: { destroy: () => void } | undefined;
+  let editorInstance: any;
+  let editorViewCtxRef: any;
 
   onMount(() => {
     void setup();
 
     return () => {
-      editor?.destroy();
+      editorInstance?.destroy();
     };
   });
+
+  function handleTaskClick(event: MouseEvent) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const li = target.closest('li[data-item-type="task"]') as HTMLElement | null;
+    if (!li) return;
+
+    // Only toggle when clicking in the checkbox zone (left 28px)
+    const rect = li.getBoundingClientRect();
+    if (event.clientX > rect.left + 28) return;
+
+    if (!editorInstance || !editorViewCtxRef) return;
+    let view: any;
+    try {
+      view = editorInstance.action((ctx: any) => ctx.get(editorViewCtxRef));
+    } catch {
+      return;
+    }
+    if (!view?.state) return;
+
+    // Walk the document to find the matching list_item node by DOM index
+    const liElements = root?.querySelectorAll('li[data-item-type="task"]');
+    if (!liElements) return;
+    const liIndex = Array.from(liElements).indexOf(li);
+    if (liIndex < 0) return;
+
+    let count = 0;
+    let found = false;
+    view.state.doc.descendants((node: any, pos: number) => {
+      if (found) return false;
+      if (node.type.name === "list_item" && node.attrs.checked != null) {
+        if (count === liIndex) {
+          const tr = view.state.tr.setNodeMarkup(pos, undefined, {
+            ...node.attrs,
+            checked: !node.attrs.checked,
+          });
+          view.dispatch(tr);
+          found = true;
+          return false;
+        }
+        count++;
+      }
+    });
+  }
 
   async function setup() {
     if (!browser || !root) return;
 
     try {
-      const [{ Editor, rootCtx, defaultValueCtx }, { gfm }, { listener, listenerCtx }] =
-        await Promise.all([
-          import("@milkdown/core"),
-          import("@milkdown/preset-gfm"),
-          import("@milkdown/plugin-listener"),
-        ]);
+      const [
+        { Editor, rootCtx, defaultValueCtx, editorViewCtx },
+        { commonmark },
+        { gfm },
+        { listener, listenerCtx },
+      ] = await Promise.all([
+        import("@milkdown/kit/core"),
+        import("@milkdown/kit/preset/commonmark"),
+        import("@milkdown/kit/preset/gfm"),
+        import("@milkdown/kit/plugin/listener"),
+      ]);
 
-      editor = await Editor.make()
+      editorViewCtxRef = editorViewCtx;
+
+      editorInstance = await Editor.make()
         .config((ctx: any) => {
           ctx.set(rootCtx, root);
           ctx.set(defaultValueCtx, value);
@@ -40,10 +92,12 @@
             onChange(markdown);
           });
         })
+        .use(commonmark)
         .use(gfm)
         .use(listener)
         .create();
-    } catch {
+    } catch (e) {
+      console.error("Milkdown setup failed:", e);
       failed = true;
     }
   }
@@ -52,7 +106,8 @@
 {#if failed}
   <SourceEditor {value} {onChange} />
 {:else}
-  <div class="milkdown-host" bind:this={root}></div>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
+  <div class="milkdown-host" bind:this={root} role="application" onclick={handleTaskClick}></div>
 {/if}
 
 <style>
@@ -107,12 +162,39 @@
     accent-color: var(--pin-accent);
   }
 
+  .milkdown-host :global(li[data-item-type="task"]),
   .milkdown-host :global(li[data-checked]),
   .milkdown-host :global(li.task-list-item) {
     list-style: none;
     margin-left: -1.2rem;
+    position: relative;
+    padding-left: 1.5rem;
   }
 
+  .milkdown-host :global(li[data-item-type="task"])::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.32em;
+    width: 15px;
+    height: 15px;
+    border: 2px solid var(--pin-accent);
+    border-radius: 3px;
+    cursor: pointer;
+    background: transparent;
+  }
+
+  .milkdown-host :global(li[data-item-type="task"][data-checked="true"])::before {
+    background: var(--pin-accent);
+    border-color: var(--pin-accent);
+    /* Checkmark via background image */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M6.5 11.5L3 8l1-1 2.5 2.5L12 4l1 1z'/%3E%3C/svg%3E");
+    background-size: 13px;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
+  .milkdown-host :global(li[data-item-type="task"][data-checked="true"]),
   .milkdown-host :global(li[data-checked="true"]) {
     color: color-mix(in srgb, var(--pin-text), transparent 38%);
     text-decoration: line-through;

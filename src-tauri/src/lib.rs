@@ -19,6 +19,23 @@ fn app_data_path(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn save_note(app: AppHandle, json: String) -> Result<(), String> {
+    let path = data_dir(&app)?.join("note.json");
+    fs::write(&path, json).map_err(|e| format!("Cannot save note: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_note(app: AppHandle) -> Result<Option<String>, String> {
+    let path = data_dir(&app)?.join("note.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path).map_err(|e| format!("Cannot load note: {e}"))?;
+    Ok(Some(content))
+}
+
+#[tauri::command]
 fn write_markdown_file(path: String, content: String) -> Result<String, String> {
     fs::write(&path, content).map_err(|error| format!("Cannot export note: {error}"))?;
     Ok(path)
@@ -40,6 +57,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             app_data_path,
+            save_note,
+            load_note,
             write_markdown_file,
             quit_app
         ])

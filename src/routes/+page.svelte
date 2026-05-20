@@ -3,11 +3,13 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { disable, enable } from "@tauri-apps/plugin-autostart";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { onMount } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
   import WindowChrome from "../components/WindowChrome.svelte";
   import { defaultContent, defaultTitle } from "$lib/defaultNote";
   import { defaultMarkdownFilename } from "$lib/filename";
+  import { loadNote, saveNote } from "$lib/noteStore";
   import { loadSettings, saveSettings, type AppSettings } from "$lib/settings";
 
   let title = $state(defaultTitle);
@@ -15,7 +17,17 @@
   let sourceMode = $state(false);
   let settingsOpen = $state(false);
   let settings = $state<AppSettings>(loadSettings());
-  let status = $state("临时便签，不会自动保存正文");
+  let status = $state("正在加载…");
+  let ready = $state(false);
+
+  onMount(() => {
+    loadNote().then((note) => {
+      title = note.title;
+      content = note.content;
+      status = "已就绪";
+      ready = true;
+    });
+  });
 
   $effect(() => {
     void setPin(settings.alwaysOnTop);
@@ -24,12 +36,14 @@
 
   function updateTitle(value: string) {
     title = value;
-    status = "标题仅用于导出文件名";
+    saveNote({ title, content });
+    status = "已自动保存";
   }
 
   function updateContent(value: string) {
     content = value;
-    status = "未保存";
+    saveNote({ title, content });
+    status = "已自动保存";
   }
 
   function updateSettings(next: AppSettings) {
@@ -145,9 +159,11 @@
   onStartDrag={startDrag}
   onStartResize={startResize}
 >
-  {#if sourceMode}
-    <SourceEditor value={content} onChange={updateContent} />
-  {:else}
-    <MilkdownEditor value={content} onChange={updateContent} />
+  {#if ready}
+    {#if sourceMode}
+      <SourceEditor value={content} onChange={updateContent} />
+    {:else}
+      <MilkdownEditor value={content} onChange={updateContent} />
+    {/if}
   {/if}
 </WindowChrome>
