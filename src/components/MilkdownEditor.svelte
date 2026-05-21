@@ -75,11 +75,13 @@
         { commonmark },
         { gfm },
         { listener, listenerCtx },
+        { history },
       ] = await Promise.all([
         import("@milkdown/kit/core"),
         import("@milkdown/kit/preset/commonmark"),
         import("@milkdown/kit/preset/gfm"),
         import("@milkdown/kit/plugin/listener"),
+        import("@milkdown/plugin-history"),
       ]);
 
       editorViewCtxRef = editorViewCtx;
@@ -94,6 +96,7 @@
         })
         .use(commonmark)
         .use(gfm)
+        .use(history)
         .use(listener)
         .create();
     } catch (e) {

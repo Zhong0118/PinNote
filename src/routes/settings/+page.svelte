@@ -1,14 +1,17 @@
 <script lang="ts">
   import { emit } from "@tauri-apps/api/event";
   import { disable, enable } from "@tauri-apps/plugin-autostart";
+  import { onMount } from "svelte";
   import { Palette, Rocket, Pin, SlidersHorizontal, Keyboard } from "lucide-svelte";
   import {
+    defaultSettings,
     loadSettings,
     saveSettings,
     defaultShortcuts,
     type AppSettings,
     type NoteTheme,
   } from "$lib/settings";
+  import { createNote, loadNoteById, patchNoteNow, type PinNote } from "$lib/notesStore";
 
   const themes: Array<{ value: NoteTheme; label: string; color: string }> = [
     { value: "paper", label: "纸张", color: "#d7b87c" },
@@ -28,16 +31,53 @@
     { label: "斜体", key: "Ctrl+I" },
   ];
 
-  let settings = $state<AppSettings>(loadSettings());
+  let settings = $state<AppSettings>({ ...defaultSettings });
+  let note = $state<PinNote>(createNote());
+  let noteId = $state<string | undefined>();
+  let noteReady = $state(false);
   let activeTab = $state<"appearance" | "behavior" | "shortcuts">("appearance");
   let recordingFor = $state<string | null>(null);
+  let shortcutError = $state("");
+
+  onMount(() => {
+    noteId = new URLSearchParams(window.location.search).get("noteId") ?? undefined;
+    loadSettings().then((next) => {
+      settings = next;
+    });
+    if (noteId) {
+      loadNoteById(noteId).then(({ note: loaded }) => {
+        if (loaded.id !== noteId) return;
+        note = loaded;
+        noteReady = true;
+      });
+    } else {
+      noteReady = false;
+      activeTab = "shortcuts";
+    }
+  });
 
   function patch(next: Partial<AppSettings>) {
     settings = { ...settings, ...next };
     broadcastSettings();
   }
 
+  function patchNote(next: Partial<PinNote>) {
+    if (!noteReady) return;
+    const draft = { ...note, ...next, updatedAt: Date.now() };
+    note = draft;
+    void patchNoteNow(note.id, next).then((saved) => {
+      note = saved;
+      void emit("note-settings-changed", saved);
+    });
+  }
+
   function patchShortcut(key: string, value: string) {
+    if (Object.entries(settings.shortcuts).some(([name, shortcut]) => name !== key && shortcut === value)) {
+      shortcutError = "这个快捷键已经被使用";
+      return;
+    }
+
+    shortcutError = "";
     settings = {
       ...settings,
       shortcuts: { ...settings.shortcuts, [key]: value },
@@ -46,8 +86,8 @@
   }
 
   function broadcastSettings() {
-    saveSettings(settings);
-    emit("settings-changed", settings);
+    void saveSettings(settings);
+    void emit("settings-changed", settings);
   }
 
   async function handleAutoStartChange(value: boolean) {
@@ -75,7 +115,10 @@
     if (event.metaKey) parts.push("Cmd");
 
     // Need at least one modifier
-    if (parts.length === 0) return;
+    if (parts.length === 0) {
+      shortcutError = "请至少包含 Ctrl、Alt、Shift 或 Cmd";
+      return;
+    }
 
     parts.push(event.key.length === 1 ? event.key.toUpperCase() : event.key);
     patchShortcut(recordingFor, parts.join("+"));
@@ -87,8 +130,9 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="settings-window" onkeydown={handleShortcutKeydown}>
+<svelte:window onkeydown={handleShortcutKeydown} />
+
+<div class="settings-window">
   <nav class="tab-bar">
     <button
       class:active={activeTab === "appearance"}
@@ -113,6 +157,9 @@
   <div class="tab-content">
     {#if activeTab === "appearance"}
       <div class="section">
+        {#if !noteReady}
+          <p class="hint">请从某张便签窗口打开设置来修改外观</p>
+        {/if}
         <label class="field">
           <span class="label-with-icon"><SlidersHorizontal size={14} /> 透明度</span>
           <input
@@ -120,8 +167,9 @@
             min="0.72"
             max="1"
             step="0.01"
-            value={settings.opacity}
-            oninput={(e) => patch({ opacity: Number(e.currentTarget.value) })}
+            value={note.opacity}
+            disabled={!noteReady}
+            oninput={(e) => patchNote({ opacity: Number(e.currentTarget.value) })}
           />
         </label>
 
@@ -131,24 +179,26 @@
             {#each themes as theme}
               <button
                 class="swatch"
-                class:active={settings.theme === theme.value}
+                class:active={note.theme === theme.value}
                 type="button"
                 title={theme.label}
                 style:--swatch={theme.color}
-                onclick={() => patch({ theme: theme.value })}
+                disabled={!noteReady}
+                onclick={() => patchNote({ theme: theme.value })}
               ></button>
             {/each}
             <label
               class="swatch custom-swatch"
-              class:active={settings.theme === "custom"}
+              class:active={note.theme === "custom"}
               title="自定义颜色"
-              style:--swatch={settings.customColor}
+              style:--swatch={note.customColor}
             >
               <input
                 type="color"
-                value={settings.customColor}
+                value={note.customColor}
+                disabled={!noteReady}
                 oninput={(e) =>
-                  patch({ theme: "custom", customColor: e.currentTarget.value })}
+                  patchNote({ theme: "custom", customColor: e.currentTarget.value })}
               />
             </label>
           </div>
@@ -170,8 +220,9 @@
           <span class="label-with-icon"><Pin size={14} /> 窗口置顶</span>
           <input
             type="checkbox"
-            checked={settings.alwaysOnTop}
-            onchange={(e) => patch({ alwaysOnTop: e.currentTarget.checked })}
+            checked={note.alwaysOnTop}
+            disabled={!noteReady}
+            onchange={(e) => patchNote({ alwaysOnTop: e.currentTarget.checked })}
           />
         </label>
       </div>
@@ -180,9 +231,12 @@
       <div class="section">
         <h3>全局快捷键</h3>
         <p class="hint">在任何应用中都可触发，点击可修改</p>
+        {#if shortcutError}
+          <p class="error">{shortcutError}</p>
+        {/if}
         <div class="shortcut-list">
           <div class="shortcut-row">
-            <span>显示/隐藏窗口</span>
+            <span>显示最近便签</span>
             <button
               class="key-badge"
               class:recording={recordingFor === "toggleWindow"}
@@ -308,6 +362,12 @@
     margin: -8px 0 4px;
     font-size: 12px;
     color: #999;
+  }
+
+  .error {
+    margin: -6px 0 2px;
+    color: #a84332;
+    font-size: 12px;
   }
 
   .field {

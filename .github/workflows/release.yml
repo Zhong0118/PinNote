@@ -5,47 +5,53 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: windows-latest
-            target: x86_64-pc-windows-msvc
+            args: ""
           - platform: macos-latest
-            target: aarch64-apple-darwin
-          - platform: macos-latest
-            target: x86_64-apple-darwin
+            args: "--target universal-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Build Tauri app
+      - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "PinNote ${{ github.ref_name }}"
-          releaseBody: "See [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/README.md#更新日志) for details."
+          releaseBody: "See README for details."
           releaseDraft: false
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: ${{ matrix.args }}

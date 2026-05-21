@@ -56,7 +56,7 @@
   >
     <Settings size={16} strokeWidth={2.1} />
   </button>
-  <button class="danger" type="button" title="退出应用" aria-label="退出应用" onclick={onQuit}>
+  <button class="danger" type="button" title="关闭便签" aria-label="关闭便签" onclick={onQuit}>
     <Power size={16} strokeWidth={2.1} />
   </button>
 </nav>

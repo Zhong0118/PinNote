@@ -8,76 +8,198 @@
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
   import WindowChrome from "../components/WindowChrome.svelte";
-  import { defaultContent, defaultTitle } from "$lib/defaultNote";
   import { defaultMarkdownFilename } from "$lib/filename";
-  import { loadNote, saveNote } from "$lib/noteStore";
-  import { loadSettings, saveSettings, type AppSettings } from "$lib/settings";
-  import { registerGlobalShortcuts, unregisterGlobalShortcuts, toggleWindowVisibility } from "$lib/shortcuts";
+  import { defaultSettings, loadSettings, saveSettings, type AppSettings } from "$lib/settings";
+  import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "$lib/shortcuts";
   import { openSettingsWindow } from "$lib/settingsWindow";
+  import {
+    createNote,
+    flushNoteSave,
+    getRecentNote,
+    loadNoteById,
+    markNoteActive,
+    markNoteClosed,
+    saveNoteNow,
+    scheduleNoteSave,
+    type PinNote,
+  } from "$lib/notesStore";
+  import { openNoteWindow } from "$lib/noteWindows";
 
-  let title = $state(defaultTitle);
-  let content = $state(defaultContent);
+  let note = $state<PinNote>(createNote());
   let sourceMode = $state(false);
-  let settings = $state<AppSettings>(loadSettings());
+  let globalSettings = $state<AppSettings>({ ...defaultSettings });
   let status = $state("正在加载…");
   let ready = $state(false);
+  let settingsReady = $state(false);
+  let editorRevision = $state(0);
+  let registeredShortcuts = $state("");
+  let isMainWindow = false;
+
+  const noteSettings = $derived({
+    alwaysOnTop: note.alwaysOnTop,
+    opacity: note.opacity,
+    theme: note.theme,
+    customColor: note.customColor,
+  });
 
   onMount(() => {
-    loadNote().then((note) => {
-      title = note.title;
-      content = note.content;
+    const win = getCurrentWindow();
+    isMainWindow = win.label === "main";
+    const requestedNoteId = new URLSearchParams(window.location.search).get("noteId") ?? undefined;
+
+    loadNoteById(requestedNoteId).then(async ({ note: loaded }) => {
+      note = loaded;
       status = "已就绪";
       ready = true;
+      await applyNativeWindowState();
+      void markNoteActive(note);
     });
 
-    // Register global shortcuts
-    registerGlobalShortcuts(settings.shortcuts, {
-      toggleWindow: () => toggleWindowVisibility(),
-      newNote: () => resetNote(),
+    loadSettings().then((next) => {
+      globalSettings = next;
+      settingsReady = true;
+      if (isMainWindow) void registerShortcuts();
     });
 
-    // Listen for settings changes from the settings window
-    const unlistenPromise = listen<AppSettings>("settings-changed", (event) => {
+    const settingsPromise = listen<AppSettings>("settings-changed", (event) => {
       const next = event.payload;
-      if (next.autoStart !== settings.autoStart) {
+      if (next.autoStart !== globalSettings.autoStart) {
         void syncAutoStart(next.autoStart);
       }
-      settings = next;
-      // Re-register global shortcuts with new bindings
-      registerGlobalShortcuts(settings.shortcuts, {
-        toggleWindow: () => toggleWindowVisibility(),
-        newNote: () => resetNote(),
-      });
+      const shortcutsChanged =
+        shortcutSignature(next.shortcuts) !== shortcutSignature(globalSettings.shortcuts);
+      globalSettings = next;
+      if (isMainWindow && shortcutsChanged) {
+        void registerShortcuts();
+      }
       status = "设置已同步";
     });
 
+    const noteSettingsPromise = listen<PinNote>("note-settings-changed", (event) => {
+      if (event.payload.id !== note.id) return;
+      note = { ...note, ...event.payload };
+      void applyNativeWindowState();
+      scheduleNoteSave(note);
+      status = "便签设置已同步";
+    });
+
+    const newNotePromise = isMainWindow
+      ? listen("new-note-requested", () => {
+          void createNewNoteWindow();
+        })
+      : Promise.resolve(() => {});
+
+    const openSettingsPromise = isMainWindow
+      ? listen("open-settings-requested", () => {
+          void openRecentSettings();
+        })
+      : Promise.resolve(() => {});
+
+    const showLastNotePromise = isMainWindow
+      ? listen("show-last-note-requested", () => {
+          void showLastNoteWindow();
+        })
+      : Promise.resolve(() => {});
+
+    const movedPromise = win.onMoved(() => {
+      void captureWindowState();
+    });
+    const resizedPromise = win.onResized(() => {
+      void captureWindowState();
+    });
+    const focusPromise = win.onFocusChanged(({ payload }) => {
+      if (payload) void markNoteActive(note);
+    });
+    const closePromise = win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      await saveBeforeWindowAction();
+      await markNoteClosed(note);
+      await win.hide();
+    });
+
     return () => {
-      unregisterGlobalShortcuts();
-      unlistenPromise.then((fn) => fn());
+      if (isMainWindow) unregisterGlobalShortcuts();
+      settingsPromise.then((fn) => fn());
+      noteSettingsPromise.then((fn) => fn());
+      newNotePromise.then((fn) => fn());
+      openSettingsPromise.then((fn) => fn());
+      showLastNotePromise.then((fn) => fn());
+      movedPromise.then((fn) => fn());
+      resizedPromise.then((fn) => fn());
+      focusPromise.then((fn) => fn());
+      closePromise.then((fn) => fn());
     };
   });
 
   $effect(() => {
-    void setPin(settings.alwaysOnTop);
-    saveSettings(settings);
+    if (!settingsReady || !ready) return;
+    void setPin(note.alwaysOnTop);
+    scheduleNoteSave(note);
   });
 
-  function resetNote() {
-    title = defaultTitle;
-    content = defaultContent;
-    saveNote({ title, content });
+  async function registerShortcuts() {
+    const signature = shortcutSignature(globalSettings.shortcuts);
+    if (registeredShortcuts === signature) return;
+
+    const result = await registerGlobalShortcuts(globalSettings.shortcuts, {
+      toggleWindow: () => {
+        void showLastNoteWindow();
+      },
+      newNote: () => {
+        void createNewNoteWindow();
+      },
+    });
+    if (result.ok) {
+      registeredShortcuts = signature;
+      status = "快捷键已就绪";
+    } else {
+      status = `快捷键注册失败：${result.message}`;
+    }
+  }
+
+  async function createNewNoteWindow() {
+    const next = createNote({
+      theme: note.theme,
+      customColor: note.customColor,
+      opacity: note.opacity,
+      alwaysOnTop: note.alwaysOnTop,
+      window: {
+        ...note.window,
+        x: note.window.x == null ? undefined : note.window.x + 24,
+        y: note.window.y == null ? undefined : note.window.y + 24,
+      },
+    });
+    await saveNoteNow(next);
+    await openNoteWindow(next);
     status = "已新建便签";
   }
 
+  async function showLastNoteWindow() {
+    const { note: target } = await getRecentNote();
+
+    if (target.id === note.id && isMainWindow) {
+      const win = getCurrentWindow();
+      if (await win.isVisible()) {
+        await win.hide();
+      } else {
+        await win.show();
+        await win.setFocus();
+      }
+      return;
+    }
+
+    await openNoteWindow(target);
+  }
+
   function updateTitle(value: string) {
-    title = value;
-    saveNote({ title, content });
+    note = { ...note, title: value, updatedAt: Date.now() };
+    scheduleNoteSave(note);
     status = "已自动保存";
   }
 
   function updateContent(value: string) {
-    content = value;
-    saveNote({ title, content });
+    note = { ...note, content: value, updatedAt: Date.now() };
+    scheduleNoteSave(note);
     status = "已自动保存";
   }
 
@@ -102,12 +224,17 @@
   }
 
   function togglePin() {
-    settings = { ...settings, alwaysOnTop: !settings.alwaysOnTop };
-    status = settings.alwaysOnTop ? "已置顶" : "已取消置顶";
+    note = { ...note, alwaysOnTop: !note.alwaysOnTop, updatedAt: Date.now() };
+    scheduleNoteSave(note);
+    status = note.alwaysOnTop ? "已置顶" : "已取消置顶";
   }
 
   async function exportMarkdown() {
-    const defaultPath = defaultMarkdownFilename(title);
+    await flushNoteSave(note.id).catch(() => {
+      status = "自动保存失败，仍将尝试导出";
+    });
+
+    const defaultPath = defaultMarkdownFilename(note.title);
 
     try {
       const path = await save({
@@ -124,7 +251,7 @@
       const target = path.toLowerCase().endsWith(".md") ? path : `${path}.md`;
       await invoke("write_markdown_file", {
         path: target,
-        content,
+        content: note.content,
       });
       status = `已导出 ${target.split(/[\\/]/).at(-1)}`;
     } catch {
@@ -132,9 +259,11 @@
     }
   }
 
-  async function quitApp() {
+  async function closeCurrentNote() {
     try {
-      await invoke("quit_app");
+      await saveBeforeWindowAction();
+      await markNoteClosed(note);
+      await getCurrentWindow().hide();
     } catch {
       window.close();
     }
@@ -176,11 +305,60 @@
       togglePin();
     } else if (mod && event.key === ",") {
       event.preventDefault();
-      openSettingsWindow();
+      openCurrentSettings();
     } else if (event.ctrlKey && event.key === "/") {
       event.preventDefault();
       sourceMode = !sourceMode;
     }
+  }
+
+  async function applyNativeWindowState() {
+    try {
+      await getCurrentWindow().setAlwaysOnTop(note.alwaysOnTop);
+    } catch {
+      // Browser preview cannot control a native window.
+    }
+  }
+
+  async function openCurrentSettings() {
+    await saveNoteNow(note);
+    await markNoteActive(note);
+    await openSettingsWindow(note.id);
+  }
+
+  async function openRecentSettings() {
+    const { note: target } = await getRecentNote();
+    await openSettingsWindow(target.id);
+  }
+
+  async function captureWindowState() {
+    if (!ready) return;
+    try {
+      const win = getCurrentWindow();
+      const [position, size] = await Promise.all([win.outerPosition(), win.innerSize()]);
+      note = {
+        ...note,
+        window: {
+          x: position.x,
+          y: position.y,
+          width: size.width,
+          height: size.height,
+        },
+        updatedAt: Date.now(),
+      };
+      scheduleNoteSave(note);
+    } catch {
+      // Browser preview cannot control a native window.
+    }
+  }
+
+  async function saveBeforeWindowAction() {
+    await captureWindowState();
+    await Promise.allSettled([flushNoteSave(note.id), saveSettings(globalSettings)]);
+  }
+
+  function shortcutSignature(shortcuts: AppSettings["shortcuts"]) {
+    return `${shortcuts.toggleWindow}\n${shortcuts.newNote}`;
   }
 </script>
 
@@ -191,24 +369,26 @@
 </svelte:head>
 
 <WindowChrome
-  {title}
+  title={note.title}
   {status}
   {sourceMode}
-  {settings}
+  settings={noteSettings}
   onTitleChange={updateTitle}
   onTogglePin={togglePin}
   onToggleSource={() => (sourceMode = !sourceMode)}
   onExport={exportMarkdown}
-  onOpenSettings={openSettingsWindow}
-  onQuit={quitApp}
+  onOpenSettings={openCurrentSettings}
+  onQuit={closeCurrentNote}
   onStartDrag={startDrag}
   onStartResize={startResize}
 >
   {#if ready}
-    {#if sourceMode}
-      <SourceEditor value={content} onChange={updateContent} />
-    {:else}
-      <MilkdownEditor value={content} onChange={updateContent} />
-    {/if}
+    {#key `${note.id}-${editorRevision}`}
+      {#if sourceMode}
+        <SourceEditor value={note.content} onChange={updateContent} />
+      {:else}
+        <MilkdownEditor value={note.content} onChange={updateContent} />
+      {/if}
+    {/key}
   {/if}
 </WindowChrome>

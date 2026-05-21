@@ -1,12 +1,19 @@
 <script lang="ts">
   import Toolbar from "./Toolbar.svelte";
-  import type { AppSettings } from "$lib/settings";
+  import type { NoteTheme } from "$lib/settings";
+
+  type NoteViewSettings = {
+    alwaysOnTop: boolean;
+    opacity: number;
+    theme: NoteTheme;
+    customColor: string;
+  };
 
   type Props = {
     title: string;
     status: string;
     sourceMode: boolean;
-    settings: AppSettings;
+    settings: NoteViewSettings;
     onTitleChange: (title: string) => void;
     onTogglePin: () => void;
     onToggleSource: () => void;

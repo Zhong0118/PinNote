@@ -23,8 +23,10 @@ export async function registerGlobalShortcuts(
       if (event.state === "Pressed") handlers.newNote();
     });
     registered = true;
+    return { ok: true, message: "" };
   } catch (e) {
     console.warn("Failed to register global shortcuts:", e);
+    return { ok: false, message: e instanceof Error ? e.message : "快捷键可能被占用" };
   }
 }
 
