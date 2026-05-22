@@ -1,5 +1,6 @@
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { normalizeShortcut, shortcutIdentity } from "./settings";
 import type { ShortcutConfig } from "./settings";
 
 export type ShortcutHandlers = {
@@ -16,15 +17,20 @@ export async function registerGlobalShortcuts(
   await unregisterGlobalShortcuts();
 
   try {
-    await register(shortcuts.toggleWindow, (event) => {
-      if (event.state === "Pressed") handlers.toggleWindow();
-    });
-    await register(shortcuts.newNote, (event) => {
-      if (event.state === "Pressed") handlers.newNote();
+    const toggleWindow = normalizeShortcut(shortcuts.toggleWindow);
+    const newNote = normalizeShortcut(shortcuts.newNote);
+
+    await register([toggleWindow, newNote], (event) => {
+      if (event.state !== "Pressed") return;
+      const eventShortcut = shortcutIdentity(event.shortcut);
+      if (eventShortcut === shortcutIdentity(toggleWindow)) handlers.toggleWindow();
+      if (eventShortcut === shortcutIdentity(newNote)) handlers.newNote();
     });
     registered = true;
     return { ok: true, message: "" };
   } catch (e) {
+    await unregisterAll().catch(() => undefined);
+    registered = false;
     console.warn("Failed to register global shortcuts:", e);
     return { ok: false, message: e instanceof Error ? e.message : "快捷键可能被占用" };
   }

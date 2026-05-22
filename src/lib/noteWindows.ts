@@ -1,4 +1,5 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { isMacPlatform } from "./settings";
 import type { PinNote } from "./notesStore";
 
 export function noteWindowLabel(noteId: string) {
@@ -27,10 +28,13 @@ export async function openNoteWindow(note: PinNote, options: { offset?: boolean 
     y,
     minWidth: 300,
     minHeight: 320,
+    preventOverflow: true,
     alwaysOnTop: note.alwaysOnTop,
     decorations: false,
     resizable: true,
     transparent: true,
+    backgroundColor: "#00000000",
     shadow: false,
+    visibleOnAllWorkspaces: isMacPlatform(),
   });
 }

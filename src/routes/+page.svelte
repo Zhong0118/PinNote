@@ -9,7 +9,13 @@
   import SourceEditor from "../components/SourceEditor.svelte";
   import WindowChrome from "../components/WindowChrome.svelte";
   import { defaultMarkdownFilename } from "$lib/filename";
-  import { defaultSettings, loadSettings, saveSettings, type AppSettings } from "$lib/settings";
+  import {
+    defaultSettings,
+    loadSettings,
+    normalizeShortcut,
+    saveSettings,
+    type AppSettings,
+  } from "$lib/settings";
   import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "$lib/shortcuts";
   import { openSettingsWindow } from "$lib/settingsWindow";
   import {
@@ -158,15 +164,17 @@
   }
 
   async function createNewNoteWindow() {
+    await captureWindowState();
+    const { note: seed } = await getRecentNote();
     const next = createNote({
-      theme: note.theme,
-      customColor: note.customColor,
-      opacity: note.opacity,
-      alwaysOnTop: note.alwaysOnTop,
+      theme: seed.theme,
+      customColor: seed.customColor,
+      opacity: seed.opacity,
+      alwaysOnTop: seed.alwaysOnTop,
       window: {
-        ...note.window,
-        x: note.window.x == null ? undefined : note.window.x + 24,
-        y: note.window.y == null ? undefined : note.window.y + 24,
+        ...seed.window,
+        x: seed.window.x == null ? undefined : seed.window.x + 24,
+        y: seed.window.y == null ? undefined : seed.window.y + 24,
       },
     });
     await saveNoteNow(next);
@@ -335,14 +343,20 @@
     if (!ready) return;
     try {
       const win = getCurrentWindow();
-      const [position, size] = await Promise.all([win.outerPosition(), win.innerSize()]);
+      const [position, size, scaleFactor] = await Promise.all([
+        win.outerPosition(),
+        win.innerSize(),
+        win.scaleFactor(),
+      ]);
+      const logicalPosition = position.toLogical(scaleFactor);
+      const logicalSize = size.toLogical(scaleFactor);
       note = {
         ...note,
         window: {
-          x: position.x,
-          y: position.y,
-          width: size.width,
-          height: size.height,
+          x: Math.round(logicalPosition.x),
+          y: Math.round(logicalPosition.y),
+          width: Math.round(logicalSize.width),
+          height: Math.round(logicalSize.height),
         },
         updatedAt: Date.now(),
       };
@@ -358,7 +372,7 @@
   }
 
   function shortcutSignature(shortcuts: AppSettings["shortcuts"]) {
-    return `${shortcuts.toggleWindow}\n${shortcuts.newNote}`;
+    return `${normalizeShortcut(shortcuts.toggleWindow)}\n${normalizeShortcut(shortcuts.newNote)}`;
   }
 </script>
 

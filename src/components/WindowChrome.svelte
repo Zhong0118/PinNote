@@ -81,7 +81,7 @@
     </div>
 
     <button
-      class="resize-grip"
+      class="resize-zone resize-grip"
       type="button"
       aria-label="调整窗口大小"
       onpointerdown={onStartResize}
@@ -140,7 +140,6 @@
 
     width: 100vw;
     height: 100vh;
-    padding: 8px;
     background: transparent;
   }
 
@@ -211,9 +210,7 @@
     overflow: hidden;
     border: 1px solid var(--pin-border);
     background: color-mix(in srgb, var(--pin-bg) calc(var(--pin-opacity) * 100%), transparent);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.56),
-      0 16px 42px rgba(16, 18, 15, 0.16);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.56);
   }
 
   .dragbar {
@@ -284,20 +281,26 @@
     overflow: hidden;
   }
 
-  .resize-grip {
+  .resize-zone {
     position: absolute;
-    right: 0;
-    bottom: 0;
     z-index: 10;
+    border: 0;
+    opacity: 0;
+    background: transparent;
+    -webkit-app-region: no-drag;
+  }
+
+  .resize-grip {
     width: 42px;
     height: 42px;
-    border: 0;
+    right: 0;
+    bottom: 0;
     border-bottom-right-radius: 20px;
+    opacity: 1;
     background:
       linear-gradient(135deg, transparent 0 58%, color-mix(in srgb, var(--pin-text), transparent 72%) 59% 63%, transparent 64%),
       linear-gradient(135deg, transparent 0 72%, color-mix(in srgb, var(--pin-text), transparent 62%) 73% 77%, transparent 78%);
     cursor: nwse-resize;
-    -webkit-app-region: no-drag;
   }
 
   :global(::-webkit-scrollbar) {

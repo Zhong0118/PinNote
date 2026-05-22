@@ -7,7 +7,10 @@
     defaultSettings,
     loadSettings,
     saveSettings,
-    defaultShortcuts,
+    isMacPlatform,
+    normalizeShortcut,
+    platformDefaultShortcuts,
+    shortcutIdentity,
     type AppSettings,
     type NoteTheme,
   } from "$lib/settings";
@@ -22,13 +25,14 @@
     { value: "ink", label: "深色", color: "#30363a" },
   ];
 
+  const modKey = isMacPlatform() ? "Cmd" : "Ctrl";
   const inAppShortcuts = [
-    { label: "导出 Markdown", key: "Ctrl+S" },
-    { label: "切换置顶", key: "Ctrl+T" },
+    { label: "导出 Markdown", key: `${modKey}+S` },
+    { label: "切换置顶", key: `${modKey}+T` },
     { label: "切换源码模式", key: "Ctrl+/" },
-    { label: "打开设置", key: "Ctrl+," },
-    { label: "加粗", key: "Ctrl+B" },
-    { label: "斜体", key: "Ctrl+I" },
+    { label: "打开设置", key: `${modKey}+,` },
+    { label: "加粗", key: `${modKey}+B` },
+    { label: "斜体", key: `${modKey}+I` },
   ];
 
   let settings = $state<AppSettings>({ ...defaultSettings });
@@ -72,7 +76,13 @@
   }
 
   function patchShortcut(key: string, value: string) {
-    if (Object.entries(settings.shortcuts).some(([name, shortcut]) => name !== key && shortcut === value)) {
+    const normalized = normalizeShortcut(value);
+    const identity = shortcutIdentity(normalized);
+    if (
+      Object.entries(settings.shortcuts).some(
+        ([name, shortcut]) => name !== key && shortcutIdentity(shortcut) === identity,
+      )
+    ) {
       shortcutError = "这个快捷键已经被使用";
       return;
     }
@@ -80,7 +90,7 @@
     shortcutError = "";
     settings = {
       ...settings,
-      shortcuts: { ...settings.shortcuts, [key]: value },
+      shortcuts: { ...settings.shortcuts, [key]: normalized },
     };
     broadcastSettings();
   }
@@ -110,7 +120,7 @@
 
     const parts: string[] = [];
     if (event.ctrlKey) parts.push("Ctrl");
-    if (event.altKey) parts.push("Alt");
+    if (event.altKey) parts.push("Option");
     if (event.shiftKey) parts.push("Shift");
     if (event.metaKey) parts.push("Cmd");
 
@@ -126,7 +136,7 @@
   }
 
   function resetShortcut(key: string) {
-    patchShortcut(key, defaultShortcuts[key as keyof typeof defaultShortcuts]);
+    patchShortcut(key, platformDefaultShortcuts()[key as keyof ReturnType<typeof platformDefaultShortcuts>]);
   }
 </script>
 

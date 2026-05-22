@@ -124,6 +124,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("main-tray")
         .icon(icon)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("PinNote")
         .menu(&menu)
         .show_menu_on_left_click(false)
