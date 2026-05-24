@@ -1,6 +1,8 @@
 <script lang="ts">
   import { emit } from "@tauri-apps/api/event";
+  import { invoke } from "@tauri-apps/api/core";
   import { disable, enable } from "@tauri-apps/plugin-autostart";
+  import { openPath } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import { Palette, Rocket, Pin, SlidersHorizontal, Keyboard } from "lucide-svelte";
   import {
@@ -29,7 +31,7 @@
   const inAppShortcuts = [
     { label: "导出 Markdown", key: `${modKey}+S` },
     { label: "切换置顶", key: `${modKey}+T` },
-    { label: "切换源码模式", key: "Ctrl+/" },
+    { label: "切换源码模式", key: `${modKey}+/` },
     { label: "打开设置", key: `${modKey}+,` },
     { label: "加粗", key: `${modKey}+B` },
     { label: "斜体", key: `${modKey}+I` },
@@ -42,6 +44,7 @@
   let activeTab = $state<"appearance" | "behavior" | "shortcuts">("appearance");
   let recordingFor = $state<string | null>(null);
   let shortcutError = $state("");
+  let dataPathStatus = $state("");
 
   onMount(() => {
     noteId = new URLSearchParams(window.location.search).get("noteId") ?? undefined;
@@ -110,6 +113,16 @@
     patch({ autoStart: value });
   }
 
+  async function openDataDirectory() {
+    try {
+      const path = await invoke<string>("app_data_path");
+      await openPath(path);
+      dataPathStatus = "已打开数据目录";
+    } catch {
+      dataPathStatus = "无法打开数据目录";
+    }
+  }
+
   function handleShortcutKeydown(event: KeyboardEvent) {
     if (!recordingFor) return;
     event.preventDefault();
@@ -120,13 +133,13 @@
 
     const parts: string[] = [];
     if (event.ctrlKey) parts.push("Ctrl");
-    if (event.altKey) parts.push("Option");
+    if (event.altKey) parts.push(isMacPlatform() ? "Option" : "Alt");
     if (event.shiftKey) parts.push("Shift");
     if (event.metaKey) parts.push("Cmd");
 
     // Need at least one modifier
     if (parts.length === 0) {
-      shortcutError = "请至少包含 Ctrl、Alt、Shift 或 Cmd";
+      shortcutError = isMacPlatform() ? "请至少包含 Ctrl、Option、Shift 或 Cmd" : "请至少包含 Ctrl、Alt 或 Shift";
       return;
     }
 
@@ -235,6 +248,17 @@
             onchange={(e) => patchNote({ alwaysOnTop: e.currentTarget.checked })}
           />
         </label>
+
+        <div class="action-row">
+          <span>
+            <strong>用户数据</strong>
+            <small>notes.json / settings.json / templates.json</small>
+          </span>
+          <button type="button" onclick={openDataDirectory}>打开目录</button>
+        </div>
+        {#if dataPathStatus}
+          <p class="hint">{dataPathStatus}</p>
+        {/if}
       </div>
 
     {:else if activeTab === "shortcuts"}
@@ -396,6 +420,51 @@
     font-size: 13px;
     font-weight: 600;
     color: #555;
+  }
+
+  .action-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 38px;
+    color: #555;
+    font-size: 13px;
+  }
+
+  .action-row span {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .action-row strong {
+    color: #555;
+    font-size: 13px;
+  }
+
+  .action-row small {
+    overflow: hidden;
+    color: #999;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .action-row button {
+    border: 1px solid #d0cdc6;
+    border-radius: 5px;
+    padding: 5px 10px;
+    color: #333;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .action-row button:hover {
+    border-color: #2d7d74;
+    color: #2d7d74;
   }
 
   .label-with-icon {

@@ -131,7 +131,7 @@ export function normalizeShortcut(value: string) {
   for (const part of parts) {
     const upper = part.toUpperCase();
     if (["CTRL", "CONTROL"].includes(upper)) addModifier(modifiers, "Ctrl");
-    else if (["ALT", "OPTION"].includes(upper)) addModifier(modifiers, "Option");
+    else if (["ALT", "OPTION"].includes(upper)) addModifier(modifiers, altModifierName());
     else if (["CMD", "COMMAND", "SUPER"].includes(upper)) addModifier(modifiers, "Cmd");
     else if (["CMDORCTRL", "CMDORCONTROL", "COMMANDORCTRL", "COMMANDORCONTROL"].includes(upper)) {
       addModifier(modifiers, "CmdOrCtrl");
@@ -184,6 +184,10 @@ function normalizeShortcuts(shortcuts?: Partial<ShortcutConfig>) {
 
 function addModifier(modifiers: string[], modifier: string) {
   if (!modifiers.includes(modifier)) modifiers.push(modifier);
+}
+
+function altModifierName() {
+  return isMacPlatform() ? "Option" : "Alt";
 }
 
 function formatShortcutKey(key: string) {

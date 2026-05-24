@@ -330,7 +330,7 @@
     } else if (mod && event.key === ",") {
       event.preventDefault();
       openCurrentSettings();
-    } else if (event.ctrlKey && event.key === "/") {
+    } else if (mod && event.key === "/") {
       event.preventDefault();
       sourceMode = !sourceMode;
     }
