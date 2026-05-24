@@ -226,4 +226,43 @@
     padding: 0.85rem;
     background: rgba(32, 33, 36, 0.08);
   }
+
+  .milkdown-host :global(table) {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0.9rem 0;
+    overflow: auto;
+    border-collapse: collapse;
+    border-spacing: 0;
+    font-size: 0.92em;
+  }
+
+  .milkdown-host :global(th),
+  .milkdown-host :global(td) {
+    min-width: 7rem;
+    border: 1px solid color-mix(in srgb, var(--pin-border), var(--pin-text) 10%);
+    padding: 0.42rem 0.58rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .milkdown-host :global(th) {
+    color: var(--pin-heading);
+    background: color-mix(in srgb, var(--pin-accent), transparent 88%);
+    font-weight: 750;
+  }
+
+  .milkdown-host :global(td) {
+    background: color-mix(in srgb, var(--pin-bg), transparent 8%);
+  }
+
+  .milkdown-host :global(tr:nth-child(even) td) {
+    background: color-mix(in srgb, var(--pin-accent), transparent 95%);
+  }
+
+  .milkdown-host :global(th p),
+  .milkdown-host :global(td p) {
+    margin: 0.15em 0;
+  }
 </style>
