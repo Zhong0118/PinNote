@@ -2,7 +2,7 @@
   import { emit } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
   import { disable, enable } from "@tauri-apps/plugin-autostart";
-  import { openPath } from "@tauri-apps/plugin-opener";
+  import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import { Palette, Rocket, Pin, SlidersHorizontal, Keyboard } from "lucide-svelte";
   import {
@@ -44,6 +44,7 @@
   let activeTab = $state<"appearance" | "behavior" | "shortcuts">("appearance");
   let recordingFor = $state<string | null>(null);
   let shortcutError = $state("");
+  let dataPath = $state("");
   let dataPathStatus = $state("");
 
   onMount(() => {
@@ -61,6 +62,7 @@
       noteReady = false;
       activeTab = "shortcuts";
     }
+    void loadDataPath();
   });
 
   function patch(next: Partial<AppSettings>) {
@@ -115,12 +117,44 @@
 
   async function openDataDirectory() {
     try {
-      const path = await invoke<string>("app_data_path");
-      await openPath(path);
-      dataPathStatus = "已打开数据目录";
+      const path = await ensureDataPath();
+      const notesPath = await invoke<string>("app_data_file_path", { name: "notes.json" });
+
+      try {
+        await revealItemInDir(notesPath);
+        dataPathStatus = "已在文件管理器中定位 notes.json";
+        return;
+      } catch {
+        await openPath(path);
+        dataPathStatus = "已打开数据目录";
+      }
     } catch {
-      dataPathStatus = "无法打开数据目录";
+      dataPathStatus = "无法打开数据目录，已显示路径";
     }
+  }
+
+  async function copyDataPath() {
+    try {
+      const path = await ensureDataPath();
+      await navigator.clipboard.writeText(path);
+      dataPathStatus = "已复制数据目录路径";
+    } catch {
+      dataPathStatus = "无法复制路径，请手动选择复制";
+    }
+  }
+
+  async function loadDataPath() {
+    try {
+      dataPath = await invoke<string>("app_data_path");
+    } catch {
+      dataPath = "";
+    }
+  }
+
+  async function ensureDataPath() {
+    if (dataPath) return dataPath;
+    dataPath = await invoke<string>("app_data_path");
+    return dataPath;
   }
 
   function handleShortcutKeydown(event: KeyboardEvent) {
@@ -254,8 +288,14 @@
             <strong>用户数据</strong>
             <small>notes.json / settings.json / templates.json</small>
           </span>
-          <button type="button" onclick={openDataDirectory}>打开目录</button>
+          <div class="action-buttons">
+            <button type="button" onclick={openDataDirectory}>打开目录</button>
+            <button type="button" onclick={copyDataPath}>复制路径</button>
+          </div>
         </div>
+        {#if dataPath}
+          <p class="path-line" title={dataPath}>{dataPath}</p>
+        {/if}
         {#if dataPathStatus}
           <p class="hint">{dataPathStatus}</p>
         {/if}
@@ -451,7 +491,13 @@
     white-space: nowrap;
   }
 
-  .action-row button {
+  .action-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .action-buttons button {
     border: 1px solid #d0cdc6;
     border-radius: 5px;
     padding: 5px 10px;
@@ -462,9 +508,24 @@
     cursor: pointer;
   }
 
-  .action-row button:hover {
+  .action-buttons button:hover {
     border-color: #2d7d74;
     color: #2d7d74;
+  }
+
+  .path-line {
+    overflow: hidden;
+    margin: -10px 0 0;
+    border: 1px solid #e3dfd7;
+    border-radius: 5px;
+    padding: 6px 8px;
+    color: #666;
+    background: #fff;
+    font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .label-with-icon {

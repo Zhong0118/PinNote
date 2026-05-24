@@ -188,6 +188,16 @@ fn app_data_path(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn app_data_file_path(app: AppHandle, name: String) -> Result<String, String> {
+    match name.as_str() {
+        "notes.json" | "settings.json" | "templates.json" | "note.json" => {
+            Ok(data_file(&app, &name)?.to_string_lossy().to_string())
+        }
+        _ => Err("Unsupported data file".to_string()),
+    }
+}
+
+#[tauri::command]
 fn load_note(app: AppHandle) -> Result<Option<String>, String> {
     read_optional(data_file(&app, "note.json")?)
 }
@@ -355,6 +365,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_data_path,
+            app_data_file_path,
             load_note,
             save_notes,
             load_notes,
