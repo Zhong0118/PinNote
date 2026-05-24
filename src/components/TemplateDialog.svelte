@@ -209,8 +209,8 @@
     top: 46px;
     right: 10px;
     z-index: 100;
-    width: min(230px, calc(100vw - 20px));
-    max-height: min(440px, calc(100vh - 56px));
+    width: min(220px, calc(100vw - 16px));
+    max-height: min(380px, calc(100vh - 54px));
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
     border: 1px solid #d7d2c7;
@@ -226,7 +226,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px;
+    padding: 6px 8px;
     background: #fffdf7;
   }
 
@@ -236,6 +236,7 @@
   }
 
   footer {
+    flex-wrap: wrap;
     border-top: 1px solid #ebe6dc;
   }
 
@@ -274,8 +275,8 @@
   .delete-btn {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 0;
@@ -293,7 +294,7 @@
   .template-list {
     min-height: 0;
     overflow: auto;
-    padding: 4px;
+    padding: 3px;
   }
 
   .confirm-row {
@@ -302,7 +303,7 @@
     align-items: center;
     gap: 6px;
     border-bottom: 1px solid #ebe6dc;
-    padding: 7px 8px;
+    padding: 5px 7px;
     background: #fff7e6;
   }
 
@@ -318,7 +319,7 @@
   .confirm-row button {
     border: 1px solid #dfc78d;
     border-radius: 5px;
-    padding: 3px 7px;
+    padding: 2px 6px;
     color: #4c360d;
     background: #fffdf7;
     font-size: 12px;
@@ -332,8 +333,8 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
-    gap: 2px;
-    border-radius: 6px;
+    gap: 1px;
+    border-radius: 5px;
   }
 
   .template-item:hover {
@@ -344,8 +345,9 @@
     display: grid;
     min-width: 0;
     border: 0;
-    border-radius: 6px;
-    padding: 8px 9px;
+    border-radius: 5px;
+    padding: 5px 7px;
+    min-height: 28px;
     text-align: left;
     color: #24231f;
     background: transparent;
@@ -361,7 +363,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: 12px;
+    line-height: 1.25;
     font-weight: 500;
   }
 
@@ -372,7 +375,7 @@
     gap: 6px;
     border: 1px solid #d8d2c6;
     border-radius: 6px;
-    padding: 5px 8px;
+    padding: 4px 7px;
     color: #222;
     background: #f7f3ea;
     font-size: 12px;
@@ -391,10 +394,10 @@
 
   .template-form {
     display: grid;
-    gap: 12px;
+    gap: 8px;
     min-height: 0;
     overflow: auto;
-    padding: 10px;
+    padding: 8px;
   }
 
   label {
@@ -410,7 +413,7 @@
     width: 100%;
     border: 1px solid #d8d2c6;
     border-radius: 6px;
-    padding: 8px 9px;
+    padding: 6px 8px;
     color: #24231f;
     background: #fff;
     outline: 0;
@@ -422,10 +425,44 @@
   }
 
   textarea {
-    min-height: 150px;
+    min-height: 96px;
     resize: vertical;
     font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
     font-size: 12px;
     line-height: 1.55;
+  }
+
+  @media (max-height: 360px) {
+    .template-popover {
+      top: 38px;
+      right: 6px;
+      width: min(210px, calc(100vw - 12px));
+      max-height: calc(100vh - 44px);
+    }
+
+    header,
+    footer {
+      padding: 5px 6px;
+    }
+
+    .template-main {
+      min-height: 25px;
+      padding: 4px 6px;
+    }
+
+    .delete-btn,
+    .icon-btn {
+      width: 24px;
+      height: 24px;
+    }
+
+    .template-form {
+      gap: 6px;
+      padding: 6px;
+    }
+
+    textarea {
+      min-height: 72px;
+    }
   }
 </style>
