@@ -7,6 +7,7 @@
   import { onMount } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
+  import TemplateDialog from "../components/TemplateDialog.svelte";
   import WindowChrome from "../components/WindowChrome.svelte";
   import { defaultMarkdownFilename } from "$lib/filename";
   import {
@@ -18,6 +19,7 @@
   } from "$lib/settings";
   import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "$lib/shortcuts";
   import { openSettingsWindow } from "$lib/settingsWindow";
+  import type { NoteTemplate } from "$lib/templates";
   import {
     createNote,
     flushNoteSave,
@@ -39,6 +41,7 @@
   let settingsReady = $state(false);
   let editorRevision = $state(0);
   let registeredShortcuts = $state("");
+  let templatesOpen = $state(false);
   let isMainWindow = false;
 
   const noteSettings = $derived({
@@ -167,6 +170,7 @@
     await captureWindowState();
     const { note: seed } = await getRecentNote();
     const next = createNote({
+      content: "",
       theme: seed.theme,
       customColor: seed.customColor,
       opacity: seed.opacity,
@@ -209,6 +213,18 @@
     note = { ...note, content: value, updatedAt: Date.now() };
     scheduleNoteSave(note);
     status = "已自动保存";
+  }
+
+  function applyTemplate(template: NoteTemplate) {
+    note = {
+      ...note,
+      title: template.title,
+      content: template.content,
+      updatedAt: Date.now(),
+    };
+    editorRevision += 1;
+    scheduleNoteSave(note);
+    status = `已套用模板：${template.name}`;
   }
 
   async function syncAutoStart(value: boolean) {
@@ -390,6 +406,7 @@
   onTitleChange={updateTitle}
   onTogglePin={togglePin}
   onToggleSource={() => (sourceMode = !sourceMode)}
+  onOpenTemplates={() => (templatesOpen = true)}
   onExport={exportMarkdown}
   onOpenSettings={openCurrentSettings}
   onQuit={closeCurrentNote}
@@ -406,3 +423,10 @@
     {/key}
   {/if}
 </WindowChrome>
+
+<TemplateDialog
+  open={templatesOpen}
+  hasContent={note.content.trim().length > 0}
+  onApply={applyTemplate}
+  onClose={() => (templatesOpen = false)}
+/>

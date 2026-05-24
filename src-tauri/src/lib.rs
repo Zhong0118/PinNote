@@ -11,6 +11,7 @@ use tauri::{
 };
 
 struct NotesFileLock(Mutex<()>);
+struct TemplatesFileLock(Mutex<()>);
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -68,10 +69,33 @@ fn save_notes_value(app: &AppHandle, file: Value) -> Result<(), String> {
     atomic_write(data_file(app, "notes.json")?, file.to_string())
 }
 
+fn load_templates_value(app: &AppHandle) -> Result<Value, String> {
+    let path = data_file(app, "templates.json")?;
+    let Some(raw) = read_optional(path)? else {
+        return Ok(serde_json::json!({
+            "version": 1,
+            "templates": {}
+        }));
+    };
+
+    serde_json::from_str(&raw).map_err(|e| format!("Cannot parse templates file: {e}"))
+}
+
+fn save_templates_value(app: &AppHandle, file: Value) -> Result<(), String> {
+    atomic_write(data_file(app, "templates.json")?, file.to_string())
+}
+
 fn ensure_notes_object(file: &mut Value) {
     file["version"] = Value::from(1);
     if !file.get("notes").is_some_and(Value::is_object) {
         file["notes"] = serde_json::json!({});
+    }
+}
+
+fn ensure_templates_object(file: &mut Value) {
+    file["version"] = Value::from(1);
+    if !file.get("templates").is_some_and(Value::is_object) {
+        file["templates"] = serde_json::json!({});
     }
 }
 
@@ -179,6 +203,54 @@ fn load_notes(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn load_templates(app: AppHandle) -> Result<Option<String>, String> {
+    read_optional(data_file(&app, "templates.json")?)
+}
+
+#[tauri::command]
+fn upsert_template(
+    app: AppHandle,
+    lock: tauri::State<'_, TemplatesFileLock>,
+    json: String,
+) -> Result<String, String> {
+    let _guard = lock
+        .0
+        .lock()
+        .map_err(|_| "Cannot lock templates file".to_string())?;
+    let template: Value =
+        serde_json::from_str(&json).map_err(|e| format!("Cannot parse template: {e}"))?;
+    let id = note_id(&template)?;
+    let mut file = load_templates_value(&app)?;
+    ensure_templates_object(&mut file);
+    if let Some(templates) = file["templates"].as_object() {
+        if !templates.contains_key(&id) && templates.len() >= 8 {
+            return Err("最多只能保存 8 个自定义模板".to_string());
+        }
+    }
+    file["templates"][&id] = template.clone();
+    save_templates_value(&app, file)?;
+    Ok(template.to_string())
+}
+
+#[tauri::command]
+fn delete_template(
+    app: AppHandle,
+    lock: tauri::State<'_, TemplatesFileLock>,
+    id: String,
+) -> Result<(), String> {
+    let _guard = lock
+        .0
+        .lock()
+        .map_err(|_| "Cannot lock templates file".to_string())?;
+    let mut file = load_templates_value(&app)?;
+    ensure_templates_object(&mut file);
+    if let Some(templates) = file["templates"].as_object_mut() {
+        templates.remove(&id);
+    }
+    save_templates_value(&app, file)
+}
+
+#[tauri::command]
 fn upsert_note(
     app: AppHandle,
     lock: tauri::State<'_, NotesFileLock>,
@@ -254,6 +326,7 @@ fn quit_app(app: AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .manage(NotesFileLock(Mutex::new(())))
+        .manage(TemplatesFileLock(Mutex::new(())))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
@@ -285,6 +358,9 @@ pub fn run() {
             load_note,
             save_notes,
             load_notes,
+            load_templates,
+            upsert_template,
+            delete_template,
             upsert_note,
             patch_note,
             save_settings,

@@ -17,6 +17,7 @@
     onTitleChange: (title: string) => void;
     onTogglePin: () => void;
     onToggleSource: () => void;
+    onOpenTemplates: () => void;
     onExport: () => void;
     onOpenSettings: () => void;
     onQuit: () => void;
@@ -33,6 +34,7 @@
     onTitleChange,
     onTogglePin,
     onToggleSource,
+    onOpenTemplates,
     onExport,
     onOpenSettings,
     onQuit,
@@ -64,6 +66,7 @@
         {sourceMode}
         onTogglePin={onTogglePin}
         onToggleSource={onToggleSource}
+        onOpenTemplates={onOpenTemplates}
         onExport={onExport}
         onOpenSettings={onOpenSettings}
         onQuit={onQuit}

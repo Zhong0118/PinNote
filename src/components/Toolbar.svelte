@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Code2, Download, Pin, PinOff, Power, Settings } from "lucide-svelte";
+  import { Code2, Download, LayoutTemplate, Pin, PinOff, Power, Settings } from "lucide-svelte";
 
   type Props = {
     alwaysOnTop: boolean;
     sourceMode: boolean;
     onTogglePin: () => void;
     onToggleSource: () => void;
+    onOpenTemplates: () => void;
     onExport: () => void;
     onOpenSettings: () => void;
     onQuit: () => void;
@@ -16,6 +17,7 @@
     sourceMode,
     onTogglePin,
     onToggleSource,
+    onOpenTemplates,
     onExport,
     onOpenSettings,
     onQuit,
@@ -44,6 +46,9 @@
     onclick={onToggleSource}
   >
     <Code2 size={16} strokeWidth={2.1} />
+  </button>
+  <button type="button" title="模板" aria-label="模板" onclick={onOpenTemplates}>
+    <LayoutTemplate size={16} strokeWidth={2.1} />
   </button>
   <button type="button" title="导出 Markdown" aria-label="导出 Markdown" onclick={onExport}>
     <Download size={16} strokeWidth={2.1} />
