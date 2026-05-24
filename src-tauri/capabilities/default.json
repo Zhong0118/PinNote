@@ -25,6 +25,7 @@
     "global-shortcut:allow-is-registered",
     "autostart:default",
     "dialog:default",
-    "opener:default"
+    "opener:default",
+    "opener:allow-open-path"
   ]
 }
