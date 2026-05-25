@@ -20,6 +20,7 @@
     onOpenTemplates: () => void;
     onExport: () => void;
     onOpenSettings: () => void;
+    onDelete: () => void;
     onQuit: () => void;
     onStartDrag: (event: PointerEvent) => void;
     onStartResize: (event: PointerEvent) => void;
@@ -37,6 +38,7 @@
     onOpenTemplates,
     onExport,
     onOpenSettings,
+    onDelete,
     onQuit,
     onStartDrag,
     onStartResize,
@@ -69,6 +71,7 @@
         onOpenTemplates={onOpenTemplates}
         onExport={onExport}
         onOpenSettings={onOpenSettings}
+        onDelete={onDelete}
         onQuit={onQuit}
       />
     </header>

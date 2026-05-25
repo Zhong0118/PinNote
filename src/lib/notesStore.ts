@@ -168,6 +168,23 @@ export async function markNoteClosed(note: PinNote) {
   });
 }
 
+export async function deleteNoteNow(id: string) {
+  clearTimeout(timers.get(id));
+  timers.delete(id);
+  pendingNotes.delete(id);
+
+  const file = await loadNotes();
+  delete file.notes[id];
+
+  const fallback = Object.values(file.notes).sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)[0] ?? createNote();
+  file.notes[fallback.id] = fallback;
+  file.lastActiveNoteId = fallback.id;
+  file.lastClosedNoteId = fallback.id;
+
+  await saveNotes(file);
+  return fallback;
+}
+
 export async function saveNotes(file: NotesFile) {
   await invoke("save_notes", { json: JSON.stringify(normalizeNotes(file)) });
 }

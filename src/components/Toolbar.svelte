@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Code2, Download, LayoutTemplate, Pin, PinOff, Power, Settings } from "lucide-svelte";
+  import { Code2, Download, LayoutTemplate, Pin, PinOff, Power, Settings, Trash2 } from "lucide-svelte";
 
   type Props = {
     alwaysOnTop: boolean;
@@ -9,6 +9,7 @@
     onOpenTemplates: () => void;
     onExport: () => void;
     onOpenSettings: () => void;
+    onDelete: () => void;
     onQuit: () => void;
   };
 
@@ -20,6 +21,7 @@
     onOpenTemplates,
     onExport,
     onOpenSettings,
+    onDelete,
     onQuit,
   }: Props = $props();
 </script>
@@ -60,6 +62,9 @@
     onclick={onOpenSettings}
   >
     <Settings size={16} strokeWidth={2.1} />
+  </button>
+  <button class="danger" type="button" title="删除便签" aria-label="删除便签" onclick={onDelete}>
+    <Trash2 size={16} strokeWidth={2.1} />
   </button>
   <button class="danger" type="button" title="关闭便签" aria-label="关闭便签" onclick={onQuit}>
     <Power size={16} strokeWidth={2.1} />

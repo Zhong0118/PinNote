@@ -3,6 +3,7 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
@@ -22,6 +23,7 @@
   import type { NoteTemplate } from "$lib/templates";
   import {
     createNote,
+    deleteNoteNow,
     flushNoteSave,
     getRecentNote,
     loadNoteById,
@@ -31,7 +33,7 @@
     scheduleNoteSave,
     type PinNote,
   } from "$lib/notesStore";
-  import { openNoteWindow } from "$lib/noteWindows";
+  import { noteWindowLabel, openNoteWindow } from "$lib/noteWindows";
 
   let note = $state<PinNote>(createNote());
   let sourceMode = $state(false);
@@ -200,6 +202,17 @@
       return;
     }
 
+    const existing = await WebviewWindow.getByLabel(noteWindowLabel(target.id));
+    if (existing) {
+      if (await existing.isVisible()) {
+        await existing.hide();
+      } else {
+        await existing.show();
+        await existing.setFocus();
+      }
+      return;
+    }
+
     await openNoteWindow(target);
   }
 
@@ -295,6 +308,19 @@
       await getCurrentWindow().hide();
     } catch {
       window.close();
+    }
+  }
+
+  async function deleteCurrentNote() {
+    const title = note.title.trim() || "未命名便签";
+    if (!window.confirm(`删除便签「${title}」？此操作不可撤销。`)) return;
+
+    try {
+      await deleteNoteNow(note.id);
+      status = "便签已删除";
+      await getCurrentWindow().hide();
+    } catch {
+      status = "删除失败，请稍后重试";
     }
   }
 
@@ -414,6 +440,7 @@
   onOpenTemplates={() => (templatesOpen = true)}
   onExport={exportMarkdown}
   onOpenSettings={openCurrentSettings}
+  onDelete={deleteCurrentNote}
   onQuit={closeCurrentNote}
   onStartDrag={startDrag}
   onStartResize={startResize}
