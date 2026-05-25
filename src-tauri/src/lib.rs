@@ -334,13 +334,21 @@ fn quit_app(app: AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    let autostart = tauri_plugin_autostart::Builder::new()
+        .app_name("PinNote")
+        .args(["--hidden"])
+        .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
+
+    #[cfg(not(target_os = "macos"))]
+    let autostart = tauri_plugin_autostart::Builder::new()
+        .app_name("PinNote")
+        .args(["--hidden"]);
+
     tauri::Builder::default()
         .manage(NotesFileLock(Mutex::new(())))
         .manage(TemplatesFileLock(Mutex::new(())))
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--hidden"]),
-        ))
+        .plugin(autostart.build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
