@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Code2, Download, LayoutTemplate, Pin, PinOff, Power, Settings, Trash2 } from "lucide-svelte";
+  import { Code2, Download, LayoutTemplate, List, Pin, PinOff, Power, Settings, Trash2 } from "lucide-svelte";
 
   type Props = {
     alwaysOnTop: boolean;
     sourceMode: boolean;
     onTogglePin: () => void;
     onToggleSource: () => void;
+    onOpenNotes: () => void;
     onOpenTemplates: () => void;
     onExport: () => void;
     onOpenSettings: () => void;
@@ -18,6 +19,7 @@
     sourceMode,
     onTogglePin,
     onToggleSource,
+    onOpenNotes,
     onOpenTemplates,
     onExport,
     onOpenSettings,
@@ -48,6 +50,9 @@
     onclick={onToggleSource}
   >
     <Code2 size={16} strokeWidth={2.1} />
+  </button>
+  <button type="button" title="便签列表" aria-label="便签列表" onclick={onOpenNotes}>
+    <List size={16} strokeWidth={2.1} />
   </button>
   <button type="button" title="模板" aria-label="模板" onclick={onOpenTemplates}>
     <LayoutTemplate size={16} strokeWidth={2.1} />

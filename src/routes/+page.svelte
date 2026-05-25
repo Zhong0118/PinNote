@@ -8,6 +8,7 @@
   import { onMount } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
+  import NoteListPopover, { type NoteListItem } from "../components/NoteListPopover.svelte";
   import TemplateDialog from "../components/TemplateDialog.svelte";
   import WindowChrome from "../components/WindowChrome.svelte";
   import { defaultMarkdownFilename } from "$lib/filename";
@@ -44,6 +45,8 @@
   let settingsReady = $state(false);
   let editorRevision = $state(0);
   let registeredShortcuts = $state("");
+  let notesOpen = $state(false);
+  let noteListItems = $state<NoteListItem[]>([]);
   let templatesOpen = $state(false);
   let isMainWindow = false;
   let isDeleting = false;
@@ -119,6 +122,11 @@
       void closeCurrentNote();
     });
 
+    const deleteNotePromise = listen<{ id: string }>("delete-note-requested", (event) => {
+      if (event.payload.id !== note.id) return;
+      void deleteCurrentNote(false);
+    });
+
     const movedPromise = win.onMoved(() => {
       void captureWindowState();
     });
@@ -144,6 +152,7 @@
       openSettingsPromise.then((fn) => fn());
       toggleNotesPromise.then((fn) => fn());
       hideNotePromise.then((fn) => fn());
+      deleteNotePromise.then((fn) => fn());
       movedPromise.then((fn) => fn());
       resizedPromise.then((fn) => fn());
       focusPromise.then((fn) => fn());
@@ -258,9 +267,77 @@
   }
 
   function noteIdFromWindowLabel(label: string) {
-    if (label === "main") return note.id;
+    if (label === "main") return isMainWindow ? note.id : "";
     if (label.startsWith("note-")) return label.slice("note-".length);
     return "";
+  }
+
+  async function openNoteList() {
+    templatesOpen = false;
+    notesOpen = true;
+    await refreshNoteList();
+  }
+
+  async function refreshNoteList() {
+    const file = await loadNotes();
+    const visibleIds = new Set((await getVisibleNoteWindows(file)).map((item) => item.id));
+    noteListItems = Object.values(file.notes)
+      .sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        visible: visibleIds.has(item.id),
+        current: item.id === note.id,
+        updatedAt: item.updatedAt,
+      }));
+  }
+
+  async function showNoteById(id: string) {
+    const file = await loadNotes();
+    const target = file.notes[id];
+    if (!target) {
+      await refreshNoteList();
+      return;
+    }
+
+    if (target.id === note.id && getCurrentWindow().label === (isMainWindow ? "main" : noteWindowLabel(note.id))) {
+      await getCurrentWindow().show();
+      await getCurrentWindow().setFocus();
+    } else {
+      await openNoteWindow(target);
+    }
+
+    await refreshNoteList();
+  }
+
+  async function hideNoteById(id: string) {
+    if (id === note.id) {
+      await closeCurrentNote();
+    } else {
+      await emit("hide-note-requested", { id });
+    }
+    await refreshNoteList();
+  }
+
+  async function deleteNoteById(id: string) {
+    const target = noteListItems.find((item) => item.id === id);
+    const title = target?.title?.trim() || "未命名便签";
+    if (!window.confirm(`删除便签「${title}」？此操作不可撤销。`)) return;
+
+    if (id === note.id) {
+      await deleteCurrentNote(false);
+      return;
+    }
+
+    const win = await WebviewWindow.getByLabel(noteWindowLabel(id));
+    if (win) {
+      await emit("delete-note-requested", { id });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } else {
+      await deleteNoteNow(id);
+    }
+
+    await refreshNoteList();
   }
 
   function updateTitle(value: string) {
@@ -359,9 +436,9 @@
     }
   }
 
-  async function deleteCurrentNote() {
+  async function deleteCurrentNote(shouldConfirm = true) {
     const title = note.title.trim() || "未命名便签";
-    if (!window.confirm(`删除便签「${title}」？此操作不可撤销。`)) return;
+    if (shouldConfirm && !window.confirm(`删除便签「${title}」？此操作不可撤销。`)) return;
 
     try {
       isDeleting = true;
@@ -494,7 +571,11 @@
   onTitleChange={updateTitle}
   onTogglePin={togglePin}
   onToggleSource={() => (sourceMode = !sourceMode)}
-  onOpenTemplates={() => (templatesOpen = true)}
+  onOpenNotes={openNoteList}
+  onOpenTemplates={() => {
+    notesOpen = false;
+    templatesOpen = true;
+  }}
   onExport={exportMarkdown}
   onOpenSettings={openCurrentSettings}
   onDelete={deleteCurrentNote}
@@ -512,6 +593,16 @@
     {/key}
   {/if}
 </WindowChrome>
+
+<NoteListPopover
+  open={notesOpen}
+  items={noteListItems}
+  onShow={showNoteById}
+  onHide={hideNoteById}
+  onDelete={deleteNoteById}
+  onRefresh={refreshNoteList}
+  onClose={() => (notesOpen = false)}
+/>
 
 <TemplateDialog
   open={templatesOpen}
