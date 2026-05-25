@@ -172,10 +172,10 @@ export async function deleteNoteNow(id: string) {
   clearTimeout(timers.get(id));
   timers.delete(id);
   pendingNotes.delete(id);
+  await pendingSave.catch(() => undefined);
 
+  await invoke("delete_note", { id });
   const file = await loadNotes();
-  delete file.notes[id];
-
   const fallback = Object.values(file.notes).sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)[0] ?? createNote();
   file.notes[fallback.id] = fallback;
   file.lastActiveNoteId = fallback.id;

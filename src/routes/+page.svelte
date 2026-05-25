@@ -4,7 +4,7 @@
   import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { listen } from "@tauri-apps/api/event";
+  import { emit, listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
@@ -26,6 +26,7 @@
     deleteNoteNow,
     flushNoteSave,
     getRecentNote,
+    loadNotes,
     loadNoteById,
     markNoteActive,
     markNoteClosed,
@@ -45,6 +46,7 @@
   let registeredShortcuts = $state("");
   let templatesOpen = $state(false);
   let isMainWindow = false;
+  let isDeleting = false;
 
   const noteSettings = $derived({
     alwaysOnTop: note.alwaysOnTop,
@@ -106,11 +108,16 @@
         })
       : Promise.resolve(() => {});
 
-    const showLastNotePromise = isMainWindow
-      ? listen("show-last-note-requested", () => {
-          void showLastNoteWindow();
-        })
+    const toggleNotesPromise = isMainWindow
+      ? listen("toggle-notes-visibility-requested", () => {
+        void toggleAllNotesVisibility();
+      })
       : Promise.resolve(() => {});
+
+    const hideNotePromise = listen<{ id: string }>("hide-note-requested", (event) => {
+      if (event.payload.id !== note.id) return;
+      void closeCurrentNote();
+    });
 
     const movedPromise = win.onMoved(() => {
       void captureWindowState();
@@ -119,9 +126,10 @@
       void captureWindowState();
     });
     const focusPromise = win.onFocusChanged(({ payload }) => {
-      if (payload) void markNoteActive(note);
+      if (payload && !isDeleting) void markNoteActive(note);
     });
     const closePromise = win.onCloseRequested(async (event) => {
+      if (isDeleting) return;
       event.preventDefault();
       await saveBeforeWindowAction();
       await markNoteClosed(note);
@@ -134,7 +142,8 @@
       noteSettingsPromise.then((fn) => fn());
       newNotePromise.then((fn) => fn());
       openSettingsPromise.then((fn) => fn());
-      showLastNotePromise.then((fn) => fn());
+      toggleNotesPromise.then((fn) => fn());
+      hideNotePromise.then((fn) => fn());
       movedPromise.then((fn) => fn());
       resizedPromise.then((fn) => fn());
       focusPromise.then((fn) => fn());
@@ -143,7 +152,7 @@
   });
 
   $effect(() => {
-    if (!settingsReady || !ready) return;
+    if (!settingsReady || !ready || isDeleting) return;
     void setPin(note.alwaysOnTop);
     scheduleNoteSave(note);
   });
@@ -154,7 +163,7 @@
 
     const result = await registerGlobalShortcuts(globalSettings.shortcuts, {
       toggleWindow: () => {
-        void showLastNoteWindow();
+        void toggleAllNotesVisibility();
       },
       newNote: () => {
         void createNewNoteWindow();
@@ -188,32 +197,70 @@
     status = "已新建便签";
   }
 
-  async function showLastNoteWindow() {
-    const { note: target } = await getRecentNote();
+  async function toggleAllNotesVisibility() {
+    const file = await loadNotes();
+    const visibleWindows = await getVisibleNoteWindows(file);
+
+    if (visibleWindows.length > 0) {
+      await Promise.all(
+        visibleWindows.map((targetWindow) =>
+          targetWindow.id === note.id && targetWindow.label === getCurrentWindow().label
+            ? closeCurrentNote()
+            : emit("hide-note-requested", { id: targetWindow.id }),
+        ),
+      );
+      status = "已隐藏全部便签";
+      return;
+    }
+
+    await showAllNotes(file);
+    status = "已显示全部便签";
+  }
+
+  async function showAllNotes(file: Awaited<ReturnType<typeof loadNotes>>) {
+    const notes = Object.values(file.notes).sort((a, b) => a.createdAt - b.createdAt);
+
+    for (const target of notes) {
+      if (target.id === note.id && isMainWindow) {
+        await getCurrentWindow().show();
+        continue;
+      }
+      await openNoteWindow(target);
+    }
+
+    await focusRecentNote(notes);
+  }
+
+  async function focusRecentNote(notes: PinNote[]) {
+    const target = [...notes].sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)[0];
+    if (!target) return;
 
     if (target.id === note.id && isMainWindow) {
-      const win = getCurrentWindow();
-      if (await win.isVisible()) {
-        await win.hide();
-      } else {
-        await win.show();
-        await win.setFocus();
-      }
+      await getCurrentWindow().setFocus();
       return;
     }
 
     const existing = await WebviewWindow.getByLabel(noteWindowLabel(target.id));
-    if (existing) {
-      if (await existing.isVisible()) {
-        await existing.hide();
-      } else {
-        await existing.show();
-        await existing.setFocus();
-      }
-      return;
+    await existing?.setFocus();
+  }
+
+  async function getVisibleNoteWindows(file: Awaited<ReturnType<typeof loadNotes>>) {
+    const windows = await WebviewWindow.getAll();
+    const result: Array<{ id: string; label: string; lastFocusedAt: number }> = [];
+
+    for (const win of windows) {
+      const id = noteIdFromWindowLabel(win.label);
+      if (!id || !file.notes[id] || !(await win.isVisible())) continue;
+      result.push({ id, label: win.label, lastFocusedAt: file.notes[id].lastFocusedAt });
     }
 
-    await openNoteWindow(target);
+    return result;
+  }
+
+  function noteIdFromWindowLabel(label: string) {
+    if (label === "main") return note.id;
+    if (label.startsWith("note-")) return label.slice("note-".length);
+    return "";
   }
 
   function updateTitle(value: string) {
@@ -303,6 +350,7 @@
 
   async function closeCurrentNote() {
     try {
+      if (isDeleting) return;
       await saveBeforeWindowAction();
       await markNoteClosed(note);
       await getCurrentWindow().hide();
@@ -316,10 +364,19 @@
     if (!window.confirm(`删除便签「${title}」？此操作不可撤销。`)) return;
 
     try {
-      await deleteNoteNow(note.id);
+      isDeleting = true;
+      const fallback = await deleteNoteNow(note.id);
       status = "便签已删除";
-      await getCurrentWindow().hide();
+      if (isMainWindow) {
+        note = fallback;
+        editorRevision += 1;
+        isDeleting = false;
+        await getCurrentWindow().hide();
+      } else {
+        await getCurrentWindow().destroy();
+      }
     } catch {
+      isDeleting = false;
       status = "删除失败，请稍后重试";
     }
   }
@@ -387,7 +444,7 @@
   }
 
   async function captureWindowState() {
-    if (!ready) return;
+    if (!ready || isDeleting) return;
     try {
       const win = getCurrentWindow();
       const [position, size, scaleFactor] = await Promise.all([

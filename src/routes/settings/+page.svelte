@@ -337,7 +337,7 @@
         {/if}
         <div class="shortcut-list">
           <div class="shortcut-row">
-            <span>显示最近便签</span>
+            <span>显示/隐藏全部便签</span>
             <button
               class="key-badge"
               class:recording={recordingFor === "toggleWindow"}

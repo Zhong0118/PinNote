@@ -134,7 +134,7 @@ fn hide_main_window(app: &AppHandle) {
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
-        .text("show", "显示最近便签")
+        .text("show", "显示/隐藏全部便签")
         .text("new_note", "新建便签")
         .text("settings", "设置")
         .separator()
@@ -159,12 +159,12 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 ..
             } = event
             {
-                let _ = tray.app_handle().emit("show-last-note-requested", ());
+                let _ = tray.app_handle().emit("toggle-notes-visibility-requested", ());
             }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
-                let _ = app.emit("show-last-note-requested", ());
+                let _ = app.emit("toggle-notes-visibility-requested", ());
             }
             "new_note" => {
                 show_main_window(app);
@@ -312,6 +312,35 @@ fn patch_note(
 }
 
 #[tauri::command]
+fn delete_note(
+    app: AppHandle,
+    lock: tauri::State<'_, NotesFileLock>,
+    id: String,
+) -> Result<(), String> {
+    let _guard = lock.0.lock().map_err(|_| "Cannot lock notes file".to_string())?;
+    let mut file = load_notes_value(&app)?;
+    ensure_notes_object(&mut file);
+
+    if let Some(notes) = file["notes"].as_object_mut() {
+        notes.remove(&id);
+    }
+
+    let fallback_id = file["notes"]
+        .as_object()
+        .and_then(|notes| notes.keys().next().cloned())
+        .unwrap_or_default();
+
+    if file["lastActiveNoteId"].as_str() == Some(id.as_str()) {
+        file["lastActiveNoteId"] = Value::from(fallback_id.clone());
+    }
+    if file["lastClosedNoteId"].as_str() == Some(id.as_str()) {
+        file["lastClosedNoteId"] = Value::from(fallback_id);
+    }
+
+    save_notes_value(&app, file)
+}
+
+#[tauri::command]
 fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
     atomic_write(data_file(&app, "settings.json")?, json)
 }
@@ -382,6 +411,7 @@ pub fn run() {
             delete_template,
             upsert_note,
             patch_note,
+            delete_note,
             save_settings,
             load_settings,
             write_markdown_file,
