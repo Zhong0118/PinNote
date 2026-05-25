@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
-  import { disable, enable } from "@tauri-apps/plugin-autostart";
+  import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
@@ -234,8 +234,13 @@
       } else {
         await disable();
       }
+      const enabled = await isEnabled();
+      globalSettings = { ...globalSettings, autoStart: enabled };
+      if (enabled !== value) {
+        status = "开机自启状态与系统启动项不一致";
+      }
     } catch {
-      status = "开机自启需要安装 autostart 插件";
+      status = "开机自启设置失败，请使用安装版运行后重试";
     }
   }
 

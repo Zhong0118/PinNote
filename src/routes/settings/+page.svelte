@@ -1,7 +1,7 @@
 <script lang="ts">
   import { emit } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
-  import { disable, enable } from "@tauri-apps/plugin-autostart";
+  import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import { Palette, Rocket, Pin, SlidersHorizontal, Keyboard } from "lucide-svelte";
@@ -44,6 +44,7 @@
   let activeTab = $state<"appearance" | "behavior" | "shortcuts">("appearance");
   let recordingFor = $state<string | null>(null);
   let shortcutError = $state("");
+  let autoStartStatus = $state("");
   let dataPath = $state("");
   let dataPathStatus = $state("");
 
@@ -51,6 +52,7 @@
     noteId = new URLSearchParams(window.location.search).get("noteId") ?? undefined;
     loadSettings().then((next) => {
       settings = next;
+      void refreshAutoStartState();
     });
     if (noteId) {
       loadNoteById(noteId).then(({ note: loaded }) => {
@@ -109,10 +111,32 @@
     try {
       if (value) await enable();
       else await disable();
+      const enabled = await isEnabled();
+      patch({ autoStart: enabled });
+      autoStartStatus = enabled === value ? "开机自启设置已更新" : "系统启动项状态与设置不一致";
     } catch {
-      // Ignore
+      const enabled = await readAutoStartState(settings.autoStart);
+      settings = { ...settings, autoStart: enabled };
+      autoStartStatus = "开机自启设置失败，请使用安装版运行后重试";
+      void saveSettings(settings);
+      return;
     }
-    patch({ autoStart: value });
+  }
+
+  async function refreshAutoStartState() {
+    const enabled = await readAutoStartState(settings.autoStart);
+    if (enabled !== settings.autoStart) {
+      settings = { ...settings, autoStart: enabled };
+      void saveSettings(settings);
+    }
+  }
+
+  async function readAutoStartState(fallback: boolean) {
+    try {
+      return await isEnabled();
+    } catch {
+      return fallback;
+    }
   }
 
   async function openDataDirectory() {
@@ -272,6 +296,9 @@
             onchange={(e) => handleAutoStartChange(e.currentTarget.checked)}
           />
         </label>
+        {#if autoStartStatus}
+          <p class="hint">{autoStartStatus}</p>
+        {/if}
 
         <label class="switch-row">
           <span class="label-with-icon"><Pin size={14} /> 窗口置顶</span>
