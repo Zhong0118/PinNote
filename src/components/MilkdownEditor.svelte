@@ -11,14 +11,26 @@
   let { value, onChange }: Props = $props();
   let root = $state<HTMLDivElement>();
   let failed = $state(false);
+  let disposed = false;
+  let updateTimer: ReturnType<typeof setTimeout>;
   let editorInstance: any;
   let editorViewCtxRef: any;
+  let serializerCtxRef: any;
+
+  export function flush() {
+    if (!editorInstance || disposed) return;
+    const markdown = editorInstance.action((ctx: any) =>
+      ctx.get(serializerCtxRef)(ctx.get(editorViewCtxRef).state.doc));
+    if (markdown !== value) onChange(markdown);
+  }
 
   onMount(() => {
     void setup();
 
     return () => {
-      editorInstance?.destroy();
+      disposed = true;
+      clearTimeout(updateTimer);
+      void editorInstance?.destroy();
     };
   });
 
@@ -71,37 +83,48 @@
 
     try {
       const [
-        { Editor, rootCtx, defaultValueCtx, editorViewCtx },
+        { Editor, rootCtx, defaultValueCtx, editorViewCtx, serializerCtx },
         { commonmark },
         { gfm },
-        { listener, listenerCtx },
+        { $prose: prosePlugin },
+        { Plugin },
         { history },
       ] = await Promise.all([
         import("@milkdown/kit/core"),
         import("@milkdown/kit/preset/commonmark"),
         import("@milkdown/kit/preset/gfm"),
-        import("@milkdown/kit/plugin/listener"),
+        import("@milkdown/kit/utils"),
+        import("@milkdown/kit/prose/state"),
         import("@milkdown/plugin-history"),
       ]);
 
+      if (disposed || !root) return;
       editorViewCtxRef = editorViewCtx;
+      serializerCtxRef = serializerCtx;
 
       editorInstance = await Editor.make()
         .config((ctx: any) => {
           ctx.set(rootCtx, root);
           ctx.set(defaultValueCtx, value);
-          ctx.get(listenerCtx).markdownUpdated((_ctx: unknown, markdown: string) => {
-            onChange(markdown);
-          });
         })
         .use(commonmark)
         .use(gfm)
         .use(history)
-        .use(listener)
+        .use(prosePlugin(() => new Plugin({
+          view: () => ({
+            update: (view, previous) => {
+              if (view.state.doc.eq(previous.doc)) return;
+              clearTimeout(updateTimer);
+              updateTimer = setTimeout(flush, 200);
+            },
+            destroy: () => clearTimeout(updateTimer),
+          }),
+        })))
         .create();
+      if (disposed) await editorInstance.destroy();
     } catch (e) {
       console.error("Milkdown setup failed:", e);
-      failed = true;
+      if (!disposed) failed = true;
     }
   }
 </script>
@@ -118,7 +141,7 @@
     height: 100%;
     min-height: 0;
     overflow: auto;
-    padding: 18px 22px 34px;
+    padding: 8px 16px 18px;
     scrollbar-gutter: stable;
   }
 
@@ -127,25 +150,31 @@
   }
 
   .milkdown-host :global(.editor) {
-    min-height: calc(100vh - 112px);
+    min-height: calc(100vh - 68px);
+    display: flow-root;
     outline: 0;
     color: var(--pin-text);
     caret-color: var(--pin-accent-strong);
-    font-size: 15px;
-    line-height: 1.68;
+    font-size: 14px;
+    line-height: 1.6;
   }
+
+  .milkdown-host :global(.editor > :first-child) { margin-top: 0; }
+  .milkdown-host :global(.editor > :last-child) { margin-bottom: 0; }
 
   .milkdown-host :global(h1) {
     margin: 0.15em 0 0.55em;
     color: var(--pin-heading);
-    font-size: 1.55rem;
+    font-size: 20px;
+    font-weight: 600;
     line-height: 1.2;
   }
 
   .milkdown-host :global(h2) {
     margin: 1em 0 0.45em;
     color: var(--pin-heading);
-    font-size: 1.18rem;
+    font-size: 17px;
+    font-weight: 600;
   }
 
   .milkdown-host :global(p) {

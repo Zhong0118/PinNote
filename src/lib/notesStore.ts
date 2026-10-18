@@ -3,6 +3,10 @@ import { defaultContent, defaultTitle } from "./defaultNote";
 import { defaultSettings, type NoteTheme } from "./settings";
 
 export type NoteWindowState = {
+  collapsed?: boolean;
+  position?: { x: number; y: number };
+  positionSpace?: "logical";
+  capsulePosition?: { x: number; y: number };
   x?: number;
   y?: number;
   width: number;
@@ -42,11 +46,20 @@ const pendingNotes = new Map<string, PinNote>();
 let pendingSave: Promise<void> = Promise.resolve();
 
 export async function loadNotes(): Promise<NotesFile> {
-  try {
-    const raw = await invoke<string | null>("load_notes");
-    if (raw) return normalizeNotes(JSON.parse(raw) as Partial<NotesFile>);
-  } catch {
-    // Browser preview or first launch.
+  const raw = await invoke<string | null>("load_notes");
+  if (raw !== null) {
+    const file = JSON.parse(raw) as Partial<NotesFile>;
+    if (!file || typeof file.notes !== "object" || !file.notes || Array.isArray(file.notes)) {
+      throw new Error("便签数据格式无效，原文件已保留");
+    }
+    for (const note of Object.values(file.notes)) {
+      if (!note || typeof note !== "object" ||
+          (note.content != null && typeof note.content !== "string") ||
+          (note.title != null && typeof note.title !== "string")) {
+        throw new Error("便签数据格式无效，原文件已保留");
+      }
+    }
+    return normalizeNotes(file);
   }
 
   return migrateLegacyNote();
@@ -61,7 +74,8 @@ export async function loadNoteById(id?: string): Promise<{ note: PinNote; file: 
     file.notes[note.id] = note;
     file.lastActiveNoteId = note.id;
     file.lastClosedNoteId = note.id;
-    await saveNotes(file);
+    await saveNoteNow(note);
+    await markNoteClosed(note);
   }
 
   return { note, file };
@@ -85,15 +99,16 @@ export function createNote(seed: Partial<PinNote> = {}): PinNote {
   };
 }
 
-export function scheduleNoteSave(note: PinNote) {
-  pendingNotes.set(note.id, note);
+export function scheduleNoteSave(note: PinNote, onResult?: (error?: unknown) => void) {
+  pendingNotes.set(note.id, { ...note, window: { ...note.window } });
   clearTimeout(timers.get(note.id));
   timers.set(
     note.id,
     setTimeout(() => {
-      void flushNoteSave(note.id).catch(() => {
-        // Keep the note pending for the next attempt.
-      });
+      timers.delete(note.id);
+      void flushNoteSave(note.id).then(() => {
+        if (!pendingNotes.has(note.id)) onResult?.();
+      }).catch((error) => onResult?.(error));
     }, SAVE_DELAY),
   );
 }
@@ -108,22 +123,18 @@ export async function flushNoteSave(id?: string) {
       : []
     : Array.from(pendingNotes.values());
 
-  notes.forEach((note) => pendingNotes.delete(note.id));
   if (notes.length === 0) return pendingSave;
 
   pendingSave = pendingSave.catch(() => undefined).then(async () => {
-    try {
-      for (const note of notes) {
-        const next = { ...note, updatedAt: Date.now() };
-        await invoke("upsert_note", {
-          json: JSON.stringify(next),
-          setActive: false,
-          setClosed: false,
-        });
-      }
-    } catch (error) {
-      notes.forEach((note) => pendingNotes.set(note.id, note));
-      throw error;
+    for (const note of notes) {
+      const next = { ...note, updatedAt: Date.now() };
+      await invoke("upsert_note", {
+        json: JSON.stringify(next),
+        setActive: false,
+        setClosed: false,
+      });
+      // A newer draft may have arrived while the native write was in flight.
+      if (pendingNotes.get(note.id) === note) pendingNotes.delete(note.id);
     }
   });
 
@@ -131,13 +142,13 @@ export async function flushNoteSave(id?: string) {
 }
 
 export async function saveNoteNow(note: PinNote) {
-  pendingNotes.set(note.id, note);
+  pendingNotes.set(note.id, { ...note, window: { ...note.window } });
   await flushNoteSave(note.id);
 }
 
 export async function getRecentNote() {
   const file = await loadNotes();
-  const note = file.notes[file.lastActiveNoteId] ?? file.notes[file.lastClosedNoteId] ?? Object.values(file.notes)[0];
+  const note = file.notes[file.lastActiveNoteId] ?? file.notes[file.lastClosedNoteId] ?? Object.values(file.notes)[0] ?? createNote();
   return { note, file };
 }
 
@@ -177,11 +188,7 @@ export async function deleteNoteNow(id: string) {
   await invoke("delete_note", { id });
   const file = await loadNotes();
   const fallback = Object.values(file.notes).sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)[0] ?? createNote();
-  file.notes[fallback.id] = fallback;
-  file.lastActiveNoteId = fallback.id;
-  file.lastClosedNoteId = fallback.id;
-
-  await saveNotes(file);
+  if (!file.notes[fallback.id]) await saveNoteNow(fallback);
   return fallback;
 }
 
@@ -192,12 +199,8 @@ export async function saveNotes(file: NotesFile) {
 async function migrateLegacyNote(): Promise<NotesFile> {
   let legacy: LegacyNote = {};
 
-  try {
-    const raw = await invoke<string | null>("load_note");
-    if (raw) legacy = JSON.parse(raw) as LegacyNote;
-  } catch {
-    // No legacy note to migrate.
-  }
+  const raw = await invoke<string | null>("load_note");
+  if (raw) legacy = JSON.parse(raw) as LegacyNote;
 
   const note = createNote({
     title: legacy.title ?? defaultTitle,
@@ -209,7 +212,7 @@ async function migrateLegacyNote(): Promise<NotesFile> {
     lastClosedNoteId: note.id,
     notes: { [note.id]: note },
   });
-  await saveNotes(file).catch(() => undefined);
+  await saveNotes(file);
   return file;
 }
 
@@ -217,14 +220,7 @@ function normalizeNotes(file: Partial<NotesFile>): NotesFile {
   const notes = Object.fromEntries(
     Object.entries(file.notes ?? {}).map(([id, note]) => [id, createNote({ ...note, id })]),
   );
-  const firstId = Object.keys(notes)[0];
-
-  if (!firstId) {
-    const note = createNote();
-    notes[note.id] = note;
-  }
-
-  const fallbackId = Object.keys(notes)[0];
+  const fallbackId = Object.keys(notes)[0] ?? "";
   const lastActiveNoteId =
     file.lastActiveNoteId && notes[file.lastActiveNoteId] ? file.lastActiveNoteId : fallbackId;
   const lastClosedNoteId =

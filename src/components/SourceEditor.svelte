@@ -34,7 +34,7 @@
   });
 
   function handleKeydown(event: KeyboardEvent) {
-    if (!textarea) return;
+    if (!textarea || event.isComposing || event.keyCode === 229) return;
 
     const mod = event.metaKey || event.ctrlKey;
 
@@ -255,7 +255,7 @@
     resize: none;
     border: 0;
     outline: 0;
-    padding: 18px 22px 30px;
+    padding: 8px 16px 18px;
     color: var(--pin-text);
     background: transparent;
     font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;

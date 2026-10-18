@@ -2,7 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "settings", "note-*", "settings-*"],
+  "windows": [
+    "main",
+    "settings",
+    "note-*",
+    "settings-*"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-close",
@@ -26,6 +31,10 @@
     "autostart:default",
     "dialog:default",
     "opener:default",
-    "opener:allow-open-path"
+    "opener:allow-open-path",
+    "global-shortcut:allow-unregister-all",
+    "core:window:allow-center",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-resizable"
   ]
 }
