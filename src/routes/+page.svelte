@@ -1,11 +1,10 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
-  import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWindow, PhysicalPosition, LogicalPosition, LogicalSize, availableMonitors, type Window } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { emit, listen } from "@tauri-apps/api/event";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
   import NoteListPopover, { type NoteListItem } from "../components/NoteListPopover.svelte";
@@ -16,7 +15,7 @@
     defaultSettings,
     loadSettings,
     normalizeShortcut,
-    saveSettings,
+    isMacPlatform,
     type AppSettings,
   } from "$lib/settings";
   import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "$lib/shortcuts";
@@ -35,8 +34,14 @@
     scheduleNoteSave,
     type PinNote,
   } from "$lib/notesStore";
-  import { noteWindowLabel, openNoteWindow } from "$lib/noteWindows";
+  import { requestWindowVisibility, listenWindowVisibility } from "$lib/windowVisibility";
+  import { noteWindowLabel, findNoteWindow, openNoteWindow } from "$lib/noteWindows";
 
+  import { CAPSULE, EDITOR_MIN, fitBounds, normalizeBounds, normalizeDisplays, switchBounds, rememberBounds, restoreBounds, type Bounds } from "$lib/windowGeometry";
+
+  let transitioning = $state(false);
+  let modeChange: Promise<void> | undefined;
+  let geometryRevision = 0;
   let note = $state<PinNote>(createNote());
   let sourceMode = $state(false);
   let globalSettings = $state<AppSettings>({ ...defaultSettings });
@@ -44,12 +49,18 @@
   let ready = $state(false);
   let settingsReady = $state(false);
   let editorRevision = $state(0);
-  let registeredShortcuts = $state("");
+  let requestedShortcuts = "";
+  let visibilityChange = Promise.resolve();
   let notesOpen = $state(false);
   let noteListItems = $state<NoteListItem[]>([]);
   let templatesOpen = $state(false);
   let isMainWindow = false;
   let isDeleting = false;
+  let windowStateTimer: ReturnType<typeof setTimeout>;
+  let initialization: Promise<void>;
+  let editor = $state<MilkdownEditor>();
+  let quitAttempt: number | undefined;
+  const pinned = $derived(note.alwaysOnTop);
 
   const noteSettings = $derived({
     alwaysOnTop: note.alwaysOnTop,
@@ -63,12 +74,19 @@
     isMainWindow = win.label === "main";
     const requestedNoteId = new URLSearchParams(window.location.search).get("noteId") ?? undefined;
 
-    loadNoteById(requestedNoteId).then(async ({ note: loaded }) => {
+    initialization = loadNoteById(requestedNoteId).then(async ({ note: loaded }) => {
       note = loaded;
       status = "已就绪";
+      await applyNativeWindowState(true).catch(() => { status = "窗口位置恢复失败，可继续编辑"; });
+      if (isMainWindow) await invoke("set_main_note_id", { id: note.id });
+      await markNoteActive(note);
+      // Complete the initial reveal before accepting tray requests or edits.
+      if (!isMainWindow || !(await invoke<boolean>("startup_hidden"))) await win.show();
       ready = true;
-      await applyNativeWindowState();
-      void markNoteActive(note);
+    });
+    void initialization.catch(async (error) => {
+      status = `加载失败，原数据已保留：${String(error)}`;
+      await win.show();
     });
 
     loadSettings().then((next) => {
@@ -79,9 +97,6 @@
 
     const settingsPromise = listen<AppSettings>("settings-changed", (event) => {
       const next = event.payload;
-      if (next.autoStart !== globalSettings.autoStart) {
-        void syncAutoStart(next.autoStart);
-      }
       const shortcutsChanged =
         shortcutSignature(next.shortcuts) !== shortcutSignature(globalSettings.shortcuts);
       globalSettings = next;
@@ -92,10 +107,10 @@
     });
 
     const noteSettingsPromise = listen<PinNote>("note-settings-changed", (event) => {
-      if (event.payload.id !== note.id) return;
-      note = { ...note, ...event.payload };
-      void applyNativeWindowState();
-      scheduleNoteSave(note);
+      if (!ready || event.payload.id !== note.id) return;
+      const { theme, customColor, opacity, alwaysOnTop } = event.payload;
+      note = { ...note, theme, customColor, opacity, alwaysOnTop };
+      queueNoteSave();
       status = "便签设置已同步";
     });
 
@@ -117,44 +132,71 @@
       })
       : Promise.resolve(() => {});
 
-    const hideNotePromise = listen<{ id: string }>("hide-note-requested", (event) => {
-      if (event.payload.id !== note.id) return;
-      void closeCurrentNote();
-    });
-
     const deleteNotePromise = listen<{ id: string }>("delete-note-requested", (event) => {
-      if (event.payload.id !== note.id) return;
+      if (!ready || event.payload.id !== note.id) return;
       void deleteCurrentNote(false);
     });
 
-    const movedPromise = win.onMoved(() => {
-      void captureWindowState();
+    const visibilityPromise = listenWindowVisibility(async (visible, expiresAt) => {
+      await initialization;
+      if (visible) await showCurrentNote(expiresAt);
+      else if (!(await closeCurrentNote(expiresAt))) throw new Error("保存失败，便签未隐藏");
     });
-    const resizedPromise = win.onResized(() => {
-      void captureWindowState();
-    });
+    const movedPromise = win.onMoved(scheduleWindowCapture);
+    const scalePromise = win.onScaleChanged(scheduleWindowCapture);
+    const resizedPromise = win.onResized(scheduleWindowCapture);
     const focusPromise = win.onFocusChanged(({ payload }) => {
-      if (payload && !isDeleting) void markNoteActive(note);
+      if (payload && ready && !isDeleting) void markNoteActive(note).catch(() => { status = "保存失败，请重试"; });
     });
     const closePromise = win.onCloseRequested(async (event) => {
       if (isDeleting) return;
       event.preventDefault();
-      await saveBeforeWindowAction();
-      await markNoteClosed(note);
-      await win.hide();
+      await closeCurrentNote();
+    });
+
+    async function prepareToQuit(attempt: number) {
+      if (quitAttempt === attempt) return;
+      quitAttempt = attempt;
+      document.body.inert = true;
+      try {
+        await initialization.catch(() => undefined);
+        await saveBeforeWindowAction();
+        await invoke("quit_save_complete", { success: true, attempt });
+      } catch {
+        if (quitAttempt === attempt) {
+          document.body.inert = false;
+          status = "保存失败，已取消退出，请重试或导出便签";
+        }
+        await invoke("quit_save_complete", { success: false, attempt });
+      }
+    }
+    const quitPromise = listen<number>("save-before-quit", (event) => void prepareToQuit(event.payload));
+    // A quit request may precede this webview's listener registration.
+    void quitPromise.then(async () => {
+      const attempt = await invoke<number | null>("pending_quit");
+      if (attempt != null) await prepareToQuit(attempt);
+    });
+    const quitFailedPromise = listen<number>("quit-save-failed", (event) => {
+      if (quitAttempt !== event.payload) return;
+      document.body.inert = false;
+      status = "保存失败，已取消退出，请重试或导出便签";
     });
 
     return () => {
-      if (isMainWindow) unregisterGlobalShortcuts();
+      clearTimeout(windowStateTimer);
+      if (isMainWindow) void unregisterGlobalShortcuts();
+      quitPromise.then((fn) => fn());
+      quitFailedPromise.then((fn) => fn());
       settingsPromise.then((fn) => fn());
       noteSettingsPromise.then((fn) => fn());
       newNotePromise.then((fn) => fn());
       openSettingsPromise.then((fn) => fn());
       toggleNotesPromise.then((fn) => fn());
-      hideNotePromise.then((fn) => fn());
       deleteNotePromise.then((fn) => fn());
       movedPromise.then((fn) => fn());
       resizedPromise.then((fn) => fn());
+      scalePromise.then((fn) => fn());
+      visibilityPromise.then((fn) => fn());
       focusPromise.then((fn) => fn());
       closePromise.then((fn) => fn());
     };
@@ -162,13 +204,13 @@
 
   $effect(() => {
     if (!settingsReady || !ready || isDeleting) return;
-    void setPin(note.alwaysOnTop);
-    scheduleNoteSave(note);
+    void setPin(pinned);
   });
 
   async function registerShortcuts() {
     const signature = shortcutSignature(globalSettings.shortcuts);
-    if (registeredShortcuts === signature) return;
+    if (requestedShortcuts === signature) return;
+    requestedShortcuts = signature;
 
     const result = await registerGlobalShortcuts(globalSettings.shortcuts, {
       toggleWindow: () => {
@@ -178,16 +220,18 @@
         void createNewNoteWindow();
       },
     });
+    if (result.cancelled) return;
     if (result.ok) {
-      registeredShortcuts = signature;
       status = "快捷键已就绪";
     } else {
+      requestedShortcuts = "";
       status = `快捷键注册失败：${result.message}`;
     }
   }
 
   async function createNewNoteWindow() {
-    await captureWindowState();
+    if (document.body.inert) return;
+    await saveBeforeWindowAction();
     const { note: seed } = await getRecentNote();
     const next = createNote({
       content: "",
@@ -197,33 +241,57 @@
       alwaysOnTop: seed.alwaysOnTop,
       window: {
         ...seed.window,
+        collapsed: false,
+        capsulePosition: undefined,
+        position: seed.window.position ? { x: seed.window.position.x + (seed.window.positionSpace === "logical" ? 24 : 48), y: seed.window.position.y + (seed.window.positionSpace === "logical" ? 24 : 48) } : undefined,
         x: seed.window.x == null ? undefined : seed.window.x + 24,
         y: seed.window.y == null ? undefined : seed.window.y + 24,
       },
     });
     await saveNoteNow(next);
-    await openNoteWindow(next);
+    if (!document.body.inert) await openNoteWindow(next);
     status = "已新建便签";
   }
 
-  async function toggleAllNotesVisibility() {
-    const file = await loadNotes();
-    const visibleWindows = await getVisibleNoteWindows(file);
+  function toggleAllNotesVisibility() {
+    visibilityChange = visibilityChange.then(async () => {
+      await initialization;
+      if (document.body.inert) return;
+      const file = await loadNotes();
+      const visibleWindows = await getVisibleNoteWindows(file);
+      if (visibleWindows.length) {
+        const results = await Promise.allSettled(visibleWindows.map((target) => requestWindowVisibility(target.label, false)));
+        if (results.some((result) => result.status === "rejected")) throw new Error("部分便签未隐藏");
+        status = "已隐藏全部便签";
+      } else {
+        await showAllNotes(file);
+        status = "已显示全部便签";
+      }
+    }).catch(() => { status = "便签显示状态切换失败，请重试"; });
+    return visibilityChange;
+  }
 
-    if (visibleWindows.length > 0) {
-      await Promise.all(
-        visibleWindows.map((targetWindow) =>
-          targetWindow.id === note.id && targetWindow.label === getCurrentWindow().label
-            ? closeCurrentNote()
-            : emit("hide-note-requested", { id: targetWindow.id }),
-        ),
-      );
-      status = "已隐藏全部便签";
-      return;
+  async function showCurrentNote(expiresAt = Infinity) {
+    await modeChange;
+    const id = note.id;
+    const revision = geometryRevision;
+    const assertCurrent = () => {
+      if (!ready || isDeleting || document.body.inert || note.id !== id || geometryRevision !== revision || Date.now() >= expiresAt) {
+        throw new Error("窗口状态已改变，请重试");
+      }
+    };
+    assertCurrent();
+    const current = await readWindowBounds();
+    const target = fitBounds(current, normalizeDisplays(await availableMonitors(), isMacPlatform()));
+    assertCurrent();
+    // Repair windows stranded by a disconnected display before revealing them.
+    if (target.x !== current.x || target.y !== current.y || target.width !== current.width || target.height !== current.height) {
+      await setWindowBounds(target, Boolean(note.window.collapsed));
+      assertCurrent();
+      await captureWindowState();
     }
-
-    await showAllNotes(file);
-    status = "已显示全部便签";
+    assertCurrent();
+    await getCurrentWindow().show();
   }
 
   async function showAllNotes(file: Awaited<ReturnType<typeof loadNotes>>) {
@@ -231,7 +299,7 @@
 
     for (const target of notes) {
       if (target.id === note.id && isMainWindow) {
-        await getCurrentWindow().show();
+        await showCurrentNote();
         continue;
       }
       await openNoteWindow(target);
@@ -255,10 +323,11 @@
 
   async function getVisibleNoteWindows(file: Awaited<ReturnType<typeof loadNotes>>) {
     const windows = await WebviewWindow.getAll();
+    const mainNoteId = await invoke<string | null>("main_note_id");
     const result: Array<{ id: string; label: string; lastFocusedAt: number }> = [];
 
     for (const win of windows) {
-      const id = noteIdFromWindowLabel(win.label);
+      const id = win.label === "main" ? mainNoteId : noteIdFromWindowLabel(win.label);
       if (!id || !file.notes[id] || !(await win.isVisible())) continue;
       result.push({ id, label: win.label, lastFocusedAt: file.notes[id].lastFocusedAt });
     }
@@ -301,7 +370,7 @@
     }
 
     if (target.id === note.id && getCurrentWindow().label === (isMainWindow ? "main" : noteWindowLabel(note.id))) {
-      await getCurrentWindow().show();
+      await showCurrentNote();
       await getCurrentWindow().setFocus();
     } else {
       await openNoteWindow(target);
@@ -314,7 +383,8 @@
     if (id === note.id) {
       await closeCurrentNote();
     } else {
-      await emit("hide-note-requested", { id });
+      const win = await findNoteWindow(id);
+      if (win) await requestWindowVisibility(win.label, false);
     }
     await refreshNoteList();
   }
@@ -329,7 +399,7 @@
       return;
     }
 
-    const win = await WebviewWindow.getByLabel(noteWindowLabel(id));
+    const win = await findNoteWindow(id);
     if (win) {
       await emit("delete-note-requested", { id });
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -340,16 +410,22 @@
     await refreshNoteList();
   }
 
+  function queueNoteSave() {
+    if (!ready || isDeleting) return;
+    status = "正在保存…";
+    scheduleNoteSave(note, (error) => {
+      status = error ? "保存失败，请重试或导出便签" : "已自动保存";
+    });
+  }
+
   function updateTitle(value: string) {
     note = { ...note, title: value, updatedAt: Date.now() };
-    scheduleNoteSave(note);
-    status = "已自动保存";
+    queueNoteSave();
   }
 
   function updateContent(value: string) {
     note = { ...note, content: value, updatedAt: Date.now() };
-    scheduleNoteSave(note);
-    status = "已自动保存";
+    queueNoteSave();
   }
 
   function applyTemplate(template: NoteTemplate) {
@@ -360,25 +436,8 @@
       updatedAt: Date.now(),
     };
     editorRevision += 1;
-    scheduleNoteSave(note);
+    queueNoteSave();
     status = `已套用模板：${template.name}`;
-  }
-
-  async function syncAutoStart(value: boolean) {
-    try {
-      if (value) {
-        await enable();
-      } else {
-        await disable();
-      }
-      const enabled = await isEnabled();
-      globalSettings = { ...globalSettings, autoStart: enabled };
-      if (enabled !== value) {
-        status = "开机自启状态与系统启动项不一致";
-      }
-    } catch {
-      status = "开机自启设置失败，请使用安装版运行后重试";
-    }
   }
 
   async function setPin(value: boolean) {
@@ -391,11 +450,12 @@
 
   function togglePin() {
     note = { ...note, alwaysOnTop: !note.alwaysOnTop, updatedAt: Date.now() };
-    scheduleNoteSave(note);
+    queueNoteSave();
     status = note.alwaysOnTop ? "已置顶" : "已取消置顶";
   }
 
   async function exportMarkdown() {
+    editor?.flush();
     await flushNoteSave(note.id).catch(() => {
       status = "自动保存失败，仍将尝试导出";
     });
@@ -425,14 +485,20 @@
     }
   }
 
-  async function closeCurrentNote() {
+  async function closeCurrentNote(expiresAt = Infinity) {
     try {
-      if (isDeleting) return;
+      if (isDeleting || !ready || document.body.inert) return false;
       await saveBeforeWindowAction();
       await markNoteClosed(note);
+      if (Date.now() >= expiresAt || isDeleting || document.body.inert) {
+        status = "窗口响应超时或状态已改变，便签未隐藏";
+        return false;
+      }
       await getCurrentWindow().hide();
+      return true;
     } catch {
-      window.close();
+      status = "保存失败，便签未关闭，请重试或导出";
+      return false;
     }
   }
 
@@ -442,12 +508,18 @@
 
     try {
       isDeleting = true;
+      await modeChange;
+      geometryRevision += 1;
       const fallback = await deleteNoteNow(note.id);
       status = "便签已删除";
       if (isMainWindow) {
-        note = fallback;
+        const existing = await WebviewWindow.getByLabel(noteWindowLabel(fallback.id));
+        ready = !existing;
+        await invoke("set_main_note_id", { id: ready ? fallback.id : null });
+        note = ready ? fallback : createNote({ id: "" });
         editorRevision += 1;
         isDeleting = false;
+        if (ready) await applyNativeWindowState(true);
         await getCurrentWindow().hide();
       } else {
         await getCurrentWindow().destroy();
@@ -468,12 +540,13 @@
     }
   }
 
-  async function startResize(event: PointerEvent) {
+  async function startResize(event: PointerEvent, direction: Parameters<Window["startResizeDragging"]>[0]) {
+    if (event.button !== 0 || transitioning || note.window.collapsed) return;
     event.preventDefault();
     event.stopPropagation();
 
     try {
-      await getCurrentWindow().startResizeDragging("SouthEast" as never);
+      await getCurrentWindow().startResizeDragging(direction);
     } catch {
       status = "浏览器预览模式不能调整原生窗口大小";
     }
@@ -483,7 +556,14 @@
     return target instanceof Element && Boolean(target.closest("button, input, textarea, a"));
   }
 
+  function toggleSource() {
+    editor?.flush();
+    sourceMode = !sourceMode;
+  }
+
   function handleKeydown(event: KeyboardEvent) {
+    if (!ready || document.body.inert) return;
+    if (event.isComposing || event.keyCode === 229 || event.repeat) return;
     const mod = event.metaKey || event.ctrlKey;
 
     if (mod && event.key === "s") {
@@ -497,19 +577,90 @@
       openCurrentSettings();
     } else if (mod && event.key === "/") {
       event.preventDefault();
-      sourceMode = !sourceMode;
+      toggleSource();
     }
   }
 
-  async function applyNativeWindowState() {
+  async function readWindowBounds(): Promise<Bounds> {
+    const win = getCurrentWindow();
+    const [position, size, scaleFactor] = await Promise.all([win.outerPosition(), win.innerSize(), win.scaleFactor()]);
+    const logical = size.toLogical(scaleFactor);
+    return normalizeBounds({ x: position.x, y: position.y, width: logical.width, height: logical.height, scaleFactor }, isMacPlatform());
+  }
+
+  async function setWindowBounds(bounds: Bounds, collapsed: boolean, animate = false) {
+    const win = getCurrentWindow();
+    // Disable native resizing before shrinking: Windows otherwise enforces its resize-frame minimum.
+    await win.setResizable(false);
+    await win.setMinSize(new LogicalSize(CAPSULE.width, CAPSULE.height));
+    if (animate && isMacPlatform()) {
+      await invoke("animate_note_window", { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+    } else {
+      await win.setPosition((isMacPlatform() ? new LogicalPosition(bounds.x, bounds.y) : new PhysicalPosition(bounds.x, bounds.y)));
+      await win.setSize(new LogicalSize(bounds.width, bounds.height));
+      // macOS resizes from the bottom edge; restore the intended top edge afterwards.
+      await win.setPosition((isMacPlatform() ? new LogicalPosition(bounds.x, bounds.y) : new PhysicalPosition(bounds.x, bounds.y)));
+    }
+    if (!collapsed) {
+      await win.setMinSize(new LogicalSize(EDITOR_MIN.width, EDITOR_MIN.height));
+      await win.setResizable(true);
+    }
+  }
+
+  async function applyNativeWindowState(restoreGeometry = false) {
+    if (restoreGeometry) {
+      const [current, monitors] = await Promise.all([readWindowBounds(), availableMonitors()]);
+      await setWindowBounds(restoreBounds(note.window, current, normalizeDisplays(monitors, isMacPlatform())), Boolean(note.window.collapsed));
+    }
+    await getCurrentWindow().setAlwaysOnTop(note.alwaysOnTop);
+  }
+
+  function toggleCollapsed() {
+    if (!ready || isDeleting || transitioning || document.body.inert) return;
+    modeChange = changeWindowMode().finally(() => { modeChange = undefined; });
+  }
+
+  async function changeWindowMode() {
+    transitioning = true;
+    geometryRevision += 1;
+    clearTimeout(windowStateTimer);
+    notesOpen = false;
+    templatesOpen = false;
+    editor?.flush();
+    const previous = note.window;
+    let current: Bounds | undefined;
     try {
-      await getCurrentWindow().setAlwaysOnTop(note.alwaysOnTop);
+      current = await readWindowBounds();
+      const saved = rememberBounds(previous, current);
+      const collapsed = !previous.collapsed;
+      const target = switchBounds(current, saved, collapsed, normalizeDisplays(await availableMonitors(), isMacPlatform()));
+      // Persist the live editor before changing the window; a failed write keeps it open.
+      note = { ...note, window: saved };
+      await saveNoteNow(note);
+      const animate = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      // Finish the content fade before resizing. The native frame animation then
+      // owns both position and size, instead of separate visible IPC jumps.
+      await tick();
+      if (animate) await new Promise((resolve) => setTimeout(resolve, 100));
+      note = { ...note, window: { ...saved, collapsed } };
+      await tick();
+      await setWindowBounds(target, collapsed, animate);
+      note = { ...note, window: rememberBounds({ ...saved, collapsed }, target) };
+      queueNoteSave();
+      await flushNoteSave(note.id);
     } catch {
-      // Browser preview cannot control a native window.
+      note = { ...note, window: previous };
+      if (current) await setWindowBounds(current, Boolean(previous.collapsed)).catch(() => undefined);
+      // Replace any failed compact-state save with the rolled-back state for the next retry.
+      queueNoteSave();
+      status = "窗口切换失败，已保留原便签，请重试";
+    } finally {
+      transitioning = false;
     }
   }
 
   async function openCurrentSettings() {
+    editor?.flush();
     await saveNoteNow(note);
     await markNoteActive(note);
     await openSettingsWindow(note.id);
@@ -520,36 +671,29 @@
     await openSettingsWindow(target.id);
   }
 
+  function scheduleWindowCapture() {
+    if (!ready || isDeleting || transitioning) return;
+    clearTimeout(windowStateTimer);
+    windowStateTimer = setTimeout(() => void captureWindowState().catch(() => { status = "窗口位置保存失败，请重试"; }), 150);
+  }
+
   async function captureWindowState() {
-    if (!ready || isDeleting) return;
-    try {
-      const win = getCurrentWindow();
-      const [position, size, scaleFactor] = await Promise.all([
-        win.outerPosition(),
-        win.innerSize(),
-        win.scaleFactor(),
-      ]);
-      const logicalPosition = position.toLogical(scaleFactor);
-      const logicalSize = size.toLogical(scaleFactor);
-      note = {
-        ...note,
-        window: {
-          x: Math.round(logicalPosition.x),
-          y: Math.round(logicalPosition.y),
-          width: Math.round(logicalSize.width),
-          height: Math.round(logicalSize.height),
-        },
-        updatedAt: Date.now(),
-      };
-      scheduleNoteSave(note);
-    } catch {
-      // Browser preview cannot control a native window.
-    }
+    clearTimeout(windowStateTimer);
+    if (!ready || isDeleting || transitioning) return;
+    const revision = geometryRevision;
+    const id = note.id;
+    const bounds = await readWindowBounds();
+    if (revision !== geometryRevision || id !== note.id || transitioning || isDeleting) return;
+    note = { ...note, window: rememberBounds(note.window, bounds), updatedAt: Date.now() };
+    queueNoteSave();
   }
 
   async function saveBeforeWindowAction() {
+    await modeChange;
+    if (!ready || isDeleting) return;
+    editor?.flush();
     await captureWindowState();
-    await Promise.allSettled([flushNoteSave(note.id), saveSettings(globalSettings)]);
+    await flushNoteSave(note.id);
   }
 
   function shortcutSignature(shortcuts: AppSettings["shortcuts"]) {
@@ -564,22 +708,28 @@
 </svelte:head>
 
 <WindowChrome
+  disabled={!ready}
+  collapsed={Boolean(note.window.collapsed)}
+  {transitioning}
+  onToggleCollapsed={toggleCollapsed}
+  onNewNote={createNewNoteWindow}
   title={note.title}
   {status}
   {sourceMode}
   settings={noteSettings}
   onTitleChange={updateTitle}
   onTogglePin={togglePin}
-  onToggleSource={() => (sourceMode = !sourceMode)}
+  onToggleSource={toggleSource}
   onOpenNotes={openNoteList}
   onOpenTemplates={() => {
+    editor?.flush();
     notesOpen = false;
     templatesOpen = true;
   }}
   onExport={exportMarkdown}
   onOpenSettings={openCurrentSettings}
   onDelete={deleteCurrentNote}
-  onQuit={closeCurrentNote}
+  onQuit={() => { void closeCurrentNote(); }}
   onStartDrag={startDrag}
   onStartResize={startResize}
 >
@@ -588,7 +738,7 @@
       {#if sourceMode}
         <SourceEditor value={note.content} onChange={updateContent} />
       {:else}
-        <MilkdownEditor value={note.content} onChange={updateContent} />
+        <MilkdownEditor bind:this={editor} value={note.content} onChange={updateContent} />
       {/if}
     {/key}
   {/if}

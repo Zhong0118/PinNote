@@ -8,42 +8,71 @@ export type ShortcutHandlers = {
   newNote: () => void;
 };
 
-let registered = false;
+let needsCleanup = false;
+let revision = 0;
+let pending = Promise.resolve();
 
-export async function registerGlobalShortcuts(
+function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  const result = pending.then(operation);
+  pending = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function clearShortcuts() {
+  if (!needsCleanup) return;
+  await unregisterAll();
+  needsCleanup = false;
+}
+
+export function registerGlobalShortcuts(
   shortcuts: ShortcutConfig,
   handlers: ShortcutHandlers,
 ) {
-  await unregisterGlobalShortcuts();
+  const request = ++revision;
+  const snapshot = { ...shortcuts };
+  const cancelled = { ok: false, message: "", cancelled: true };
 
-  try {
-    const toggleWindow = normalizeShortcut(shortcuts.toggleWindow);
-    const newNote = normalizeShortcut(shortcuts.newNote);
+  return enqueue(async () => {
+    if (request !== revision) return cancelled;
+    let active = false;
+    try {
+      await clearShortcuts();
+      if (request !== revision) return cancelled;
+      const toggleWindow = normalizeShortcut(snapshot.toggleWindow);
+      const newNote = normalizeShortcut(snapshot.newNote);
+      const toggleIdentity = shortcutIdentity(toggleWindow);
+      const newNoteIdentity = shortcutIdentity(newNote);
+      const pressed = new Set<string>();
 
-    await register([toggleWindow, newNote], (event) => {
-      if (event.state !== "Pressed") return;
-      const eventShortcut = shortcutIdentity(event.shortcut);
-      if (eventShortcut === shortcutIdentity(toggleWindow)) handlers.toggleWindow();
-      if (eventShortcut === shortcutIdentity(newNote)) handlers.newNote();
-    });
-    registered = true;
-    return { ok: true, message: "" };
-  } catch (e) {
-    await unregisterAll().catch(() => undefined);
-    registered = false;
-    console.warn("Failed to register global shortcuts:", e);
-    return { ok: false, message: e instanceof Error ? e.message : "快捷键可能被占用" };
-  }
+      // Bulk registration can fail after registering only the first shortcut.
+      needsCleanup = true;
+      await register([toggleWindow, newNote], (event) => {
+        if (!active || request !== revision) return;
+        const identity = shortcutIdentity(event.shortcut);
+        if (event.state === "Released") {
+          pressed.delete(identity);
+          return;
+        }
+        if (event.state !== "Pressed" || pressed.has(identity)) return;
+        pressed.add(identity);
+        if (identity === toggleIdentity) handlers.toggleWindow();
+        if (identity === newNoteIdentity) handlers.newNote();
+      });
+      if (request !== revision) return cancelled;
+      active = true;
+      return { ok: true, message: "", cancelled: false };
+    } catch (e) {
+      await clearShortcuts().catch(() => undefined);
+      if (request !== revision) return cancelled;
+      console.warn("Failed to register global shortcuts:", e);
+      return { ok: false, message: e instanceof Error ? e.message : "快捷键可能被占用", cancelled: false };
+    }
+  });
 }
 
-export async function unregisterGlobalShortcuts() {
-  if (!registered) return;
-  try {
-    await unregisterAll();
-    registered = false;
-  } catch {
-    // Ignore
-  }
+export function unregisterGlobalShortcuts() {
+  ++revision;
+  return enqueue(() => clearShortcuts().catch(() => undefined));
 }
 
 export async function toggleWindowVisibility() {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { popup, reveal } from "$lib/motion";
   import { Eye, EyeOff, List, Trash2, X } from "lucide-svelte";
 
   export type NoteListItem = {
@@ -25,15 +26,11 @@
     if (open) onRefresh();
   });
 
-  function handleWindowKeydown(event: KeyboardEvent) {
-    if (open && event.key === "Escape") onClose();
-  }
 </script>
 
-<svelte:window onkeydown={handleWindowKeydown} />
 
 {#if open}
-  <div class="note-list-popover" aria-label="便签列表" role="dialog" tabindex="-1">
+  <div class="note-list-popover" use:popup={onClose} transition:reveal aria-label="便签列表" role="dialog" tabindex="-1">
     <header>
       <div class="title">
         <List size={15} />
@@ -49,7 +46,7 @@
         <p class="empty">暂无便签</p>
       {:else}
         {#each items as item (item.id)}
-          <article class:current={item.current} class="note-item">
+          <article class:current={item.current} class="note-item" transition:reveal>
             <button class="note-main" type="button" title={item.title} onclick={() => onShow(item.id)}>
               <span>{item.title || "未命名便签"}</span>
               {#if item.current}
@@ -92,19 +89,19 @@
 <style>
   .note-list-popover {
     position: fixed;
-    top: 46px;
+    top: 43px;
     right: 10px;
     z-index: 110;
     width: min(260px, calc(100vw - 16px));
-    max-height: min(390px, calc(100vh - 54px));
+    max-height: min(390px, calc(100vh - 51px));
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    border: 1px solid #d7d2c7;
-    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
     overflow: hidden;
-    color: var(--pin-text);
-    background: #fffdf7;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+    color: #171717;
+    background: #fff;
+    box-shadow: 0 8px 28px #00000014;
   }
 
   header,
@@ -114,15 +111,15 @@
     justify-content: space-between;
     gap: 8px;
     padding: 6px 8px;
-    background: #fffdf7;
+    background: #fff;
   }
 
   header {
-    border-bottom: 1px solid #ebe6dc;
+    border-bottom: 1px solid #ededee;
   }
 
   footer {
-    border-top: 1px solid #ebe6dc;
+    border-top: 1px solid #ededee;
   }
 
   .title {
@@ -130,7 +127,7 @@
     min-width: 0;
     align-items: center;
     gap: 6px;
-    color: #24231f;
+    color: #171717;
   }
 
   h2 {
@@ -142,13 +139,14 @@
 
   small,
   .empty {
-    color: var(--pin-muted);
+    color: #737373;
     font-size: 12px;
   }
 
   button {
     font: inherit;
     cursor: pointer;
+    transition: background 140ms, color 140ms, transform 140ms;
   }
 
   .note-list {
@@ -171,7 +169,7 @@
 
   .note-item:hover,
   .note-item.current {
-    background: #f2efe8;
+    background: #f5f5f5;
   }
 
   .note-main {
@@ -185,12 +183,12 @@
     border-radius: 6px;
     padding: 5px 7px;
     text-align: left;
-    color: #24231f;
+    color: #171717;
     background: transparent;
   }
 
   .note-main:hover {
-    background: #eee8dd;
+    background: #eff6ff;
   }
 
   .note-main span {
@@ -203,7 +201,7 @@
   }
 
   .note-main small {
-    color: #7a6c58;
+    color: #2563eb;
     font-weight: 650;
   }
 
@@ -215,28 +213,33 @@
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 0;
-    color: var(--pin-muted);
+    color: #737373;
     background: transparent;
   }
 
   .icon-btn:hover {
-    border-color: #ded8cc;
+    border-color: #e5e7eb;
     color: #222;
-    background: #f3efe7;
+    background: #f5f5f5;
   }
 
   .icon-btn.danger:hover {
     border-color: rgba(168, 67, 50, 0.26);
-    color: #933626;
+    color: #dc2626;
     background: rgba(168, 67, 50, 0.08);
   }
 
+  button:hover { transform: scale(1.01); }
+  button:active { transform: scale(0.97); }
+  button:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
   @media (max-height: 360px) {
     .note-list-popover {
-      top: 38px;
+      top: 43px;
       right: 6px;
       width: min(240px, calc(100vw - 12px));
-      max-height: calc(100vh - 44px);
+      max-height: calc(100vh - 49px);
     }
 
     header,

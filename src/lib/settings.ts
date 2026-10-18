@@ -120,6 +120,13 @@ export function isMacPlatform() {
   return /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 }
 
+export function shortcutKeyFromEvent(event: Pick<KeyboardEvent, "key" | "code">) {
+  // Native global shortcuts use physical keys, even when Option produces a dead key.
+  if (/^(Key[A-Z]|Digit[0-9])$/.test(event.code)) return formatShortcutKey(event.code);
+  if (["Dead", "Process", "Unidentified"].includes(event.key)) return "";
+  return formatShortcutKey(event.key);
+}
+
 export function normalizeShortcut(value: string) {
   const parts = value
     .split("+")
@@ -202,6 +209,5 @@ function formatShortcutKey(key: string) {
   const upper = key.toUpperCase();
   if (/^KEY[A-Z]$/.test(upper)) return upper.slice(3);
   if (/^DIGIT[0-9]$/.test(upper)) return upper.slice(5);
-  if (key.length === 1) return key.toUpperCase();
-  return aliases[upper] ?? key;
+  return aliases[upper] ?? (key.length === 1 ? upper : key);
 }

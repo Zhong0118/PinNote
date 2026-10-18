@@ -33,16 +33,32 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
+          components: clippy
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Check frontend
+        run: pnpm check
+
+      - name: Test frontend behavior
+        run: pnpm test
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Test native behavior
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Lint native code
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0

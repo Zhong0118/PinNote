@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { reveal } from "$lib/motion";
   import { emit } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
   import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
@@ -13,13 +14,14 @@
     normalizeShortcut,
     platformDefaultShortcuts,
     shortcutIdentity,
+    shortcutKeyFromEvent,
     type AppSettings,
     type NoteTheme,
   } from "$lib/settings";
   import { createNote, loadNoteById, patchNoteNow, type PinNote } from "$lib/notesStore";
 
   const themes: Array<{ value: NoteTheme; label: string; color: string }> = [
-    { value: "paper", label: "纸张", color: "#d7b87c" },
+    { value: "paper", label: "纯白", color: "#ffffff" },
     { value: "mint", label: "薄荷", color: "#2d9c7c" },
     { value: "rose", label: "玫瑰", color: "#c56b79" },
     { value: "sky", label: "天空", color: "#5f8fcf" },
@@ -77,9 +79,9 @@
     const draft = { ...note, ...next, updatedAt: Date.now() };
     note = draft;
     void patchNoteNow(note.id, next).then((saved) => {
-      note = saved;
-      void emit("note-settings-changed", saved);
-    });
+      const { id, theme, customColor, opacity, alwaysOnTop } = saved;
+      void emit("note-settings-changed", { id, theme, customColor, opacity, alwaysOnTop });
+    }).catch(() => { dataPathStatus = "便签设置保存失败，请重试"; });
   }
 
   function patchShortcut(key: string, value: string) {
@@ -182,7 +184,7 @@
   }
 
   function handleShortcutKeydown(event: KeyboardEvent) {
-    if (!recordingFor) return;
+    if (!recordingFor || event.isComposing) return;
     event.preventDefault();
     event.stopPropagation();
 
@@ -201,7 +203,9 @@
       return;
     }
 
-    parts.push(event.key.length === 1 ? event.key.toUpperCase() : event.key);
+    const key = shortcutKeyFromEvent(event);
+    if (!key) return;
+    parts.push(key);
     patchShortcut(recordingFor, parts.join("+"));
     recordingFor = null;
   }
@@ -213,21 +217,24 @@
 
 <svelte:window onkeydown={handleShortcutKeydown} />
 
-<div class="settings-window">
-  <nav class="tab-bar">
+<div class="settings-window" transition:reveal>
+  <nav class="tab-bar" aria-label="设置分类">
     <button
+      aria-pressed={activeTab === "appearance"}
       class:active={activeTab === "appearance"}
       onclick={() => (activeTab = "appearance")}
     >
       <Palette size={14} /> 外观
     </button>
     <button
+      aria-pressed={activeTab === "behavior"}
       class:active={activeTab === "behavior"}
       onclick={() => (activeTab = "behavior")}
     >
       <Rocket size={14} /> 行为
     </button>
     <button
+      aria-pressed={activeTab === "shortcuts"}
       class:active={activeTab === "shortcuts"}
       onclick={() => (activeTab = "shortcuts")}
     >
@@ -237,9 +244,9 @@
 
   <div class="tab-content">
     {#if activeTab === "appearance"}
-      <div class="section">
+      <div class="section" transition:reveal>
         {#if !noteReady}
-          <p class="hint">请从某张便签窗口打开设置来修改外观</p>
+          <p transition:reveal class="hint">请从某张便签窗口打开设置来修改外观</p>
         {/if}
         <label class="field">
           <span class="label-with-icon"><SlidersHorizontal size={14} /> 透明度</span>
@@ -263,6 +270,8 @@
                 class:active={note.theme === theme.value}
                 type="button"
                 title={theme.label}
+                aria-label={theme.label}
+                aria-pressed={note.theme === theme.value}
                 style:--swatch={theme.color}
                 disabled={!noteReady}
                 onclick={() => patchNote({ theme: theme.value })}
@@ -287,7 +296,7 @@
       </div>
 
     {:else if activeTab === "behavior"}
-      <div class="section">
+      <div class="section" transition:reveal>
         <label class="switch-row">
           <span class="label-with-icon"><Rocket size={14} /> 开机自启</span>
           <input
@@ -297,7 +306,7 @@
           />
         </label>
         {#if autoStartStatus}
-          <p class="hint">{autoStartStatus}</p>
+          <p transition:reveal class="hint">{autoStartStatus}</p>
         {/if}
 
         <label class="switch-row">
@@ -321,19 +330,19 @@
           </div>
         </div>
         {#if dataPath}
-          <p class="path-line" title={dataPath}>{dataPath}</p>
+          <p transition:reveal class="path-line" title={dataPath}>{dataPath}</p>
         {/if}
         {#if dataPathStatus}
-          <p class="hint">{dataPathStatus}</p>
+          <p transition:reveal class="hint">{dataPathStatus}</p>
         {/if}
       </div>
 
     {:else if activeTab === "shortcuts"}
-      <div class="section">
+      <div class="section" transition:reveal>
         <h3>全局快捷键</h3>
-        <p class="hint">在任何应用中都可触发，点击可修改</p>
+        <p transition:reveal class="hint">在任何应用中都可触发，点击可修改</p>
         {#if shortcutError}
-          <p class="error">{shortcutError}</p>
+          <p transition:reveal class="error">{shortcutError}</p>
         {/if}
         <div class="shortcut-list">
           <div class="shortcut-row">
@@ -365,7 +374,7 @@
         </div>
 
         <h3>应用内快捷键</h3>
-        <p class="hint">仅在 PinNote 窗口聚焦时生效</p>
+        <p transition:reveal class="hint">仅在 PinNote 窗口聚焦时生效</p>
         <div class="shortcut-list">
           {#each inAppShortcuts as shortcut}
             <div class="shortcut-row">
@@ -391,8 +400,8 @@
       "Microsoft YaHei", sans-serif;
     font-size: 14px;
     line-height: 1.55;
-    background: #f8f7f4;
-    color: #20231f;
+    background: #fff;
+    color: #18181b;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -405,10 +414,10 @@
 
   .tab-bar {
     display: flex;
-    gap: 0;
-    border-bottom: 1px solid #e0ddd6;
-    background: #f0eeea;
-    padding: 0 12px;
+    gap: 4px;
+    border-bottom: 1px solid #e4e4e7;
+    background: #fafafa;
+    padding: 10px 16px;
     flex-shrink: 0;
   }
 
@@ -416,11 +425,11 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 10px 16px;
+    padding: 7px 14px;
     border: none;
-    border-bottom: 2px solid transparent;
+    border-radius: 8px;
     background: transparent;
-    color: #777b72;
+    color: #71717a;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
@@ -428,21 +437,26 @@
   }
 
   .tab-bar button:hover {
-    color: #20231f;
+    color: #18181b;
   }
 
   .tab-bar button.active {
-    color: #2d7d74;
-    border-bottom-color: #2d7d74;
+    color: #2563eb;
+    background: #eff6ff;
   }
 
   .tab-content {
     flex: 1;
+    display: grid;
+    align-content: start;
     overflow-y: auto;
     padding: 20px 24px;
   }
 
   .section {
+    grid-area: 1 / 1;
+    min-width: 0;
+    transform-origin: top center;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -451,8 +465,8 @@
   h3 {
     margin: 8px 0 0;
     font-size: 13px;
-    font-weight: 800;
-    color: #171a16;
+    font-weight: 650;
+    color: #18181b;
   }
 
   h3:first-child {
@@ -462,12 +476,12 @@
   .hint {
     margin: -8px 0 4px;
     font-size: 12px;
-    color: #999;
+    color: #71717a;
   }
 
   .error {
     margin: -6px 0 2px;
-    color: #a84332;
+    color: #b91c1c;
     font-size: 12px;
   }
 
@@ -476,7 +490,7 @@
     gap: 8px;
     font-size: 13px;
     font-weight: 600;
-    color: #555;
+    color: #3f3f46;
   }
 
   .switch-row {
@@ -486,7 +500,7 @@
     min-height: 36px;
     font-size: 13px;
     font-weight: 600;
-    color: #555;
+    color: #3f3f46;
   }
 
   .action-row {
@@ -495,7 +509,7 @@
     align-items: center;
     gap: 12px;
     min-height: 38px;
-    color: #555;
+    color: #3f3f46;
     font-size: 13px;
   }
 
@@ -506,13 +520,13 @@
   }
 
   .action-row strong {
-    color: #555;
+    color: #3f3f46;
     font-size: 13px;
   }
 
   .action-row small {
     overflow: hidden;
-    color: #999;
+    color: #71717a;
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -525,10 +539,10 @@
   }
 
   .action-buttons button {
-    border: 1px solid #d0cdc6;
+    border: 1px solid #d4d4d8;
     border-radius: 5px;
     padding: 5px 10px;
-    color: #333;
+    color: #27272a;
     background: #fff;
     font-size: 12px;
     font-weight: 600;
@@ -536,17 +550,17 @@
   }
 
   .action-buttons button:hover {
-    border-color: #2d7d74;
-    color: #2d7d74;
+    border-color: #2563eb;
+    color: #2563eb;
   }
 
   .path-line {
     overflow: hidden;
     margin: -10px 0 0;
-    border: 1px solid #e3dfd7;
+    border: 1px solid #e4e4e7;
     border-radius: 5px;
     padding: 6px 8px;
-    color: #666;
+    color: #52525b;
     background: #fff;
     font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
     font-size: 11px;
@@ -566,9 +580,9 @@
     height: 22px;
     margin: 0;
     appearance: none;
-    border: 1px solid #d0cdc6;
+    border: 1px solid #d4d4d8;
     border-radius: 999px;
-    background: #ddd;
+    background: #e4e4e7;
     cursor: pointer;
     transition: 0.16s ease;
   }
@@ -586,8 +600,8 @@
   }
 
   input[type="checkbox"]:checked {
-    border-color: #2d7d74;
-    background: #2d7d74;
+    border-color: #2563eb;
+    background: #2563eb;
   }
 
   input[type="checkbox"]:checked::before {
@@ -598,7 +612,7 @@
     width: 100%;
     height: 24px;
     margin: 0;
-    accent-color: #2d7d74;
+    accent-color: #2563eb;
     cursor: pointer;
   }
 
@@ -623,7 +637,7 @@
   }
 
   .swatch.active {
-    border-color: #155951;
+    border-color: #2563eb;
   }
 
   .custom-swatch {
@@ -655,19 +669,19 @@
 
   .shortcut-row > span:first-child {
     flex: 1;
-    color: #555;
+    color: #3f3f46;
   }
 
   .key-badge {
     display: inline-block;
     padding: 3px 10px;
-    border: 1px solid #d0cdc6;
+    border: 1px solid #d4d4d8;
     border-radius: 5px;
     background: #fff;
     font-size: 12px;
     font-weight: 600;
     font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-    color: #333;
+    color: #27272a;
     cursor: pointer;
     min-width: 80px;
     text-align: center;
@@ -675,15 +689,15 @@
   }
 
   .key-badge:hover {
-    border-color: #2d7d74;
-    color: #2d7d74;
+    border-color: #2563eb;
+    color: #2563eb;
   }
 
   .key-badge.recording {
-    border-color: #2d7d74;
-    background: #f0faf8;
-    color: #2d7d74;
-    animation: pulse 1s ease infinite;
+    border-color: #2563eb;
+    background: #eff6ff;
+    color: #2563eb;
+    box-shadow: 0 0 0 3px #dbeafe;
   }
 
   .key-badge.readonly {
@@ -692,8 +706,8 @@
   }
 
   .key-badge.readonly:hover {
-    border-color: #d0cdc6;
-    color: #333;
+    border-color: #d4d4d8;
+    color: #27272a;
   }
 
   .reset-btn {
@@ -702,17 +716,51 @@
     border-radius: 4px;
     background: transparent;
     font-size: 11px;
-    color: #999;
+    color: #71717a;
     cursor: pointer;
   }
 
   .reset-btn:hover {
-    border-color: #d0cdc6;
-    color: #555;
+    border-color: #d4d4d8;
+    color: #3f3f46;
   }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
+  button, input, .custom-swatch {
+    transition: transform 140ms ease, background-color 140ms ease,
+      border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+  }
+
+  button:not(:disabled):hover, .custom-swatch:has(input:not(:disabled)):hover {
+    transform: scale(1.025);
+  }
+
+  button:not(:disabled):active, input[type="checkbox"]:not(:disabled):active {
+    transform: scale(0.96);
+  }
+
+  button:focus-visible, input:focus-visible, .custom-swatch:focus-within {
+    outline: 2px solid #2563eb;
+    outline-offset: 3px;
+  }
+
+  button:disabled, input:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 420px) {
+    .tab-content { padding: 18px 16px; }
+    .shortcut-row { flex-wrap: wrap; gap: 8px; }
+    .shortcut-row > span:first-child { flex-basis: 100%; }
+    .action-row { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .settings-window :global(*), .settings-window :global(*::before) {
+      transition: none !important;
+    }
+    button:not(:disabled):hover, button:not(:disabled):active,
+    input[type="checkbox"]:not(:disabled):active,
+    .custom-swatch:has(input:not(:disabled)):hover { transform: none; }
   }
 </style>

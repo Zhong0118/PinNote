@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { popup, reveal } from "$lib/motion";
   import { Plus, Trash2, X } from "lucide-svelte";
   import {
     createTemplateId,
@@ -97,15 +98,11 @@
     }
   }
 
-  function handleWindowKeydown(event: KeyboardEvent) {
-    if (open && event.key === "Escape") onClose();
-  }
 </script>
 
-<svelte:window onkeydown={handleWindowKeydown} />
 
 {#if open}
-  <div class="template-popover" aria-label="模板" role="dialog" tabindex="-1">
+  <div class="template-popover" use:popup={onClose} transition:reveal aria-label="模板" role="dialog" tabindex="-1">
       <header>
         <div>
           <h2>模板</h2>
@@ -117,7 +114,7 @@
 
       {#if mode === "list"}
         {#if pendingTemplate}
-          <div class="confirm-row">
+          <div class="confirm-row" transition:reveal>
             <span>替换当前内容？</span>
             <button type="button" onclick={() => applyTemplate(pendingTemplate!)}>替换</button>
             <button
@@ -132,7 +129,7 @@
           </div>
         {/if}
 
-        <div class="template-list">
+        <div class="template-list" transition:reveal>
           {#each templates as template}
             <article class="template-item">
               <button
@@ -173,11 +170,11 @@
           </button>
           <small>{customCount}/{customTemplateLimit}</small>
           {#if status}
-            <span>{status}</span>
+            <span role={/失败|错误|请填写|最多/.test(status) ? "alert" : "status"}>{status}</span>
           {/if}
         </footer>
       {:else}
-        <div class="template-form">
+        <div class="template-form" transition:reveal>
           <label>
             模板名称
             <input bind:value={name} maxlength="28" placeholder="例如：日报" />
@@ -196,7 +193,7 @@
           <button class="secondary-btn" type="button" onclick={() => (mode = "list")}>返回</button>
           <button class="create-btn" type="button" onclick={createTemplate}>保存模板</button>
           {#if status}
-            <span>{status}</span>
+            <span role={/失败|错误|请填写|最多/.test(status) ? "alert" : "status"}>{status}</span>
           {/if}
         </footer>
       {/if}
@@ -206,19 +203,19 @@
 <style>
   .template-popover {
     position: fixed;
-    top: 46px;
+    top: 43px;
     right: 10px;
     z-index: 100;
     width: min(220px, calc(100vw - 16px));
-    max-height: min(380px, calc(100vh - 54px));
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    border: 1px solid #d7d2c7;
-    border-radius: 8px;
+    max-height: min(380px, calc(100vh - 51px));
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
     overflow: hidden;
-    color: var(--pin-text);
-    background: #fffdf7;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+    color: #171717;
+    background: #fff;
+    box-shadow: 0 8px 28px #00000014;
   }
 
   header,
@@ -227,17 +224,18 @@
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
-    background: #fffdf7;
+    background: #fff;
+    flex: 0 0 auto;
   }
 
   header {
     justify-content: space-between;
-    border-bottom: 1px solid #ebe6dc;
+    border-bottom: 1px solid #ededee;
   }
 
   footer {
     flex-wrap: wrap;
-    border-top: 1px solid #ebe6dc;
+    border-top: 1px solid #ededee;
   }
 
   h2 {
@@ -252,7 +250,7 @@
 
   small,
   footer span {
-    color: var(--pin-muted);
+    color: #737373;
     font-size: 12px;
   }
 
@@ -264,6 +262,7 @@
 
   button {
     cursor: pointer;
+    transition: background 140ms, color 140ms, transform 140ms;
   }
 
   button:disabled {
@@ -280,15 +279,15 @@
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 0;
-    color: var(--pin-muted);
+    color: #737373;
     background: transparent;
   }
 
   .icon-btn:hover,
   .delete-btn:hover {
-    border-color: #ded8cc;
+    border-color: #e5e7eb;
     color: #222;
-    background: #f3efe7;
+    background: #f5f5f5;
   }
 
   .template-list {
@@ -298,18 +297,19 @@
   }
 
   .confirm-row {
+    flex: 0 0 auto;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 6px;
-    border-bottom: 1px solid #ebe6dc;
+    border-bottom: 1px solid #ededee;
     padding: 5px 7px;
-    background: #fff7e6;
+    background: #eff6ff;
   }
 
   .confirm-row span {
     overflow: hidden;
-    color: #6c4b12;
+    color: #1d4ed8;
     font-size: 12px;
     font-weight: 600;
     text-overflow: ellipsis;
@@ -317,16 +317,16 @@
   }
 
   .confirm-row button {
-    border: 1px solid #dfc78d;
+    border: 1px solid #bfdbfe;
     border-radius: 5px;
     padding: 2px 6px;
-    color: #4c360d;
-    background: #fffdf7;
+    color: #1d4ed8;
+    background: #fff;
     font-size: 12px;
   }
 
   .confirm-row button:hover {
-    background: #f5e8c6;
+    background: #dbeafe;
   }
 
   .template-item {
@@ -338,7 +338,7 @@
   }
 
   .template-item:hover {
-    background: #f2efe8;
+    background: #f5f5f5;
   }
 
   .template-main {
@@ -349,14 +349,14 @@
     padding: 5px 7px;
     min-height: 28px;
     text-align: left;
-    color: #24231f;
+    color: #171717;
     background: transparent;
   }
 
   .template-main:hover,
   .template-main.pending {
     color: #111;
-    background: #eee8dd;
+    background: #eff6ff;
   }
 
   .template-main span {
@@ -373,23 +373,23 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    border: 1px solid #d8d2c6;
+    border: 1px solid #e5e7eb;
     border-radius: 6px;
     padding: 4px 7px;
     color: #222;
-    background: #f7f3ea;
+    background: #eff6ff;
     font-size: 12px;
     font-weight: 600;
   }
 
   .secondary-btn {
     color: #555;
-    background: #fffdf7;
+    background: #fff;
   }
 
   .create-btn:hover,
   .secondary-btn:hover {
-    background: #eee8dd;
+    background: #eff6ff;
   }
 
   .template-form {
@@ -403,7 +403,7 @@
   label {
     display: grid;
     gap: 6px;
-    color: var(--pin-muted);
+    color: #737373;
     font-size: 12px;
     font-weight: 700;
   }
@@ -411,17 +411,19 @@
   input,
   textarea {
     width: 100%;
-    border: 1px solid #d8d2c6;
+    border: 1px solid #e5e7eb;
     border-radius: 6px;
     padding: 6px 8px;
-    color: #24231f;
+    color: #171717;
     background: #fff;
     outline: 0;
   }
 
   input:focus,
   textarea:focus {
-    border-color: #8f8879;
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+    border-color: #2563eb;
   }
 
   textarea {
@@ -432,12 +434,17 @@
     line-height: 1.55;
   }
 
+  button:hover { transform: scale(1.01); }
+  button:active { transform: scale(0.97); }
+  button:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
   @media (max-height: 360px) {
     .template-popover {
-      top: 38px;
+      top: 43px;
       right: 6px;
       width: min(210px, calc(100vw - 12px));
-      max-height: calc(100vh - 44px);
+      max-height: calc(100vh - 49px);
     }
 
     header,
