@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createQuitGuard } from "$lib/quitGuard";
   import { invoke } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow, PhysicalPosition, LogicalPosition, LogicalSize, availableMonitors, type Window } from "@tauri-apps/api/window";
@@ -59,7 +60,7 @@
   let windowStateTimer: ReturnType<typeof setTimeout>;
   let initialization: Promise<void>;
   let editor = $state<MilkdownEditor>();
-  let quitAttempt: number | undefined;
+  const quitGuard = createQuitGuard();
   const pinned = $derived(note.alwaysOnTop);
 
   const noteSettings = $derived({
@@ -80,6 +81,10 @@
       await applyNativeWindowState(true).catch(() => { status = "窗口位置恢复失败，可继续编辑"; });
       if (isMainWindow) await invoke("set_main_note_id", { id: note.id });
       await markNoteActive(note);
+      // A window created after the native save snapshot must never become editable
+      // while an installation/exit is already in progress.
+      const pending = await invoke<number | null>("pending_quit");
+      if (pending != null) void prepareToQuit(pending);
       // Complete the initial reveal before accepting tray requests or edits.
       if (!isMainWindow || !(await invoke<boolean>("startup_hidden"))) await win.show();
       ready = true;
@@ -155,15 +160,14 @@
     });
 
     async function prepareToQuit(attempt: number) {
-      if (quitAttempt === attempt) return;
-      quitAttempt = attempt;
+      if (!quitGuard.begin(attempt)) return;
       document.body.inert = true;
       try {
         await initialization.catch(() => undefined);
         await saveBeforeWindowAction();
         await invoke("quit_save_complete", { success: true, attempt });
       } catch {
-        if (quitAttempt === attempt) {
+        if (quitGuard.isCurrent(attempt)) {
           document.body.inert = false;
           status = "保存失败，已取消退出，请重试或导出便签";
         }
@@ -176,8 +180,13 @@
       const attempt = await invoke<number | null>("pending_quit");
       if (attempt != null) await prepareToQuit(attempt);
     });
+    const quitCancelledPromise = listen<number>("quit-save-cancelled", (event) => {
+      if (!quitGuard.cancel(event.payload)) return;
+      document.body.inert = false;
+      status = "操作已取消，可以继续编辑";
+    });
     const quitFailedPromise = listen<number>("quit-save-failed", (event) => {
-      if (quitAttempt !== event.payload) return;
+      if (!quitGuard.cancel(event.payload)) return;
       document.body.inert = false;
       status = "保存失败，已取消退出，请重试或导出便签";
     });
@@ -187,6 +196,7 @@
       if (isMainWindow) void unregisterGlobalShortcuts();
       quitPromise.then((fn) => fn());
       quitFailedPromise.then((fn) => fn());
+      quitCancelledPromise.then((fn) => fn());
       settingsPromise.then((fn) => fn());
       noteSettingsPromise.then((fn) => fn());
       newNotePromise.then((fn) => fn());
@@ -667,6 +677,7 @@
   }
 
   async function openRecentSettings() {
+    if (document.body.inert) return;
     const { note: target } = await getRecentNote();
     await openSettingsWindow(target.id);
   }

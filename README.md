@@ -2,7 +2,7 @@
 
 一张放在桌面上的 Markdown 便签。随手写，自动保存；暂时不用时，收成一颗小胶囊。
 
-当前源码版本 **1.1.2**。对应安装包请以 GitHub Releases 中实际发布的版本为准。
+当前源码版本 **1.1.3**。对应安装包请以 GitHub Releases 中实际发布的版本为准。
 
 ## 界面
 
@@ -54,6 +54,16 @@
 
 Windows 需要 WebView2；从源码构建还需要 Microsoft C++ Build Tools（桌面 C++ 工作负载）。macOS 构建需要 Xcode Command Line Tools。完整环境要求见 [Tauri 官方前置条件](https://v2.tauri.app/start/prerequisites/)。
 
+## 检查更新
+
+托盘右键菜单选择“检查更新”。发现新版后选择“更新并重启”，应用会下载并校验更新包，保存全部便签，再安装并自动重启。下载进度显示在同一个菜单项中，不增加常驻界面；选择“稍后”可继续使用当前版本。
+
+正式版在启动 10 秒后及每 24 小时静默检查一次，同一次运行中同一新版只提醒一次。没有新版或后台检查时网络不可用不会弹窗；手动检查会明确反馈结果。下载或签名校验失败不会安装，保存失败或 15 秒内未收到所有便签的保存确认会取消安装并恢复编辑。
+
+支持 macOS Apple Silicon / Intel 和 Windows x64；Windows 沿用 NSIS / MSI 安装方式。Mac 应用请放在本机可写目录（如“应用程序”），不要直接从 DMG 中运行。Windows 安装可能需要系统权限确认。
+
+**1.1.2 及更早版本没有更新入口，需要先手动安装 1.1.3 或更新版本一次。** 后续版本发布后即可在应用内更新。更新使用 GitHub Releases，需能访问 GitHub；更新包签名用于验证来源，不等同于 Apple 公证或 Windows 代码签名。
+
 ## 开发与构建
 
 技术栈：Tauri 2、Rust、Svelte 5 / SvelteKit、TypeScript、Milkdown、Lucide。沿用现有组件，没有新增 UI 依赖。
@@ -78,24 +88,29 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 在目标平台打包：
 
 ```sh
+# 本地构建不生成更新签名；也可设置 TAURI_SIGNING_PRIVATE_KEY 后构建签名包
 # macOS：构建 .app
-pnpm tauri build --bundles app -- --locked
+pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
 
 # macOS：构建可上传 Release 的 .dmg 安装包
-pnpm tauri build --bundles dmg -- --locked
+pnpm tauri build --bundles dmg --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
 
-# Windows：构建本机安装包
-pnpm tauri build -- --locked
+# Windows PowerShell：构建本机安装包（关闭更新产物，避免需要发布私钥）
+pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
 ```
 
-构建产物位于 `src-tauri/target/release/bundle/`。本机 macOS 开发包必要时可做临时签名：
+构建产物位于 `src-tauri/target/release/bundle/`。macOS 构建默认使用 ad-hoc 签名（仍未 Apple 公证），可检查签名完整性：
 
 ```sh
-codesign --force --deep --sign - src-tauri/target/release/bundle/macos/PinNote.app
 codesign --verify --deep --strict src-tauri/target/release/bundle/macos/PinNote.app
 ```
 
-`.github/workflows/check.yml` 为 push / PR 配置 macOS、Windows 编译、类型检查和测试，不发布安装包；`release.yml` 保留 `v*` 标签触发的发布流程。推送普通分支不会创建 Release；推送 `v1.1.2` 等版本标签后，工作流会在 Windows 和 macOS runner 上打包并上传到对应 Release。macOS CI 构建通用包，支持 Apple Silicon 与 Intel；本机默认构建只包含当前架构。
+`.github/workflows/check.yml` 为 push / PR 配置 macOS、Windows 编译、类型检查和测试，不发布安装包；`release.yml` 保留 `v*` 标签触发的发布流程。推送普通分支不会创建 Release；推送 `v1.1.3` 等版本标签后，工作流会在 Windows 和 macOS runner 上打包并上传到对应 Release。macOS CI 构建通用包，支持 Apple Silicon 与 Intel；本机默认构建只包含当前架构。
+
+发布流程先创建草稿 Release，生成安装包、`.sig` 签名和 `latest.json`。两个平台都成功、更新清单包含 Mac 双架构和 Windows NSIS / MSI 且对应附件齐备后，才公开发布。失败时草稿不会成为客户端的最新版本；修复后重跑失败的工作流即可。
+
+仓库 Actions 必须配置 `TAURI_SIGNING_PRIVATE_KEY`；如私钥加密，还需 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。公钥位于 `src-tauri/tauri.conf.json`。私钥应保存在仓库外并另行备份，不能提交到 Git，也不能在后续发布中随意更换，否则已安装客户端无法验证更新。普通 PR 检查不需要私钥。
+
 
 Windows 安装包推荐交给上述 GitHub Actions 生成，无需本地 Windows 电脑。Mac 也能使用 NSIS、LLVM 和 `cargo-xwin` 交叉构建 Windows `.exe`，但配置更复杂；`.msi` 必须在 Windows 上构建。详见 [Tauri Windows 打包文档](https://v2.tauri.app/distribute/windows-installer/#build-windows-apps-on-linux-and-macos)。
 
@@ -121,14 +136,25 @@ Windows 安装包推荐交给上述 GitHub Actions 生成，无需本地 Windows
 - `tests/windowGeometry.test.mjs`：胶囊往返、负坐标、多屏缩放、断开显示器和工作区边界。
 - `tests/platform.test.mjs`：Windows / macOS 默认快捷键、并发注册与销毁、长按去重、部分注册失败、Option / 死键和空格录制。
 - `tests/windowVisibility.test.mjs`：显隐确认、启动期请求重试、去重、串行执行、失败及过期请求。
-- Rust 单元测试：并发原子写入、退出保存确认及过期请求。
-- 本轮本地结果：51 项 Node 测试、4 项 Rust 测试、34 项浏览器检查通过，类型检查与 Rust clippy 通过；浏览器场景另以 Windows 平台模拟运行通过。
+- `tests/quitGuard.test.mjs`：晚创建窗口、过期保存回复与取消顺序。
+- `tests/updateManifest.test.mjs`：完整发布清单及缺少平台、错误版本、签名不一致、附件缺失时阻止发布。
+- Rust 单元测试：并发原子写入、退出/更新保存确认、超时取消、并发检查及重复提醒。
+- `src-tauri/tests/updater_contract.rs`：本地 HTTP 服务和独立测试签名验证旧版本忽略、损坏包拒绝、有效包下载；macOS 在临时目录验证应用替换，不接触个人应用或数据。
+- 1.1.3 前端回归：61 项 Node 测试与 37 项浏览器检查通过，Svelte 类型检查无错误或警告。
+- 1.1.2 回归基线：51 项 Node 测试、4 项 Rust 测试、34 项浏览器检查通过，类型检查与 Rust clippy 通过；浏览器场景另以 Windows 平台模拟运行通过。
 - macOS 隔离应用实测：双屏往返移动、跨屏边界选屏、屏幕边缘展开和托盘事件显隐通过。逐帧采样确认页面随原生窗口连续展开，顶部和右边缘固定。当前两块实测屏幕均为 2× 缩放；混合 DPI 与断屏恢复另有模拟测试。
 - `tests/browser-regression.mjs`：真实 Svelte / Milkdown 页面配合模拟 Tauri IPC，验证编辑、保存、菜单和胶囊交互，不读取个人便签。
 
 浏览器场景是接受 Playwright `page` 的异步函数。先运行 `pnpm dev --host 127.0.0.1`，再用 Playwright MCP 的代码执行工具运行该文件内容。它不替代真实系统窗口测试。
 
 发布前仍需在 Windows 实机检查安装、托盘、快捷键冲突、自启和胶囊拖动，并在真实混合 DPI 多屏环境验证拔插显示器。基础图片引用可用，但暂不提供本地图片导入或资源管理。
+
+## 1.1.3 应用内更新
+
+- 托盘增加“检查更新”，支持 Mac / Windows 下载、签名校验、保存便签、安装及重启。
+- 后台仅在有新版本时提醒，下载进度复用菜单项。
+- 安装前等待所有便签保存；保存失败、超时或安装失败会恢复编辑，晚创建的便签也受保护。
+- GitHub Actions 自动生成签名与更新清单，完整构建后再公开 Release。
 
 ## 1.1.2 托盘、多屏与动画修复
 
