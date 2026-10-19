@@ -668,7 +668,6 @@ pub fn run() {
         .plugin(autostart.build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(updater::UpdateState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .on_window_event(|window, event| {
@@ -684,6 +683,10 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            app.manage(updater::UpdateState::load(data_file(
+                app.handle(),
+                "update-history.json",
+            )?));
             build_tray(app)?;
             updater::start_background_checks(app.handle().clone());
 

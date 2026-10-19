@@ -1,35 +1,115 @@
+use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 use tauri::{menu::MenuItem, AppHandle, Manager, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
 
 pub struct UpdateMenu(pub MenuItem<Wry>);
 
-#[derive(Default)]
+const CHECK_INTERVAL: u64 = 24 * 60 * 60;
+const MANUAL_COOLDOWN: u64 = 30;
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(default)]
+struct UpdateHistory {
+    last_check: Option<u64>,
+    notified_versions: BTreeSet<String>,
+}
+
+impl UpdateHistory {
+    fn remaining(&self, manual: bool, now: u64) -> u64 {
+        let interval = if manual {
+            MANUAL_COOLDOWN
+        } else {
+            CHECK_INTERVAL
+        };
+        self.last_check
+            // A clock adjustment must not block checks indefinitely.
+            .and_then(|last| now.checked_sub(last))
+            .map(|elapsed| interval.saturating_sub(elapsed))
+            .unwrap_or(0)
+    }
+}
+
 pub struct UpdateState {
     busy: AtomicBool,
-    notified: Mutex<Option<String>>,
+    history: Mutex<UpdateHistory>,
+    path: PathBuf,
 }
 
 impl UpdateState {
+    pub fn load(path: PathBuf) -> Self {
+        let history = match fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+                eprintln!("Cannot read update history: {error}");
+                UpdateHistory::default()
+            }),
+            Err(error) => {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("Cannot read update history: {error}");
+                }
+                UpdateHistory::default()
+            }
+        };
+        Self {
+            busy: AtomicBool::new(false),
+            history: Mutex::new(history),
+            path,
+        }
+    }
+
+    fn save(&self, history: &UpdateHistory) {
+        let result = serde_json::to_string(history)
+            .map_err(|error| error.to_string())
+            .and_then(|json| super::atomic_write(self.path.clone(), json));
+        if let Err(error) = result {
+            // Keep the in-memory throttle even if the data directory is not writable.
+            eprintln!("Cannot save update history: {error}");
+        }
+    }
+
     fn start(&self) -> bool {
         self.busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_ok()
     }
 
-    fn should_prompt(&self, version: &str, manual: bool) -> bool {
-        let mut notified = self.notified.lock().unwrap();
-        if !manual && notified.as_deref() == Some(version) {
-            return false;
-        }
-        *notified = Some(version.to_owned());
-        true
+    fn remaining(&self, manual: bool, now: u64) -> u64 {
+        self.history.lock().unwrap().remaining(manual, now)
     }
+
+    fn begin_check(&self, manual: bool, now: u64) -> u64 {
+        let mut history = self.history.lock().unwrap();
+        let remaining = history.remaining(manual, now);
+        if remaining == 0 {
+            // Record attempts before networking, including offline/failed checks.
+            history.last_check = Some(now);
+            self.save(&history);
+        }
+        remaining
+    }
+
+    fn should_prompt(&self, version: &str, manual: bool) -> bool {
+        let mut history = self.history.lock().unwrap();
+        if history.notified_versions.insert(version.to_owned()) {
+            self.save(&history);
+            true
+        } else {
+            manual
+        }
+    }
+}
+
+fn now_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn menu_status(app: &AppHandle, text: &str) {
@@ -71,29 +151,50 @@ async fn message(app: &AppHandle, text: impl Into<String>, confirm: bool) -> boo
 }
 
 pub fn check(app: AppHandle, manual: bool) {
+    tauri::async_runtime::spawn(check_once(app, manual));
+}
+
+async fn check_once(app: AppHandle, manual: bool) {
     if app.state::<super::QuitLock>().0.lock().unwrap().approved
         || !app.state::<UpdateState>().start()
     {
         return;
     }
+    let _run = UpdateRun(app.clone());
+    let remaining = app
+        .state::<UpdateState>()
+        .begin_check(manual, now_seconds());
+    if remaining > 0 {
+        if manual {
+            show_cooldown(&app).await;
+        }
+        return;
+    }
     let _ = app.state::<UpdateMenu>().0.set_enabled(false);
     menu_status(&app, "正在检查更新…");
-    tauri::async_runtime::spawn(async move {
-        let _run = UpdateRun(app.clone());
-        let mut report_error = manual;
-        if let Err(error) = run_update(&app, manual, &mut report_error).await {
-            eprintln!("Update failed: {error}");
-            // An offline startup is silent. A requested check/install always gets feedback.
-            if report_error {
-                message(
-                    &app,
-                    format!("更新未完成\n{error}\n可以稍后从托盘重试"),
-                    false,
-                )
-                .await;
-            }
+    let mut report_error = manual;
+    if let Err(error) = run_update(&app, manual, &mut report_error).await {
+        eprintln!("Update failed: {error}");
+        // An offline startup is silent. A requested check/install always gets feedback.
+        if report_error {
+            message(
+                &app,
+                format!("更新未完成\n{error}\n可以稍后从托盘重试"),
+                false,
+            )
+            .await;
         }
-    });
+    }
+    show_cooldown(&app).await;
+}
+
+async fn show_cooldown(app: &AppHandle) {
+    let remaining = app.state::<UpdateState>().remaining(true, now_seconds());
+    if remaining > 0 {
+        menu_status(app, "检查更新（稍后重试）");
+        let _ = app.state::<UpdateMenu>().0.set_enabled(false);
+        tokio::time::sleep(Duration::from_secs(remaining)).await;
+    }
 }
 
 async fn run_update(app: &AppHandle, manual: bool, report_error: &mut bool) -> Result<(), String> {
@@ -191,8 +292,11 @@ pub fn start_background_checks(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(10)).await;
         loop {
-            check(app.clone(), false);
-            tokio::time::sleep(Duration::from_secs(24 * 60 * 60)).await;
+            check_once(app.clone(), false).await;
+            // Sleep only the remaining interval after a relaunch. Manual checks
+            // can move the deadline; check_once rechecks it before each request.
+            let remaining = app.state::<UpdateState>().remaining(false, now_seconds());
+            tokio::time::sleep(Duration::from_secs(remaining.max(MANUAL_COOLDOWN))).await;
         }
     });
 }
@@ -201,9 +305,33 @@ pub fn start_background_checks(app: AppHandle) {
 mod tests {
     use super::*;
 
+    struct HistoryFile(PathBuf);
+    impl HistoryFile {
+        fn new() -> Self {
+            static ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "pinnote-update-history-{}-{}-{}",
+                std::process::id(),
+                now_seconds(),
+                ID.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&dir).unwrap();
+            Self(dir.join("update-history.json"))
+        }
+        fn load(&self) -> UpdateState {
+            UpdateState::load(self.0.clone())
+        }
+    }
+    impl Drop for HistoryFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(self.0.parent().unwrap());
+        }
+    }
+
     #[test]
     fn overlapping_manual_and_background_checks_are_ignored_until_finished() {
-        let state = UpdateState::default();
+        let file = HistoryFile::new();
+        let state = file.load();
         assert!(state.start());
         assert!(!state.start());
         state.busy.store(false, Ordering::Release);
@@ -211,11 +339,82 @@ mod tests {
     }
 
     #[test]
-    fn background_reminds_once_per_version_but_manual_check_can_retry() {
-        let state = UpdateState::default();
+    fn automatic_reminders_survive_restarts_but_manual_checks_can_retry() {
+        let file = HistoryFile::new();
+        let state = file.load();
         assert!(state.should_prompt("1.1.4", false));
         assert!(!state.should_prompt("1.1.4", false));
-        assert!(state.should_prompt("1.1.4", true));
-        assert!(state.should_prompt("1.1.5", false));
+        drop(state);
+        let restarted = file.load();
+        assert!(!restarted.should_prompt("1.1.4", false));
+        assert!(restarted.should_prompt("1.1.4", true));
+        assert!(restarted.should_prompt("1.1.5", false));
+        drop(restarted);
+        assert!(!file.load().should_prompt("1.1.4", false));
+        assert!(!file.load().should_prompt("1.1.5", false));
+    }
+
+    #[test]
+    fn attempted_checks_survive_restart_and_wait_only_the_remaining_day() {
+        let file = HistoryFile::new();
+        assert_eq!(file.load().begin_check(false, 100_000), 0);
+        let restarted = file.load();
+        assert_eq!(restarted.remaining(false, 100_010), 86_390);
+        assert_eq!(restarted.begin_check(false, 186_399), 1);
+        // Suppressed checks must not postpone the original deadline.
+        assert_eq!(file.load().begin_check(false, 186_400), 0);
+        assert_eq!(file.load().remaining(false, 186_400), 86_400);
+    }
+
+    #[test]
+    fn manual_checks_bypass_daily_interval_but_share_a_persistent_cooldown() {
+        let file = HistoryFile::new();
+        assert_eq!(file.load().begin_check(false, 100_000), 0);
+        assert_eq!(file.load().begin_check(true, 100_029), 1);
+        assert_eq!(file.load().begin_check(true, 100_030), 0);
+        assert_eq!(file.load().begin_check(true, 100_031), 29);
+        assert_eq!(file.load().remaining(false, 100_031), 86_399);
+    }
+
+    #[test]
+    fn manually_seen_versions_do_not_trigger_later_automatic_reminders() {
+        let file = HistoryFile::new();
+        assert!(file.load().should_prompt("1.1.4", true));
+        assert!(!file.load().should_prompt("1.1.4", false));
+    }
+
+    #[test]
+    fn corrupt_or_old_history_recovers_without_touching_notes() {
+        let file = HistoryFile::new();
+        let notes = file.0.with_file_name("notes.json");
+        fs::write(&notes, b"personal notes fixture").unwrap();
+        for bytes in ["{broken", "{}"] {
+            fs::write(&file.0, bytes).unwrap();
+            let state = file.load();
+            assert_eq!(state.begin_check(false, 100_000), 0);
+            assert!(state.should_prompt("1.1.4", false));
+            assert_eq!(file.load().remaining(false, 100_001), 86_399);
+            assert!(!file.load().should_prompt("1.1.4", false));
+        }
+        assert_eq!(fs::read(&notes).unwrap(), b"personal notes fixture");
+    }
+
+    #[test]
+    fn clock_rollback_repairs_the_deadline_instead_of_blocking_updates() {
+        let file = HistoryFile::new();
+        file.load().begin_check(false, 200_000);
+        assert_eq!(file.load().begin_check(false, 100_000), 0);
+        assert_eq!(file.load().remaining(false, 100_001), 86_399);
+    }
+
+    #[test]
+    fn write_failure_keeps_in_memory_throttle_and_reminder_deduplication() {
+        let file = HistoryFile::new();
+        let state = file.load();
+        fs::create_dir(&file.0).unwrap(); // destination cannot be replaced by a file
+        assert_eq!(state.begin_check(false, 100_000), 0);
+        assert_eq!(state.begin_check(true, 100_001), 29);
+        assert!(state.should_prompt("1.1.4", false));
+        assert!(!state.should_prompt("1.1.4", false));
     }
 }
