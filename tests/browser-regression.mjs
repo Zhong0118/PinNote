@@ -19,7 +19,12 @@ async (page) => {
       async invoke(cmd, args = {}) {
         state.calls.push({ cmd, args });
         if (cmd === 'load_notes') return JSON.stringify({ version: 1, notes: state.notes, lastActiveNoteId: Object.keys(state.notes)[0], lastClosedNoteId: Object.keys(state.notes)[0] });
-        if (['load_settings', 'load_templates', 'pending_quit'].includes(cmd)) return null;
+        if (cmd === 'pending_quit') {
+          const scenario = new URLSearchParams(location.search).get('update-test');
+          if (scenario === 'cancelled') state.emit('quit-save-cancelled', 12);
+          return scenario ? 12 : null;
+        }
+        if (['load_settings', 'load_templates'].includes(cmd)) return null;
         if (cmd === 'upsert_note') {
           if (state.failWrites) throw new Error('simulated disk full');
           const next = JSON.parse(args.json); state.notes[next.id] = next; return args.json;
@@ -39,7 +44,7 @@ async (page) => {
           }
           return;
         }
-        if (cmd === 'plugin:window|show') {state.visible = true; return;}
+        if (cmd === 'plugin:window|show') {state.visible = true; state.inertAtShow = document.body.inert; return;}
         if (cmd === 'plugin:window|hide') {state.visible = false; return;}
         if (cmd === 'plugin:event|emit') { state.emit(args.event, args.payload); return; }
         if (cmd === 'animate_note_window') {
@@ -278,6 +283,14 @@ async (page) => {
     await p.evaluate(()=>window.__test.releaseRead());
     await p.waitForFunction(()=>document.body.innerText.includes('切换失败'));
     check(await p.evaluate(()=>!window.__test.calls.some(c=>c.cmd==='plugin:window|show'&&c.args.label==='main')), 'deleting main invalidates an older tray reveal');
+    await p.goto('http://127.0.0.1:1420/?update-test=pending');
+    await p.waitForFunction(() => window.__test.calls.some(c => c.cmd === 'quit_save_complete'));
+    check(await p.evaluate(() => document.body.inert && window.__test.inertAtShow), 'late-created note is frozen before first reveal during update');
+    await p.evaluate(() => window.__test.emit('quit-save-cancelled', 12));
+    check(await p.evaluate(() => !document.body.inert), 'cancelled installation restores editor interaction');
+    await p.goto('http://127.0.0.1:1420/?update-test=cancelled');
+    await p.waitForFunction(() => window.__test.calls.some(c => c.cmd === 'plugin:window|show'));
+    check(await p.evaluate(() => !document.body.inert && !window.__test.calls.some(c => c.cmd === 'quit_save_complete')), 'late pending reply cannot refreeze an already cancelled installation');
     check(errors.length === 0, `no page errors (${errors.join('; ')})`);
     return { passed: passed.length, checks: passed };
   } finally { await context.close(); }

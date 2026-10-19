@@ -1,3 +1,5 @@
+mod updater;
+
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
@@ -22,18 +24,58 @@ struct QuitState {
     pending: HashSet<String>,
     approved: bool,
     attempt: u64,
+    updating: bool,
+    update_saved: Option<tokio::sync::oneshot::Sender<bool>>,
 }
 
 impl QuitState {
+    fn begin(
+        &mut self,
+        pending: HashSet<String>,
+        update_saved: Option<tokio::sync::oneshot::Sender<bool>>,
+    ) -> u64 {
+        self.attempt += 1;
+        self.pending = pending;
+        self.updating = update_saved.is_some();
+        self.update_saved = update_saved;
+        self.approved = false;
+        if self.pending.is_empty() {
+            self.finish();
+        }
+        self.attempt
+    }
+
+    fn finish(&mut self) {
+        self.approved = !self.updating;
+        if let Some(saved) = self.update_saved.take() {
+            let _ = saved.send(true);
+        }
+    }
+
+    fn cancel(&mut self, attempt: u64) -> bool {
+        if self.attempt != attempt {
+            return false;
+        }
+        self.pending.clear();
+        self.approved = false;
+        self.updating = false;
+        if let Some(saved) = self.update_saved.take() {
+            let _ = saved.send(false);
+        }
+        true
+    }
+
     fn acknowledge(&mut self, label: &str, success: bool, attempt: u64) -> bool {
         if self.attempt != attempt || !self.pending.remove(label) {
             return false;
         }
         if !success {
-            self.pending.clear();
+            self.cancel(attempt);
             return false;
         }
-        self.approved = self.pending.is_empty();
+        if self.pending.is_empty() {
+            self.finish();
+        }
         self.approved
     }
 }
@@ -156,10 +198,14 @@ fn note_id(note: &Value) -> Result<String, String> {
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let updates =
+        tauri::menu::MenuItem::with_id(app, "check_updates", "检查更新", true, None::<&str>)?;
+    app.manage(updater::UpdateMenu(updates.clone()));
     let menu = MenuBuilder::new(app)
         .text("show", "显示/隐藏全部便签")
         .text("new_note", "新建便签")
         .text("settings", "设置")
+        .item(&updates)
         .separator()
         .text("quit", "退出")
         .build()?;
@@ -182,23 +228,39 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 ..
             } = event
             {
+                if tray
+                    .app_handle()
+                    .state::<QuitLock>()
+                    .0
+                    .lock()
+                    .unwrap()
+                    .updating
+                {
+                    return;
+                }
                 let _ = tray
                     .app_handle()
                     .emit("toggle-notes-visibility-requested", ());
             }
         })
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => {
-                let _ = app.emit("toggle-notes-visibility-requested", ());
+        .on_menu_event(|app, event| {
+            if app.state::<QuitLock>().0.lock().unwrap().updating {
+                return;
             }
-            "new_note" => {
-                let _ = app.emit("new-note-requested", ());
+            match event.id().as_ref() {
+                "show" => {
+                    let _ = app.emit("toggle-notes-visibility-requested", ());
+                }
+                "new_note" => {
+                    let _ = app.emit("new-note-requested", ());
+                }
+                "settings" => {
+                    let _ = app.emit("open-settings-requested", ());
+                }
+                "check_updates" => updater::check(app.clone(), true),
+                "quit" => app.exit(0),
+                _ => {}
             }
-            "settings" => {
-                let _ = app.emit("open-settings-requested", ());
-            }
-            "quit" => app.exit(0),
-            _ => {}
         })
         .build(app)?;
 
@@ -425,19 +487,63 @@ fn set_main_note_id(
     Ok(())
 }
 
+// Both quitting and installing wait for every editor to freeze and persist its draft.
+fn request_save(
+    app: &AppHandle,
+    saved: Option<tokio::sync::oneshot::Sender<bool>>,
+) -> Result<u64, String> {
+    let state = app.state::<QuitLock>();
+    let mut quit = state.0.lock().map_err(|_| "Cannot lock quit state")?;
+    if quit.approved || quit.updating || !quit.pending.is_empty() {
+        return Err("Another save or exit is in progress".into());
+    }
+    let labels = app
+        .webview_windows()
+        .keys()
+        .filter(|label| label.as_str() == "main" || label.starts_with("note-"))
+        .cloned()
+        .collect();
+    let attempt = quit.begin(labels, saved);
+    let exit = quit.approved;
+    let pending = !quit.pending.is_empty();
+    drop(quit);
+    if exit {
+        app.exit(0);
+    }
+    if pending && app.emit("save-before-quit", attempt).is_err() {
+        resume_after_update(app, attempt);
+        return Err("Cannot request editor saves".into());
+    }
+    Ok(attempt)
+}
+
+fn resume_after_update(app: &AppHandle, attempt: u64) {
+    if app.state::<QuitLock>().0.lock().unwrap().cancel(attempt) {
+        let _ = app.emit("quit-save-cancelled", attempt);
+    }
+}
+
+async fn prepare_update(app: &AppHandle) -> Result<u64, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let attempt = request_save(app, Some(tx))?;
+    match tokio::time::timeout(std::time::Duration::from_secs(15), rx).await {
+        Ok(Ok(true)) => Ok(attempt),
+        _ => {
+            resume_after_update(app, attempt);
+            Err("便签尚未全部保存，已取消更新。请重试或先导出便签".into())
+        }
+    }
+}
+
 #[tauri::command]
-fn pending_quit(
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, QuitLock>,
-) -> Result<Option<u64>, String> {
+fn pending_quit(state: tauri::State<'_, QuitLock>) -> Result<Option<u64>, String> {
     let quit = state
         .0
         .lock()
         .map_err(|_| "Cannot read quit state".to_string())?;
-    Ok(quit
-        .pending
-        .contains(window.label())
-        .then_some(quit.attempt))
+    // Late-created windows must also freeze before becoming editable, even if
+    // the original window snapshot has already finished saving.
+    Ok((quit.updating || quit.approved || !quit.pending.is_empty()).then_some(quit.attempt))
 }
 
 #[tauri::command]
@@ -561,6 +667,8 @@ pub fn run() {
         .manage(QuitLock(Mutex::new(QuitState::default())))
         .plugin(autostart.build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdateState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .on_window_event(|window, event| {
@@ -577,6 +685,7 @@ pub fn run() {
         })
         .setup(|app| {
             build_tray(app)?;
+            updater::start_background_checks(app.handle().clone());
 
             if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| {
@@ -621,33 +730,16 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::ExitRequested { api, .. } = event {
                 let state = app.state::<QuitLock>();
-                let mut quit = state.0.lock().expect("quit state poisoned");
+                let quit = state.0.lock().expect("quit state poisoned");
                 if quit.approved {
                     return;
                 }
                 api.prevent_exit();
-                if !quit.pending.is_empty() {
+                if quit.updating || !quit.pending.is_empty() {
                     return;
                 }
-                quit.attempt += 1;
-                let attempt = quit.attempt;
-                quit.pending = app
-                    .webview_windows()
-                    .keys()
-                    .filter(|label| label.as_str() == "main" || label.starts_with("note-"))
-                    .cloned()
-                    .collect();
-                if quit.pending.is_empty() {
-                    quit.approved = true;
-                    drop(quit);
-                    app.exit(0);
-                } else {
-                    drop(quit);
-                    if app.emit("save-before-quit", attempt).is_err() {
-                        state.0.lock().expect("quit state poisoned").pending.clear();
-                        let _ = app.emit("quit-save-failed", attempt);
-                    }
-                }
+                drop(quit);
+                let _ = request_save(app, None);
             }
         });
 }
@@ -663,6 +755,7 @@ mod tests {
             pending: HashSet::from(["main".into()]),
             approved: false,
             attempt: 2,
+            ..Default::default()
         };
         assert!(!quit.acknowledge("main", true, 1));
         assert_eq!(quit.pending.len(), 1);
@@ -675,6 +768,7 @@ mod tests {
             pending: HashSet::from(["main".into(), "note-b".into()]),
             approved: false,
             attempt: 1,
+            ..Default::default()
         };
         assert!(!quit.acknowledge("main", true, 1));
         assert!(!quit.acknowledge("main", true, 1));
@@ -688,11 +782,60 @@ mod tests {
             pending: HashSet::from(["main".into(), "note-b".into()]),
             approved: false,
             attempt: 1,
+            ..Default::default()
         };
         assert!(!quit.acknowledge("main", false, 1));
         assert!(!quit.acknowledge("note-b", true, 1));
         assert!(!quit.approved);
         assert!(quit.pending.is_empty());
+    }
+
+    #[test]
+    fn update_save_waits_for_all_windows_without_exiting() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let mut quit = QuitState::default();
+        let attempt = quit.begin(HashSet::from(["main".into(), "note-b".into()]), Some(tx));
+        assert!(!quit.acknowledge("main", true, attempt));
+        assert!(rx.try_recv().is_err());
+        assert!(!quit.acknowledge("note-b", true, attempt));
+        assert_eq!(rx.try_recv(), Ok(true));
+        assert!(!quit.approved);
+        assert!(quit.updating);
+    }
+
+    #[test]
+    fn failed_update_save_cancels_install_and_late_ack_is_ignored() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let mut quit = QuitState::default();
+        let attempt = quit.begin(HashSet::from(["main".into(), "note-b".into()]), Some(tx));
+        assert!(!quit.acknowledge("main", false, attempt));
+        assert_eq!(rx.try_recv(), Ok(false));
+        assert!(!quit.acknowledge("note-b", true, attempt));
+        assert!(!quit.approved);
+        assert!(!quit.updating);
+    }
+
+    #[test]
+    fn update_timeout_can_resume_editing_and_cannot_cancel_next_attempt() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let mut quit = QuitState::default();
+        let first = quit.begin(HashSet::from(["main".into()]), Some(tx));
+        assert!(quit.cancel(first));
+        assert_eq!(rx.try_recv(), Ok(false));
+        let second = quit.begin(HashSet::from(["main".into()]), None);
+        assert!(!quit.cancel(first));
+        assert!(!quit.acknowledge("main", true, first));
+        assert!(quit.acknowledge("main", true, second));
+    }
+
+    #[test]
+    fn update_without_note_windows_can_install_without_exit() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let mut quit = QuitState::default();
+        quit.begin(HashSet::new(), Some(tx));
+        assert_eq!(rx.try_recv(), Ok(true));
+        assert!(!quit.approved);
+        assert!(quit.updating);
     }
 
     #[test]
