@@ -80,6 +80,10 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: Verify macOS bundle signature
+        if: matrix.platform == 'macos-latest'
+        run: codesign --verify --deep --strict src-tauri/target/universal-apple-darwin/release/bundle/macos/PinNote.app
+
   publish:
     needs: build
     runs-on: ubuntu-latest

@@ -99,10 +99,9 @@ pnpm tauri build --bundles dmg --config '{"bundle":{"createUpdaterArtifacts":fal
 pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
 ```
 
-构建产物位于 `src-tauri/target/release/bundle/`。本机 macOS 开发包必要时可做临时签名：
+构建产物位于 `src-tauri/target/release/bundle/`。macOS 构建默认使用 ad-hoc 签名（仍未 Apple 公证），可检查签名完整性：
 
 ```sh
-codesign --force --deep --sign - src-tauri/target/release/bundle/macos/PinNote.app
 codesign --verify --deep --strict src-tauri/target/release/bundle/macos/PinNote.app
 ```
 
