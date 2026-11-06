@@ -12,7 +12,7 @@ export async function showPreview(note: PinNote) {
   let win = await WebviewWindow.getByLabel(label);
   if (!win) {
     win = new WebviewWindow(label, { url:`/preview?noteId=${encodeURIComponent(note.id)}`, title:'便签预览', width:320, height:240,
-      decorations:false, resizable:false, alwaysOnTop:true, skipTaskbar:true, focus:false, visible:false });
+      decorations:false, resizable:false, alwaysOnTop:true, skipTaskbar:true, focus:false, focusable:false, visible:false });
     await new Promise<void>((resolve,reject) => { win!.once('tauri://created', () => resolve()); win!.once('tauri://error', e => reject(e.payload)); });
   }
   await win.setPosition(isMacPlatform() ? new LogicalPosition(target.x,target.y) : new PhysicalPosition(target.x,target.y));

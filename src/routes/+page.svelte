@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuitGuard } from "$lib/quitGuard";
   import { noteOperation, hasPendingSave, discardPendingSave } from '$lib/notesStore';
-  import { edgeTarget, edgeLayout } from '$lib/edgeQueue';
+  import { edgeTarget, edgeLayout, edgeOrder } from '$lib/edgeQueue';
   import { showPreview } from '$lib/previewWindow';
   import { openCenter } from '$lib/centerWindow';
   import ReminderDialog from '../components/ReminderDialog.svelte';
@@ -53,6 +53,9 @@
   let layingOut = false;
   let edgeHint = $state('');
   let previewTimer: ReturnType<typeof setTimeout>;
+  let hovering = false;
+  let edgeOverflow = $state(0);
+  let overflowHidden = false;
   let undoId = $state('');
   let geometryRevision = 0;
   let note = $state<PinNote>(createNote());
@@ -102,6 +105,7 @@
       // Complete the initial reveal before accepting tray requests or edits.
       if (!isMainWindow || !(await invoke<boolean>("startup_hidden"))) await win.show();
       ready = true;
+      await layoutEdges();
     });
     void initialization.catch(async (error) => {
       status = `加载失败，原数据已保留：${String(error)}`;
@@ -176,18 +180,27 @@
       if (payload.id === note.id && ready && payload.op !== 'focus') {
         editor?.flush();
         if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
-          discardPendingSave(note.id); ready = false; await win.hide();
+          if(hasPendingSave(note.id)) { status='便签状态已变化，本地草稿已保留，请先导出';return; }
+          discardPendingSave(note.id); ready = false; isDeleting = true; await win.destroy();
         } else if (!hasPendingSave(note.id) && payload.note.revision > note.revision) {
           const contentChanged = note.content !== payload.note.content;
           note = payload.note; if (contentChanged) editorRevision++;
         }
       }
       if(notesOpen) await refreshNoteList();
-      await layoutEdges();
+      if(payload.op !== 'focus') await layoutEdges();
     });
     const expand = listen<{id:string}>('expand-note-requested', ({payload}) => {
       if(payload.id === note.id && note.window.collapsed) { toggleCollapsed(); void win.setFocus(); }
     });
+    let displaySignature = '';
+    const monitorTimer=setInterval(()=>void (async()=>{
+      if(!ready||dragging||transitioning||layingOut)return;
+      const monitors=await availableMonitors();const signature=JSON.stringify(monitors);
+      if(signature===displaySignature)return;displaySignature=signature;
+      if(note.window.edge)await layoutEdges();
+      else if(await win.isVisible())await showCurrentNote();
+    })().catch(()=>{status='显示器位置恢复失败，请重新显示便签';}),5000);
 
     async function prepareToQuit(attempt: number) {
       if (!quitGuard.begin(attempt)) return;
@@ -224,6 +237,7 @@
     return () => {
       clearTimeout(windowStateTimer);
       clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f());
+      clearInterval(monitorTimer);
       if (isMainWindow) void unregisterGlobalShortcuts();
       quitPromise.then((fn) => fn());
       quitFailedPromise.then((fn) => fn());
@@ -284,6 +298,7 @@
       window: {
         ...seed.window,
         collapsed: false,
+        edge: null,
         capsulePosition: undefined,
         position: seed.window.position ? { x: seed.window.position.x + (seed.window.positionSpace === "logical" ? 24 : 48), y: seed.window.position.y + (seed.window.positionSpace === "logical" ? 24 : 48) } : undefined,
         x: seed.window.x == null ? undefined : seed.window.x + 24,
@@ -333,6 +348,11 @@
       await captureWindowState();
     }
     assertCurrent();
+    if(note.window.collapsed && note.window.edge) {
+      const target=edgeLayout(Object.values((await loadNotes()).notes),normalizeDisplays(await availableMonitors(),isMacPlatform())).get(note.id);
+      if(target?.overflow){overflowHidden=true;return;}
+      if(target)await setWindowBounds(target.bounds,true);
+    }
     await getCurrentWindow().show();
   }
 
@@ -529,11 +549,13 @@
   }
 
   async function closeCurrentNote(expiresAt = Infinity) {
+    let frozen = false;
     try {
       if (isDeleting || !ready || document.body.inert) return false;
+      document.body.inert = true; frozen = true;
       await saveBeforeWindowAction();
       await markNoteClosed(note);
-      if (Date.now() >= expiresAt || isDeleting || document.body.inert) {
+      if (Date.now() >= expiresAt || isDeleting) {
         status = "窗口响应超时或状态已改变，便签未隐藏";
         return false;
       }
@@ -542,6 +564,8 @@
     } catch {
       status = "保存失败，便签未关闭，请重试或导出";
       return false;
+    } finally {
+      if(frozen) document.body.inert = false;
     }
   }
 
@@ -555,14 +579,21 @@
 
     try {
       dragging = true; hoverPreview(false);
+      const beforeDrag = structuredClone($state.snapshot(note.window));
       await getCurrentWindow().startDragging();
+      // Native startDragging can resolve before mouse-up (notably on macOS).
+      // Track the native button, not DOM pointerup which leaves this webview.
+      while(await invoke<boolean>('pointer_pressed')) await new Promise(resolve=>setTimeout(resolve,60));
       const bounds = await readWindowBounds();
-      const edge = edgeTarget(bounds, normalizeDisplays(await availableMonitors(), isMacPlatform()));
+      const displays=normalizeDisplays(await availableMonitors(), isMacPlatform());
+      const edge = edgeTarget(bounds, displays);
       if(edge) {
+        edge.order=edgeOrder(note.id,edge,bounds,Object.values((await loadNotes()).notes),displays);
         if(!note.window.collapsed) await changeWindowMode();
-        note.window = { ...note.window, edge };
-      } else { note.window = { ...note.window, edge: null }; }
+        note.window = { ...beforeDrag, collapsed:true, edge };
+      } else { note.window = { ...rememberBounds({...note.window,edge:null},bounds), edge: null }; }
       await saveNoteNow(note);
+      dragging = false;
       await layoutEdges();
     } catch {
       // Browser preview cannot drag a native window.
@@ -662,7 +693,10 @@
       current = await readWindowBounds();
       const saved = rememberBounds(previous, current);
       const collapsed = !previous.collapsed;
-      const target = switchBounds(current, saved, collapsed, normalizeDisplays(await availableMonitors(), isMacPlatform()));
+      const displays = normalizeDisplays(await availableMonitors(), isMacPlatform());
+      const target = !collapsed && previous.edge
+        ? restoreBounds({...saved,collapsed:false},current,displays)
+        : switchBounds(current, saved, collapsed, displays);
       // Persist the live editor before changing the window; a failed write keeps it open.
       note = { ...note, window: saved };
       await saveNoteNow(note);
@@ -671,10 +705,10 @@
       // owns both position and size, instead of separate visible IPC jumps.
       await tick();
       if (animate) await new Promise((resolve) => setTimeout(resolve, 100));
-      note = { ...note, window: { ...saved, collapsed } };
+      note = { ...note, window: { ...saved, collapsed, edge:collapsed?saved.edge:null } };
       await tick();
       await setWindowBounds(target, collapsed, animate);
-      note = { ...note, window: rememberBounds({ ...saved, collapsed }, target) };
+      note = { ...note, window: rememberBounds({ ...saved, collapsed, edge:collapsed?saved.edge:null }, target) };
       queueNoteSave();
       await flushNoteSave(note.id);
     } catch {
@@ -737,14 +771,15 @@
     try {
       const entries = edgeLayout(Object.values((await loadNotes()).notes), normalizeDisplays(await availableMonitors(), isMacPlatform()));
       const target = entries.get(note.id);
-      if(target?.overflow) await getCurrentWindow().hide();
-      else if(target) { await setWindowBounds(target.bounds,true); edgeHint = target.extra ? `${note.title} · +${target.extra}（所有便签）` : ''; }
+      if(target?.overflow) { overflowHidden=true; await getCurrentWindow().hide(); }
+      else if(target) { await setWindowBounds(target.bounds,true); edgeOverflow = target.extra; if(overflowHidden){overflowHidden=false;await getCurrentWindow().show();} }
     } finally { layingOut = false; }
   }
   function hoverPreview(inside: boolean) {
+    hovering = inside;
     clearTimeout(previewTimer);
     void emit('preview-hover',{id:note.id,inside});
-    if(inside && !dragging && note.window.collapsed) previewTimer = setTimeout(() => void showPreview(note), 450);
+    if(inside && !dragging && note.window.collapsed) previewTimer = setTimeout(() => void showPreview(note).then(()=>{if(!hovering)void emit('preview-hover',{id:note.id,inside:false});}), 450);
   }
   async function lifecycle(id:string, op:string) {
     try {
@@ -755,7 +790,7 @@
       await noteOperation(target,op);
       if(op === 'center' || op === 'archive' || op === 'trash') {
         await openCenter();
-        if(id === note.id) { isDeleting = true; await getCurrentWindow().destroy(); }
+        if(id === note.id) { isDeleting = true; await getCurrentWindow().destroy().catch(()=>{}); }
       }
       if(op === 'trash' || op === 'archive') undoId = id;
       await refreshNoteList();
@@ -775,6 +810,7 @@
   {transitioning}
   onToggleCollapsed={toggleCollapsed}
   {edgeHint}
+  {edgeOverflow}
   onHover={hoverPreview}
   onArchive={() => lifecycle(note.id,'archive')}
   onReturn={() => lifecycle(note.id,'center')}

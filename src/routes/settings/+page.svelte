@@ -1,5 +1,6 @@
 <script lang="ts">
   import { reveal } from "$lib/motion";
+  import IntegrationSettings from '../../components/IntegrationSettings.svelte';
   import { emit } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
   import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
@@ -43,7 +44,7 @@
   let note = $state<PinNote>(createNote());
   let noteId = $state<string | undefined>();
   let noteReady = $state(false);
-  let activeTab = $state<"appearance" | "behavior" | "shortcuts">("appearance");
+  let activeTab = $state<"appearance" | "behavior" | "shortcuts" | "integration">("appearance");
   let recordingFor = $state<string | null>(null);
   let shortcutError = $state("");
   let autoStartStatus = $state("");
@@ -219,6 +220,7 @@
 
 <div class="settings-window" transition:reveal>
   <nav class="tab-bar" aria-label="设置分类">
+    <button class:active={activeTab==='integration'} onclick={()=>activeTab='integration'}>集成</button>
     <button
       aria-pressed={activeTab === "appearance"}
       class:active={activeTab === "appearance"}
@@ -243,6 +245,7 @@
   </nav>
 
   <div class="tab-content">
+    {#if activeTab==='integration'}<IntegrationSettings/>{/if}
     {#if activeTab === "appearance"}
       <div class="section" transition:reveal>
         {#if !noteReady}

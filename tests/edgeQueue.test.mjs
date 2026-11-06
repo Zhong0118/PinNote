@@ -9,7 +9,7 @@ function load(file) {
     {exports,require:()=>load('windowGeometry')});
   return exports;
 }
-const {edgeTarget,edgeLayout} = load('edgeQueue');
+const {edgeTarget,edgeLayout,edgeOrder} = load('edgeQueue');
 const display = {scaleFactor:2,workArea:{position:{x:2000,y:40},size:{width:2400,height:200}}};
 const note = (id,order) => ({id,lifecycle:'active',placement:'desktop',window:{collapsed:true,edge:{display:'2000:40',side:'right',order}}});
 test('edge queue uses work area, DPI, stable ordering and overflow',()=>{
@@ -27,4 +27,10 @@ test('disconnected display queues recover and lifecycle filters exclude removed 
   const b=note('b',2); b.lifecycle='trash';
   const result=edgeLayout([a,b],[display]);
   assert.equal(result.size,1); assert.equal(result.get('a').bounds.y,40);
+});
+test('reordering uses neighbors rather than stale original drag coordinates',()=>{
+  const peers=[note('a',1000),note('b',2000)];
+  const edge={display:'2000:40',side:'right',order:0};
+  const bounds={x:4040,y:136,width:180,height:40,scaleFactor:2};
+  assert.equal(edgeOrder('c',edge,bounds,peers,[display]),1500);
 });

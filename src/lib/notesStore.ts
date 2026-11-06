@@ -54,6 +54,7 @@ const revisions = new Map<string, number>();
 export function hasPendingSave(id: string) { return pendingNotes.has(id); }
 export function discardPendingSave(id: string) {
   clearTimeout(timers.get(id)); timers.delete(id); pendingNotes.delete(id);
+  void invoke('note_draft',{id,dirty:false}).catch(()=>{});
 }
 export async function noteOperation(note: PinNote, op: string, extra: Record<string, unknown> = {}) {
   const result = await invoke<PinNote | null>("note_operation", { request: {
@@ -124,6 +125,7 @@ export function createNote(seed: Partial<PinNote> = {}): PinNote {
 }
 
 export function scheduleNoteSave(note: PinNote, onResult?: (error?: unknown) => void) {
+  if(!pendingNotes.has(note.id)) void invoke('note_draft',{id:note.id,dirty:true}).catch(()=>{});
   pendingNotes.set(note.id, { ...note, window: { ...note.window } });
   clearTimeout(timers.get(note.id));
   timers.set(
@@ -150,7 +152,9 @@ export async function flushNoteSave(id?: string) {
   if (notes.length === 0) return pendingSave;
 
   pendingSave = pendingSave.catch(() => undefined).then(async () => {
-    for (const note of notes) {
+    for (const snapshot of notes) {
+      const note = pendingNotes.get(snapshot.id);
+      if (!note) continue;
       const next = { ...note, updatedAt: Date.now() };
       const revision = Math.max(revisions.get(note.id) ?? 0, note.revision);
       const result = await invoke<PinNote>("note_operation", { request: {
@@ -159,7 +163,7 @@ export async function flushNoteSave(id?: string) {
       } });
       if (result) revisions.set(note.id, result.revision);
       // A newer draft may have arrived while the native write was in flight.
-      if (pendingNotes.get(note.id) === note) pendingNotes.delete(note.id);
+      if (pendingNotes.get(note.id) === note) { pendingNotes.delete(note.id); await invoke('note_draft',{id:note.id,dirty:false}); }
     }
   });
 

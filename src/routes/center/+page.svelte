@@ -45,7 +45,7 @@
   }
   async function persist() {
     editor?.flush();
-    if(draft && editable) { const pos=editor?.capture(); if(pos) positions.set(draft.id,pos); await flushNoteSave(draft.id); }
+    if(draft && editable) { const pos=editor?.capture(); if(pos) positions.set(draft.id,pos); await flushNoteSave(draft.id); await refresh(); }
   }
   async function select(id:string) {
     await persist(); await refresh();
@@ -62,11 +62,16 @@
   async function create() {
     await persist(); const note=createNote({title:'未命名便签',content:'',placement:'center'});
     await saveNoteNow(note); await select(note.id);
+    await getCurrentWindow().show(); await getCurrentWindow().setFocus();
   }
   async function closeTab(id:string) {
     if(id===selected) await persist();
     tabs=tabs.filter(t=>t!==id);
-    if(id===selected) { selected=''; draft=undefined; if(tabs.length) await select(tabs.at(-1)!); }
+    if(id===selected) {
+      if(tabs.length) await select(tabs.at(-1)!);
+      else { editor=undefined; selected=''; draft=undefined; }
+    }
+    status='已保存 · 已关闭 Tab';
   }
   async function desktop() {
     if(!draft) return;
@@ -79,7 +84,7 @@
     if(win) await requestWindowVisibility(win.label,false);
     const note=(await loadNotes()).notes[id];
     await noteOperation(note,'center');
-    if(win) await win.destroy();
+    if(win) await win.destroy().catch(()=>{});
     await select(id); status='已收回中心 · 编辑历史从此处重新开始';
   }
   async function operation(op:string) {
@@ -88,7 +93,7 @@
     await persist(); const id=draft.id;
     const win=await findNoteWindow(id); if(win) await requestWindowVisibility(win.label,false);
     const note=(await loadNotes()).notes[id]; await noteOperation(note,op);
-    if(win && ['archive','trash','restore','purge'].includes(op)) await win.destroy();
+    if(win && ['archive','trash','restore','purge'].includes(op)) await win.destroy().catch(()=>{});
     const file=await loadNotes();
     if(op==='trash'||op==='archive') { const h=file.history?.filter(h=>h.note.id===id).at(-1); if(h) undo={id,at:h.at}; }
     await refresh();
@@ -124,6 +129,7 @@
     })().catch(e=>{status=String(e); void getCurrentWindow().show();});
     const changes=listen<{id:string;op:string;note:PinNote|null}>('notes-changed',async({payload})=>{
       editor?.flush(); await refresh();
+      if(payload.op==='trash'||payload.op==='archive') {const h=(await loadNotes()).history?.filter(h=>h.note.id===payload.id).at(-1);if(h)undo={id:payload.id,at:h.at};}
       if(draft?.id===payload.id && !hasPendingSave(payload.id) && payload.note && payload.note.revision>draft.revision) {
         const changed=draft.content!==payload.note.content || draft.placement!==payload.note.placement || draft.lifecycle!==payload.note.lifecycle;
         draft=structuredClone(payload.note); if(changed) revision++;
@@ -132,6 +138,7 @@
     const reminder=listen<{note:PinNote;error?:string}>('reminder-due',async({payload})=>{await refresh();status=payload.error?`通知发送失败：${payload.error}`:`提醒：${payload.note.title}`;});
     const reminderError=listen<string>('reminder-error',e=>{status=`提醒调度失败：${e.payload}`;});
     const newNote=listen('new-note-requested',()=>void run(create));
+    const agentOpen=listen<{id:string}>('agent-open-note',e=>void run(async()=>{await persist();const n=(await loadNotes()).notes[e.payload.id];await openNoteWindow(n);if(draft?.id===n.id)await select(n.id);}));
     const toggle=listen('toggle-notes-visibility-requested',toggleDesktop);
     const settings=listen('open-settings-requested',()=>void openSettingsWindow());
     const settingsChanged=listen('settings-changed',async()=>{const s=await loadSettings(); await registerGlobalShortcuts(s.shortcuts,{toggleWindow:toggleDesktop,newNote:()=>void run(create)});});
@@ -146,7 +153,7 @@
     void quit.then(async()=>{const attempt=await invoke<number|null>('pending_quit');if(attempt!=null)void saveForQuit(attempt);});
     const cancelled=listen<number>('quit-save-cancelled',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
     const failed=listen<number>('quit-save-failed',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
-    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed,reminder,reminderError].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();};
+    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed,reminder,reminderError,agentOpen].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();};
   });
 </script>
 
@@ -166,7 +173,7 @@
       <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={14}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={14}/>回收站</button><button aria-label="设置" onclick={()=>openSettingsWindow()}><Settings size={15}/></button></footer>
     </aside>
   {/if}
-  <section class="work">
+  <section class="work" inert={busy}>
     <header class="tabs"><button aria-label="折叠列表" title="折叠列表" onclick={()=>sidebar=!sidebar}><PanelLeft size={17}/></button>
       <div class="tab-strip">
         {#each tabs as id(id)}
@@ -183,7 +190,7 @@
         <input aria-label="便签标题" value={draft.title} readonly={!editable} oninput={e=>update({title:e.currentTarget.value})}/>
         {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{new Date(draft.reminder.at).toLocaleString()}</button>{/if}
         {#if draft.lifecycle==='active'}
-          <button class="desktop" disabled={busy} onclick={()=>run(desktop)} ondragover={e=>e.preventDefault()} ondrop={()=>run(desktop)}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
+          <button class="desktop" disabled={busy} onclick={()=>run(desktop)} ondragover={e=>e.preventDefault()} ondrop={e=>{e.preventDefault();const id=e.dataTransfer?.getData('text/pinnote');void run(async()=>{if(id)await select(id);await desktop();});}}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
         {/if}
         <button class="more" aria-label="更多操作" onclick={()=>menu=!menu}><MoreHorizontal size={18}/></button>
         {#if menu}<div class="menu" use:popup={()=>menu=false} transition:reveal role="dialog" tabindex="-1">

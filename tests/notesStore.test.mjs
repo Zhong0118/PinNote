@@ -22,7 +22,7 @@ function loadStore(invoke) {
       setTimeout: (fn) => { timers.set(++timerId, fn); return timerId; },
       clearTimeout: (id) => timers.delete(id),
       require: (name) => {
-        if (name === '@tauri-apps/api/core') return { invoke };
+        if (name === '@tauri-apps/api/core') return { invoke: (cmd,args) => cmd === 'note_draft' ? Promise.resolve() : invoke(cmd,args) };
         if (name === '$app/environment') return { browser: false };
         if (name.startsWith('.')) return load(resolve(dirname(path), `${name}.ts`));
         throw new Error(`Unexpected import: ${name}`);

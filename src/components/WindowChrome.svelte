@@ -30,6 +30,7 @@
     onReturn?: () => void;
     onHover?: (inside: boolean) => void;
     edgeHint?: string;
+    edgeOverflow?: number;
     onReminder?: () => void;
     onClearCompleted?: () => void;
     onStartDrag: (event: PointerEvent) => void;
@@ -38,7 +39,7 @@
   };
   let { disabled = false, collapsed = false, transitioning = false, title, status, sourceMode, settings,
     onTitleChange, onTogglePin, onToggleSource, onOpenNotes, onOpenTemplates, onExport, onOpenSettings,
-    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, onReminder, onClearCompleted, edgeHint = '', onStartDrag, onStartResize, children }: Props = $props();
+    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, onReminder, onClearCompleted, edgeHint = '', edgeOverflow = 0, onStartDrag, onStartResize, children }: Props = $props();
   let visibleStatus = $state(false);
   const statusIsError = $derived(/失败|错误|无法|不能/.test(status));
   $effect(() => {
@@ -66,7 +67,7 @@
   let origin: { x: number; y: number; event: PointerEvent } | null = null;
   let dragged = false;
   function capsuleDown(event: PointerEvent) {
-    if (event.button !== 0 || transitioning) return;
+    if (event.button !== 0 || transitioning || (event.target instanceof Element && event.target.closest('button'))) return;
     origin = { x: event.clientX, y: event.clientY, event };
     dragged = false;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -105,6 +106,7 @@
         onkeydown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!transitioning) onToggleCollapsed(); } }}
         >
         <span>{edgeHint || title || "未命名便签"}</span>
+        {#if edgeOverflow}<button class="overflow" title="查看溢出的桌面便签" onclick={e=>{e.stopPropagation();onOpenNotes();}}>+{edgeOverflow}</button>{/if}
         {#if statusIsError}
           <CircleAlert class="capsule-error-icon" size={14} strokeWidth={1.8} aria-hidden="true" />
         {:else}
@@ -176,6 +178,7 @@
   .capsule:active { cursor: grabbing; }
   .capsule span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
   .capsule :global(svg) { flex: 0 0 auto; color: var(--pin-muted); }
+  .overflow{border:0;border-radius:8px;background:#eff6ff;color:#2563eb;padding:2px 6px;cursor:pointer}
   .capsule :global(.capsule-error-icon) { color: #dc2626; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .resize-zone { position: absolute; z-index: 90; background: transparent; touch-action: none; }

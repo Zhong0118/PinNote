@@ -21,7 +21,7 @@ export function normalizeDisplays(displays: Display[], isMac: boolean): Display[
   } }));
 }
 
-function displayFor(bounds: Bounds, displays: Display[]): Display | undefined {
+export function displayFor(bounds: Bounds, displays: Display[]): Display | undefined {
   const right = bounds.x + bounds.width * bounds.scaleFactor;
   const bottom = bounds.y + bounds.height * bounds.scaleFactor;
   const center = { x: (bounds.x + right) / 2, y: (bounds.y + bottom) / 2 };

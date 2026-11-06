@@ -1,6 +1,7 @@
-mod updater;
+mod integration;
 mod notes;
 mod reminders;
+mod updater;
 
 use std::collections::HashSet;
 use std::fs;
@@ -85,6 +86,13 @@ impl QuitState {
 struct QuitLock(Mutex<QuitState>);
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    // Debug-only isolated acceptance runs never touch the user's real library.
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("PINNOTE_TEST_DATA_DIR") {
+        let dir = PathBuf::from(path);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        return Ok(dir);
+    }
     let dir = app
         .path()
         .app_data_dir()
@@ -131,24 +139,6 @@ fn read_optional(path: PathBuf) -> Result<Option<String>, String> {
         .map_err(|e| format!("Cannot read file: {e}"))
 }
 
-fn load_notes_value(app: &AppHandle) -> Result<Value, String> {
-    let path = data_file(app, "notes.json")?;
-    let Some(raw) = read_optional(path)? else {
-        return Ok(serde_json::json!({
-            "version": 1,
-            "lastActiveNoteId": "",
-            "lastClosedNoteId": "",
-            "notes": {}
-        }));
-    };
-
-    serde_json::from_str(&raw).map_err(|e| format!("Cannot parse notes file: {e}"))
-}
-
-fn save_notes_value(app: &AppHandle, file: Value) -> Result<(), String> {
-    atomic_write(data_file(app, "notes.json")?, file.to_string())
-}
-
 fn load_templates_value(app: &AppHandle) -> Result<Value, String> {
     let path = data_file(app, "templates.json")?;
     let Some(raw) = read_optional(path)? else {
@@ -165,30 +155,10 @@ fn save_templates_value(app: &AppHandle, file: Value) -> Result<(), String> {
     atomic_write(data_file(app, "templates.json")?, file.to_string())
 }
 
-fn ensure_notes_object(file: &mut Value) {
-    file["version"] = Value::from(1);
-    if !file.get("notes").is_some_and(Value::is_object) {
-        file["notes"] = serde_json::json!({});
-    }
-}
-
 fn ensure_templates_object(file: &mut Value) {
     file["version"] = Value::from(1);
     if !file.get("templates").is_some_and(Value::is_object) {
         file["templates"] = serde_json::json!({});
-    }
-}
-
-fn merge_json(target: &mut Value, patch: &Value) {
-    match (target, patch) {
-        (Value::Object(target), Value::Object(patch)) => {
-            for (key, value) in patch {
-                merge_json(target.entry(key.clone()).or_insert(Value::Null), value);
-            }
-        }
-        (target, patch) => {
-            *target = patch.clone();
-        }
     }
 }
 
@@ -204,6 +174,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         tauri::menu::MenuItem::with_id(app, "check_updates", "检查更新", true, None::<&str>)?;
     app.manage(updater::UpdateMenu(updates.clone()));
     let menu = MenuBuilder::new(app)
+        .text("center", "便签中心")
         .text("show", "显示/隐藏全部便签")
         .text("new_note", "新建便签")
         .text("settings", "设置")
@@ -250,6 +221,12 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 return;
             }
             match event.id().as_ref() {
+                "center" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
                 "show" => {
                     let _ = app.emit("toggle-notes-visibility-requested", ());
                 }
@@ -299,7 +276,9 @@ fn save_notes(
         .0
         .lock()
         .map_err(|_| "Cannot lock notes file".to_string())?;
-    if data_file(&app,"notes.json")?.exists() { return Err("整库覆盖已禁用，请使用便签操作服务".into()); }
+    if data_file(&app, "notes.json")?.exists() {
+        return Err("整库覆盖已禁用，请使用便签操作服务".into());
+    }
     let mut file: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
     notes::normalize(&mut file)?;
     atomic_write(data_file(&app, "notes.json")?, file.to_string())
@@ -309,7 +288,9 @@ fn save_notes(
 fn load_notes(app: AppHandle) -> Result<Option<String>, String> {
     let state = app.state::<NotesFileLock>();
     let _guard = state.0.lock().map_err(|_| "Cannot lock notes")?;
-    if !data_file(&app, "notes.json")?.exists() { return Ok(None); }
+    if !data_file(&app, "notes.json")?.exists() {
+        return Ok(None);
+    }
     Ok(Some(notes::load(&app)?.to_string()))
 }
 
@@ -359,99 +340,6 @@ fn delete_template(
         templates.remove(&id);
     }
     save_templates_value(&app, file)
-}
-
-#[tauri::command]
-fn upsert_note(
-    app: AppHandle,
-    lock: tauri::State<'_, NotesFileLock>,
-    json: String,
-    set_active: bool,
-    set_closed: bool,
-) -> Result<String, String> {
-    let _guard = lock
-        .0
-        .lock()
-        .map_err(|_| "Cannot lock notes file".to_string())?;
-    let note: Value = serde_json::from_str(&json).map_err(|e| format!("Cannot parse note: {e}"))?;
-    let id = note_id(&note)?;
-    let mut file = load_notes_value(&app)?;
-    ensure_notes_object(&mut file);
-    file["notes"][&id] = note.clone();
-    if set_active {
-        file["lastActiveNoteId"] = Value::from(id.clone());
-    }
-    if set_closed {
-        file["lastClosedNoteId"] = Value::from(id.clone());
-    }
-    save_notes_value(&app, file)?;
-    Ok(note.to_string())
-}
-
-#[tauri::command]
-fn patch_note(
-    app: AppHandle,
-    lock: tauri::State<'_, NotesFileLock>,
-    id: String,
-    json: String,
-    set_active: bool,
-    set_closed: bool,
-) -> Result<String, String> {
-    let _guard = lock
-        .0
-        .lock()
-        .map_err(|_| "Cannot lock notes file".to_string())?;
-    let patch: Value =
-        serde_json::from_str(&json).map_err(|e| format!("Cannot parse note patch: {e}"))?;
-    let mut file = load_notes_value(&app)?;
-    ensure_notes_object(&mut file);
-    if file["notes"].get(&id).is_none() {
-        return Err("Note no longer exists".to_string());
-    }
-    let target = &mut file["notes"][&id];
-    merge_json(target, &patch);
-    target["id"] = Value::from(id.clone());
-    if set_active {
-        file["lastActiveNoteId"] = Value::from(id.clone());
-    }
-    if set_closed {
-        file["lastClosedNoteId"] = Value::from(id.clone());
-    }
-    let note = file["notes"][&id].clone();
-    save_notes_value(&app, file)?;
-    Ok(note.to_string())
-}
-
-#[tauri::command]
-fn delete_note(
-    app: AppHandle,
-    lock: tauri::State<'_, NotesFileLock>,
-    id: String,
-) -> Result<(), String> {
-    let _guard = lock
-        .0
-        .lock()
-        .map_err(|_| "Cannot lock notes file".to_string())?;
-    let mut file = load_notes_value(&app)?;
-    ensure_notes_object(&mut file);
-
-    if let Some(notes) = file["notes"].as_object_mut() {
-        notes.remove(&id);
-    }
-
-    let fallback_id = file["notes"]
-        .as_object()
-        .and_then(|notes| notes.keys().next().cloned())
-        .unwrap_or_default();
-
-    if file["lastActiveNoteId"].as_str() == Some(id.as_str()) {
-        file["lastActiveNoteId"] = Value::from(fallback_id.clone());
-    }
-    if file["lastClosedNoteId"].as_str() == Some(id.as_str()) {
-        file["lastClosedNoteId"] = Value::from(fallback_id);
-    }
-
-    save_notes_value(&app, file)
 }
 
 #[tauri::command]
@@ -651,6 +539,27 @@ fn startup_hidden() -> bool {
 }
 
 #[tauri::command]
+fn pointer_pressed() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        objc2_app_kit::NSEvent::pressedMouseButtons() & 1 != 0
+    }
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetAsyncKeyState(key: i32) -> i16;
+        }
+        // SAFETY: Win32 query with the documented VK_LBUTTON value, no pointers.
+        unsafe { GetAsyncKeyState(1) < 0 }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
 }
@@ -670,6 +579,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(NotesFileLock(Mutex::new(())))
+        .manage(notes::Drafts::default())
         .manage(TemplatesFileLock(Mutex::new(())))
         .manage(MainNoteId(Mutex::new(None)))
         .manage(QuitLock(Mutex::new(QuitState::default())))
@@ -681,6 +591,9 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::Destroyed) {
+                if let Ok(mut drafts) = window.state::<notes::Drafts>().0.lock() {
+                    drafts.retain(|_, label| label != window.label());
+                }
                 let state = window.state::<QuitLock>();
                 let mut quit = state.0.lock().expect("quit state poisoned");
                 let attempt = quit.attempt;
@@ -698,6 +611,7 @@ pub fn run() {
             )?));
             build_tray(app)?;
             reminders::start(app.handle().clone());
+            integration::start(app.handle().clone())?;
             updater::start_background_checks(app.handle().clone());
 
             if let Some(window) = app.get_webview_window("main") {
@@ -722,13 +636,13 @@ pub fn run() {
             save_notes,
             load_notes,
             notes::note_operation,
+            notes::note_draft,
             reminders::reminder_permission,
+            integration::integration_status,
+            integration::integration_configure,
             load_templates,
             upsert_template,
             delete_template,
-            upsert_note,
-            patch_note,
-            delete_note,
             save_settings,
             load_settings,
             write_markdown_file,
@@ -738,6 +652,7 @@ pub fn run() {
             quit_save_complete,
             pending_quit,
             startup_hidden,
+            pointer_pressed,
             animate_note_window
         ])
         .build(tauri::generate_context!())

@@ -1,0 +1,35 @@
+// Test-only IPC boundary for browser verification; native tests run separately.
+(()=>{
+ const callbacks=new Map(),listeners=new Map();let serial=0;
+ const state=window.__test={notes:{a:{id:'a',title:'阅读与记录',content:'# 今天\n\n- [ ] 阅读源码\n- [x] 整理思路\n\n```js\nconst note = "保留代码";\n```',revision:1,lifecycle:'active',placement:'center',theme:'paper',opacity:1,alwaysOnTop:false,customColor:'#2563eb',window:{width:420,height:560},createdAt:1,updatedAt:1,lastFocusedAt:1}},history:[],calls:[],failWrites:false,
+ emit(event,payload){for(const [id,l]of listeners)if(l.event===event)callbacks.get(l.handler)?.({event,payload,id});}};
+ window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+ window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'main'},currentWebview:{label:'main',windowLabel:'main'}},transformCallback(fn){callbacks.set(++serial,fn);return serial;},unregisterCallback(id){callbacks.delete(id);},async invoke(cmd,args={}){
+  args=JSON.parse(JSON.stringify(args));
+  state.calls.push({cmd,args});
+  if(cmd==='load_notes')return JSON.stringify({version:2,notes:state.notes,history:state.history,lastActiveNoteId:'a',lastClosedNoteId:'a'});
+  if(cmd==='load_settings'||cmd==='pending_quit'||cmd==='main_note_id')return null;
+  if(cmd==='reminder_permission')return 'Granted';
+  if(cmd==='note_operation'){
+   if(state.failWrites)throw new Error('模拟磁盘写入失败');
+   const r=args.request;let n=state.notes[r.id];
+   if(r.op==='focus')return n;
+   if(r.op==='create')n={...r.note,revision:0};
+   else if(n.revision!==r.expectedRevision)throw new Error('VERSION_CONFLICT');
+   if(['trash','archive'].includes(r.op))state.history.push({at:Date.now(),op:r.op,note:structuredClone(n)});
+   if(r.op==='save')n={...n,...r.patch};
+   if(r.op==='trash'||r.op==='archive')n={...n,lifecycle:r.op==='trash'?'trash':'archived',placement:'center'};
+   if(r.op==='restore')n={...n,lifecycle:'active',placement:'center'};
+   if(r.op==='undo')n={...state.history.find(h=>h.at===r.historyId).note,revision:n.revision,placement:'center'};
+   if(r.op==='reminder')n={...n,reminder:r.at?{at:r.at,state:'pending'}:null};
+   if(r.op==='desktop'||r.op==='center')n={...n,placement:r.op};
+   n.revision++;state.notes[r.id]=structuredClone(n);return structuredClone(n);
+  }
+  if(cmd==='plugin:event|listen'){listeners.set(++serial,args);return serial;}
+  if(cmd==='plugin:event|unlisten'){listeners.delete(args.eventId);return;}
+  if(cmd==='plugin:event|emit'){state.emit(args.event,args.payload);return;}
+  if(cmd==='plugin:window|get_all_windows')return ['main'];
+  if(cmd==='plugin:window|is_visible')return true;
+  return null;
+ }};
+})();

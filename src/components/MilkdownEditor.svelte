@@ -38,6 +38,15 @@
       if(tr.docChanged)view.dispatch(tr); // One transaction, native editor undo restores it.
     });
   }
+  function taskKey(event: KeyboardEvent) {
+    if(event.isComposing || !(event.metaKey||event.ctrlKey) || !event.shiftKey || event.key!=='Enter' || !editorInstance) return;
+    editorInstance.action((ctx:any)=>{
+      const view=ctx.get(editorViewCtxRef); const from=view.state.selection.$from;
+      for(let depth=from.depth;depth>0;depth--){const node=from.node(depth);
+        if(node.type.name==='list_item'&&node.attrs.checked!=null){event.preventDefault();view.dispatch(view.state.tr.setNodeMarkup(from.before(depth),undefined,{...node.attrs,checked:!node.attrs.checked}));return;}
+      }
+    });
+  }
 
   onMount(() => {
     void setup();
@@ -154,7 +163,7 @@
   <SourceEditor {value} {onChange} />
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
-  <div class="milkdown-host" bind:this={root} role="application" onclick={handleTaskClick}></div>
+   <div class="milkdown-host" bind:this={root} role="application" onclick={handleTaskClick} onkeydown={taskKey}></div>
 {/if}
 
 <style>
