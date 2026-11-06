@@ -3,8 +3,10 @@
   import { emit, listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { loadNotes, type PinNote } from '$lib/notesStore';
+  import { checklistProgress } from '$lib/checklist';
   let note = $state<PinNote>();
   let timer: ReturnType<typeof setTimeout>;
+  const progress=$derived(checklistProgress(note?.content??''));
   onMount(() => {
     const id = new URLSearchParams(location.search).get('noteId')!;
     const refresh = async () => { note = (await loadNotes()).notes[id]; };
@@ -21,6 +23,8 @@
 <main onpointerenter={enter} onpointerleave={leave}>
   <strong>{note?.title || '未命名便签'}</strong>
   <p>{note?.content.slice(0,700) || '空白便签'}</p>
+  {#if progress.total}<small>清单 {progress.done}/{progress.total}</small>{/if}
+  {#if note?.reminder}<small>{new Date(note.reminder.at).toLocaleString()}</small>{/if}
   <button onclick={open}>打开编辑</button>
 </main>
 <style>

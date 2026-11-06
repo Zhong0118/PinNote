@@ -29,6 +29,15 @@
     const selection=editorInstance.action((ctx:any)=>ctx.get(editorViewCtxRef).state.selection);
     return {from:selection.from,to:selection.to,scroll:root?.scrollTop??0};
   }
+  export function clearCompleted() {
+    if(!editorInstance || disposed) return;
+    editorInstance.action((ctx:any)=>{
+      const view=ctx.get(editorViewCtxRef); const ranges:Array<{from:number;to:number}>=[];
+      view.state.doc.descendants((node:any,pos:number)=>{if(node.type.name==='list_item'&&node.attrs.checked===true){ranges.push({from:pos,to:pos+node.nodeSize});return false;}});
+      let tr=view.state.tr; for(const range of ranges.reverse())tr=tr.delete(range.from,range.to);
+      if(tr.docChanged)view.dispatch(tr); // One transaction, native editor undo restores it.
+    });
+  }
 
   onMount(() => {
     void setup();

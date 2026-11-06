@@ -4,6 +4,9 @@
   import { edgeTarget, edgeLayout } from '$lib/edgeQueue';
   import { showPreview } from '$lib/previewWindow';
   import { openCenter } from '$lib/centerWindow';
+  import ReminderDialog from '../components/ReminderDialog.svelte';
+  import { checklistProgress } from '$lib/checklist';
+  let reminderOpen = $state(false);
   import { invoke } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow, PhysicalPosition, LogicalPosition, LogicalSize, availableMonitors, type Window } from "@tauri-apps/api/window";
@@ -53,6 +56,7 @@
   let undoId = $state('');
   let geometryRevision = 0;
   let note = $state<PinNote>(createNote());
+  const progress = $derived(checklistProgress(note.content));
   let sourceMode = $state(false);
   let globalSettings = $state<AppSettings>({ ...defaultSettings });
   let status = $state("正在加载…");
@@ -774,6 +778,8 @@
   onHover={hoverPreview}
   onArchive={() => lifecycle(note.id,'archive')}
   onReturn={() => lifecycle(note.id,'center')}
+  onReminder={() => reminderOpen=true}
+  onClearCompleted={!sourceMode && progress.done>0 ? () => editor?.clearCompleted() : undefined}
   onNewNote={createNewNoteWindow}
   title={note.title}
   {status}
@@ -796,6 +802,7 @@
   onStartResize={startResize}
 >
   {#if ready}
+    {#if note.reminder}<button class="reminder-tag" onclick={()=>reminderOpen=true}>{note.reminder.state==='delivered'?'已提醒 · ':''}{new Date(note.reminder.at).toLocaleString()}</button>{/if}
     {#key `${note.id}-${editorRevision}`}
       {#if sourceMode}
         <SourceEditor value={note.content} onChange={updateContent} />
@@ -805,6 +812,8 @@
     {/key}
   {/if}
 </WindowChrome>
+{#if reminderOpen}<ReminderDialog onClose={()=>reminderOpen=false} onSet={async at=>{await saveBeforeWindowAction();const current=(await loadNotes()).notes[note.id];await noteOperation(current,'reminder',{at});note=current;}}/>{/if}
+<style>.reminder-tag{border:0;border-radius:5px;background:#eff6ff;color:#2563eb;font-size:11px;padding:3px 8px;margin:6px 16px;cursor:pointer}</style>
 
 <NoteListPopover
   open={notesOpen}

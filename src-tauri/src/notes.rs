@@ -94,9 +94,19 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
         }
         "archive" | "trash" => {
             note["lifecycle"] = json!(if op == "archive" { "archived" } else { "trash" });
-            note["placement"] = json!("center"); note["window"]["edge"] = Value::Null; note["reminder"] = Value::Null;
+            note["placement"] = json!("center"); note["window"]["edge"] = Value::Null;
+            if op == "archive" && note["reminder"].is_object() { note["reminder"]["state"] = json!("paused"); }
+            else { note["reminder"] = Value::Null; }
         }
         "restore" => { note["lifecycle"] = json!("active"); note["placement"] = json!("center"); note["reminder"] = Value::Null; }
+        "reminder" => {
+            if before["lifecycle"] != "active" { return Err("请先恢复便签".into()); }
+            if request["at"].is_null() { note["reminder"] = Value::Null; }
+            else {
+                let at = request["at"].as_u64().filter(|at| *at > now()).ok_or("请选择未来的提醒时间")?;
+                note["reminder"] = json!({"at":at,"state":"pending"});
+            }
+        }
         "desktop" | "center" => {
             if before["lifecycle"] != "active" { return Err("请先恢复便签".into()); }
             note["placement"] = json!(op);

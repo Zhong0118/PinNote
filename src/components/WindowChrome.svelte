@@ -30,13 +30,15 @@
     onReturn?: () => void;
     onHover?: (inside: boolean) => void;
     edgeHint?: string;
+    onReminder?: () => void;
+    onClearCompleted?: () => void;
     onStartDrag: (event: PointerEvent) => void;
     onStartResize: (event: PointerEvent, direction: ResizeDirection) => void;
     children: import("svelte").Snippet;
   };
   let { disabled = false, collapsed = false, transitioning = false, title, status, sourceMode, settings,
     onTitleChange, onTogglePin, onToggleSource, onOpenNotes, onOpenTemplates, onExport, onOpenSettings,
-    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, edgeHint = '', onStartDrag, onStartResize, children }: Props = $props();
+    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, onReminder, onClearCompleted, edgeHint = '', onStartDrag, onStartResize, children }: Props = $props();
   let visibleStatus = $state(false);
   const statusIsError = $derived(/失败|错误|无法|不能/.test(status));
   $effect(() => {
@@ -122,7 +124,7 @@
         </button>
         {#if !collapsed}
           <Toolbar alwaysOnTop={settings.alwaysOnTop} {sourceMode} {onTogglePin} {onToggleSource} {onOpenNotes}
-            {onOpenTemplates} {onExport} {onOpenSettings} {onDelete} {onQuit} {onNewNote} {onArchive} {onReturn} />
+            {onOpenTemplates} {onExport} {onOpenSettings} {onDelete} {onQuit} {onNewNote} {onArchive} {onReturn} {onReminder} {onClearCompleted} />
         {/if}
       </div>
     </header>

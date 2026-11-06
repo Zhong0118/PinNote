@@ -1,5 +1,6 @@
 mod updater;
 mod notes;
+mod reminders;
 
 use std::collections::HashSet;
 use std::fs;
@@ -674,6 +675,7 @@ pub fn run() {
         .manage(QuitLock(Mutex::new(QuitState::default())))
         .plugin(autostart.build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -695,6 +697,7 @@ pub fn run() {
                 "update-history.json",
             )?));
             build_tray(app)?;
+            reminders::start(app.handle().clone());
             updater::start_background_checks(app.handle().clone());
 
             if let Some(window) = app.get_webview_window("main") {
@@ -719,6 +722,7 @@ pub fn run() {
             save_notes,
             load_notes,
             notes::note_operation,
+            reminders::reminder_permission,
             load_templates,
             upsert_template,
             delete_template,

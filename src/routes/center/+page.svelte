@@ -13,12 +13,17 @@
   import { openSettingsWindow } from '$lib/settingsWindow';
   import { reveal, popup } from '$lib/motion';
   import { createQuitGuard } from '$lib/quitGuard';
+  import ReminderDialog from '../../components/ReminderDialog.svelte';
+  import { checklistProgress } from '$lib/checklist';
+  let reminderOpen=$state(false);
+  let due=$state<PinNote[]>([]);
   const quitGuard = createQuitGuard();
 
   let notes = $state<PinNote[]>([]);
   let tabs = $state<string[]>([]);
   let selected = $state('');
   let draft = $state<PinNote>();
+  const progress=$derived(checklistProgress(draft?.content??''));
   let query = $state('');
   let filter = $state('active');
   let sidebar = $state(true);
@@ -33,7 +38,7 @@
   const visible = $derived(notes.filter(n => (filter === 'desktop' ? n.lifecycle === 'active' && n.placement === 'desktop' : n.lifecycle === filter) && `${n.title}\n${n.content}`.toLowerCase().includes(query.toLowerCase())));
   const editable = $derived(draft?.lifecycle === 'active' && draft.placement === 'center');
 
-  async function refresh() { notes = Object.values((await loadNotes()).notes).sort((a,b)=>b.updatedAt-a.updatedAt); }
+  async function refresh() { notes = Object.values((await loadNotes()).notes).sort((a,b)=>b.updatedAt-a.updatedAt); due=notes.filter(n=>n.lifecycle==='active'&&n.reminder?.state==='delivered'); }
   async function run(action:()=>Promise<void>) {
     if(busy) return; busy=true;
     try { await action(); } catch(e) { status=String(e); } finally { busy=false; }
@@ -124,6 +129,8 @@
         draft=structuredClone(payload.note); if(changed) revision++;
       }
     });
+    const reminder=listen<{note:PinNote;error?:string}>('reminder-due',async({payload})=>{await refresh();status=payload.error?`通知发送失败：${payload.error}`:`提醒：${payload.note.title}`;});
+    const reminderError=listen<string>('reminder-error',e=>{status=`提醒调度失败：${e.payload}`;});
     const newNote=listen('new-note-requested',()=>void run(create));
     const toggle=listen('toggle-notes-visibility-requested',toggleDesktop);
     const settings=listen('open-settings-requested',()=>void openSettingsWindow());
@@ -139,7 +146,7 @@
     void quit.then(async()=>{const attempt=await invoke<number|null>('pending_quit');if(attempt!=null)void saveForQuit(attempt);});
     const cancelled=listen<number>('quit-save-cancelled',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
     const failed=listen<number>('quit-save-failed',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
-    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();};
+    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed,reminder,reminderError].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();};
   });
 </script>
 
@@ -149,6 +156,7 @@
       <div class="search"><Search size={15}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={17}/></button></div>
       <nav><button class:active={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button class:active={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button></nav>
       <div class="list">
+        {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={12}/></button></div>{/each}
         {#each visible as note(note.id)}
           <button class="note-row" class:chosen={selected===note.id} onclick={()=>run(()=>select(note.id))} draggable="true" ondragstart={e=>e.dataTransfer?.setData('text/pinnote',note.id)}>
             <span>{note.title||'未命名便签'}{#if note.placement==='desktop'}<Monitor size={12}/>{/if}</span><small>{note.content.replace(/[#*`\[\]]/g,'').slice(0,100)||'空白便签'}</small>
@@ -173,12 +181,15 @@
     {#if draft}
       <div class="title-row">
         <input aria-label="便签标题" value={draft.title} readonly={!editable} oninput={e=>update({title:e.currentTarget.value})}/>
+        {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{new Date(draft.reminder.at).toLocaleString()}</button>{/if}
         {#if draft.lifecycle==='active'}
           <button class="desktop" disabled={busy} onclick={()=>run(desktop)} ondragover={e=>e.preventDefault()} ondrop={()=>run(desktop)}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
         {/if}
         <button class="more" aria-label="更多操作" onclick={()=>menu=!menu}><MoreHorizontal size={18}/></button>
         {#if menu}<div class="menu" use:popup={()=>menu=false} transition:reveal role="dialog" tabindex="-1">
           {#if draft.lifecycle==='active'}
+            <button onclick={()=>{menu=false;reminderOpen=true;}}>设置提醒</button>
+            {#if editable && progress.done}<button onclick={()=>{editor?.clearCompleted();menu=false;}}>移除已完成项（可撤销）</button>{/if}
             {#if draft.placement==='desktop'}<button onclick={()=>run(recall)}>收回中心</button>{/if}
             <button onclick={()=>run(()=>operation('archive'))}>归档</button><button onclick={()=>run(()=>operation('trash'))}>移到回收站</button>
           {:else}<button onclick={()=>run(()=>operation('restore'))}>恢复到中心</button>{#if draft.lifecycle==='trash'}<button class="danger" onclick={()=>run(()=>operation('purge'))}>永久删除</button>{/if}{/if}
@@ -192,16 +203,18 @@
         <div class="preview" transition:reveal>
           {#if draft.placement==='desktop'&&draft.lifecycle==='active'}<div class="notice">正在独立窗口编辑 <button onclick={()=>run(recall)}>收回中心</button></div>{/if}
           {#if draft.lifecycle!=='active'}<div class="notice">{draft.lifecycle==='trash'?'已在回收站':'已归档'} <button onclick={()=>run(()=>operation('restore'))}>恢复</button></div>{/if}
-          <pre>{draft.content||'空白便签'}</pre>
+          {#if progress.total}<small>清单 {progress.done}/{progress.total}</small>{/if}<pre>{draft.content||'空白便签'}</pre>
         </div>
       {/if}
     {:else}<div class="empty-work"><p>选择一张便签，开始书写</p><button onclick={()=>run(create)}><Plus size={15}/>新建便签</button></div>{/if}
     <div class="status" role="status">{status}{#if undo}<button onclick={()=>run(undoLast)}>撤销移除</button>{/if}</div>
   </section>
 </main>
+{#if reminderOpen&&draft}<ReminderDialog onClose={()=>reminderOpen=false} onSet={async at=>{await persist();const note=(await loadNotes()).notes[draft!.id];await noteOperation(note,'reminder',{at});draft=note;await refresh();}}/>{/if}
 
 <style>
  :global(*){box-sizing:border-box}:global(body){margin:0;font:13px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;color:#171717;background:#fff}
+ .time{font-size:11px;color:#2563eb;background:#eff6ff}.due{display:flex;flex-wrap:wrap;font-size:11px;background:#eff6ff;border-radius:6px;margin:4px}.due button{font-size:11px}
  main{--pin-text:#171717;--pin-heading:#111;--pin-muted:#737373;--pin-accent:#2563eb;--pin-accent-strong:#1d4ed8;--pin-border:#e5e7eb;--pin-bg:#fff;display:grid;grid-template-columns:230px minmax(0,1fr);height:100vh;overflow:hidden}main.folded{grid-template-columns:minmax(0,1fr)}
  aside{background:#fafafa;border-right:1px solid #ededee;display:flex;flex-direction:column;min-height:0}.search{display:flex;align-items:center;gap:8px;padding:14px 10px}.search input{min-width:0;width:100%;background:transparent}input{font:inherit;border:0;outline:0;color:inherit}input:focus{box-shadow:0 1px #2563eb}
  button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:6px;background:transparent;color:inherit;padding:6px 8px;font:inherit;cursor:pointer;transition:background 140ms,transform 140ms}button:hover{background:#eee}button:active{transform:scale(.97)}button:focus-visible{outline:2px solid #2563eb;outline-offset:-2px}button:disabled{opacity:.5;cursor:wait}.active,.chosen{color:#2563eb!important;background:#eff6ff!important}nav{display:flex;padding:0 8px 10px;gap:5px}nav button{font-size:12px;flex:1}.list{flex:1;overflow:auto;padding:0 7px}.note-row{display:block;width:100%;text-align:left;padding:10px;margin:2px 0}.note-row span{display:flex;align-items:center;justify-content:space-between;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.note-row small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#888;margin-top:3px;font-size:12px}footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:#737373}footer button:last-child{margin-left:auto}.work{display:grid;grid-template-rows:42px auto minmax(0,1fr) 30px;min-width:0;min-height:0}.tabs{display:flex;gap:5px;align-items:center;padding:5px 8px;border-bottom:1px solid #eee;min-width:0}.tab-strip{display:flex;min-width:0;overflow:hidden;flex:1;gap:4px}.tab{display:flex;min-width:110px;max-width:180px;border-radius:6px}.tab button:first-child{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.tab button:last-child{padding:5px}.tabs select{max-width:110px;border:0;background:#f5f5f5;border-radius:5px}.title-row{display:flex;align-items:center;gap:8px;padding:16px 20px;position:relative}.title-row input{flex:1;min-width:0;font-size:17px;font-weight:600}.desktop{font-size:12px;color:#2563eb}.more{border-radius:50%;background:#f5f5f5}.menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px #0001}.menu button{display:block;text-align:left;width:100%;font-size:12px}.danger{color:#dc2626}.preview{overflow:auto;padding:0 22px 22px}.preview pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.notice{color:#737373;font-size:12px;background:#fafafa;padding:8px;border-radius:6px}.notice button{color:#2563eb}.empty,.empty-work{color:#888;padding:16px}.empty-work{grid-row:2/4;display:flex;align-items:center;justify-content:center;flex-direction:column}.empty-work button{color:#2563eb}.status{grid-row:4;padding:4px 16px;color:#737373;font-size:11px;overflow:auto;border-top:1px solid #f5f5f5}.status button{font-size:11px;color:#2563eb;padding:0 8px}@media(max-width:700px){main{grid-template-columns:190px minmax(0,1fr)}.title-row{padding:12px}.desktop{font-size:11px}}@media(prefers-reduced-motion:reduce){button{transition:none}}

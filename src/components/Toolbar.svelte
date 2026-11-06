@@ -16,10 +16,12 @@
     onNewNote?: () => void;
     onArchive?: () => void;
     onReturn?: () => void;
+    onReminder?: () => void;
+    onClearCompleted?: () => void;
   };
 
   let { alwaysOnTop, sourceMode, onTogglePin, onToggleSource, onOpenNotes,
-    onOpenTemplates, onExport, onOpenSettings, onDelete, onQuit, onNewNote, onArchive, onReturn }: Props = $props();
+    onOpenTemplates, onExport, onOpenSettings, onDelete, onQuit, onNewNote, onArchive, onReturn, onReminder, onClearCompleted }: Props = $props();
   let open = $state(false);
   let trigger: HTMLButtonElement;
   const actions = $derived([
@@ -27,6 +29,8 @@
     { label: alwaysOnTop ? "取消置顶" : "置顶", icon: Pin, run: onTogglePin, active: alwaysOnTop },
     { label: "所有便签", icon: List, run: onOpenNotes },
     { label: "模板", icon: LayoutTemplate, run: onOpenTemplates },
+    ...(onReminder ? [{label:"设置提醒",icon:MoreHorizontal,run:onReminder}] : []),
+    ...(onClearCompleted ? [{label:"移除已完成项（可撤销）",icon:List,run:onClearCompleted}] : []),
     { label: sourceMode ? "返回编辑" : "Markdown 源码", icon: Code2, run: onToggleSource, active: sourceMode },
     { label: "导出 Markdown", icon: Download, run: onExport },
     { label: "设置", icon: Settings, run: onOpenSettings },
