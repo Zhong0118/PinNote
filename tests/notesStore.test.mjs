@@ -40,13 +40,13 @@ test('failed older save cannot replace a newer pending draft', async () => {
   const stored = [];
   let fail = true;
   const store = loadStore(async (command, args) => {
-    assert.equal(command, 'upsert_note');
+    assert.equal(command, 'note_operation');
     if (fail) {
       fail = false;
       started();
       await new Promise((_, reject) => { rejectWrite = reject; });
     }
-    stored.push(JSON.parse(args.json));
+    stored.push(args.request.note);
   });
   const note = store.createNote({ id: 'a', content: 'old' });
   const first = store.saveNoteNow(note);
@@ -70,7 +70,7 @@ test('a failed save followed by a queued successful save does not retry stale da
       started();
       await new Promise((_, reject) => { rejectWrite = reject; });
     }
-    stored.push(JSON.parse(args.json));
+    stored.push(args.request.note);
   });
   const first = store.saveNoteNow(store.createNote({ id: 'a', content: 'old' }));
   await writing;
@@ -84,7 +84,7 @@ test('a failed save followed by a queued successful save does not retry stale da
 
 test('queued save takes a snapshot of the draft', async () => {
   let saved;
-  const store = loadStore(async (_command, args) => { saved = JSON.parse(args.json); });
+  const store = loadStore(async (_command, args) => { saved = args.request.note; });
   const note = store.createNote({ id: 'a', content: 'original' });
   store.scheduleNoteSave(note);
   const saving = store.flushNoteSave('a');

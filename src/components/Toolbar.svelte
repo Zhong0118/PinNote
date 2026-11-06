@@ -14,10 +14,12 @@
     onDelete: () => void;
     onQuit: () => void;
     onNewNote?: () => void;
+    onArchive?: () => void;
+    onReturn?: () => void;
   };
 
   let { alwaysOnTop, sourceMode, onTogglePin, onToggleSource, onOpenNotes,
-    onOpenTemplates, onExport, onOpenSettings, onDelete, onQuit, onNewNote }: Props = $props();
+    onOpenTemplates, onExport, onOpenSettings, onDelete, onQuit, onNewNote, onArchive, onReturn }: Props = $props();
   let open = $state(false);
   let trigger: HTMLButtonElement;
   const actions = $derived([
@@ -29,6 +31,8 @@
     { label: "导出 Markdown", icon: Download, run: onExport },
     { label: "设置", icon: Settings, run: onOpenSettings },
     { label: "隐藏便签", icon: EyeOff, run: onQuit },
+    ...(onReturn ? [{label:"收回中心", icon:List, run:onReturn}] : []),
+    ...(onArchive ? [{label:"归档", icon:List, run:onArchive}] : []),
     { label: "删除便签", icon: Trash2, run: onDelete, danger: true },
   ]);
 

@@ -3,6 +3,7 @@ import { defaultContent, defaultTitle } from "./defaultNote";
 import { defaultSettings, type NoteTheme } from "./settings";
 
 export type NoteWindowState = {
+  edge?: { side: "left" | "right"; display: string; order: number } | null;
   collapsed?: boolean;
   position?: { x: number; y: number };
   positionSpace?: "logical";
@@ -14,6 +15,10 @@ export type NoteWindowState = {
 };
 
 export type PinNote = {
+  revision: number;
+  lifecycle: "active" | "archived" | "trash";
+  placement: "center" | "desktop";
+  reminder?: { at: number; state: "pending" | "delivered" | "paused" } | null;
   id: string;
   title: string;
   content: string;
@@ -28,7 +33,8 @@ export type PinNote = {
 };
 
 export type NotesFile = {
-  version: 1;
+  version: 1 | 2;
+  history?: Array<{ at: number; op: string; source?: string; note: PinNote }>;
   lastActiveNoteId: string;
   lastClosedNoteId: string;
   notes: Record<string, PinNote>;
@@ -44,6 +50,18 @@ const defaultWindow = { width: 420, height: 560 };
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingNotes = new Map<string, PinNote>();
 let pendingSave: Promise<void> = Promise.resolve();
+const revisions = new Map<string, number>();
+export function hasPendingSave(id: string) { return pendingNotes.has(id); }
+export function discardPendingSave(id: string) {
+  clearTimeout(timers.get(id)); timers.delete(id); pendingNotes.delete(id);
+}
+export async function noteOperation(note: PinNote, op: string, extra: Record<string, unknown> = {}) {
+  const result = await invoke<PinNote | null>("note_operation", { request: {
+    id: note.id, op, expectedRevision: Math.max(revisions.get(note.id) ?? 0, note.revision), ...extra,
+  } });
+  if (result) { revisions.set(note.id, result.revision); Object.assign(note, result); }
+  return result;
+}
 
 export async function loadNotes(): Promise<NotesFile> {
   const raw = await invoke<string | null>("load_notes");
@@ -59,7 +77,8 @@ export async function loadNotes(): Promise<NotesFile> {
         throw new Error("便签数据格式无效，原文件已保留");
       }
     }
-    return normalizeNotes(file);
+    const normalized = normalizeNotes(file);
+    return normalized;
   }
 
   return migrateLegacyNote();
@@ -67,8 +86,9 @@ export async function loadNotes(): Promise<NotesFile> {
 
 export async function loadNoteById(id?: string): Promise<{ note: PinNote; file: NotesFile }> {
   const file = await loadNotes();
-  const noteId = id && file.notes[id] ? id : file.lastClosedNoteId || file.lastActiveNoteId;
-  const note = file.notes[noteId] ?? Object.values(file.notes)[0] ?? createNote();
+  if (id && (!file.notes[id] || file.notes[id].lifecycle !== "active")) throw new Error("便签已归档或删除");
+  const noteId = id ?? (file.lastClosedNoteId || file.lastActiveNoteId);
+  const note = (file.notes[noteId]?.lifecycle === "active" ? file.notes[noteId] : undefined) ?? Object.values(file.notes).find(n => n.lifecycle === "active") ?? createNote();
 
   if (!file.notes[note.id]) {
     file.notes[note.id] = note;
@@ -85,6 +105,10 @@ export function createNote(seed: Partial<PinNote> = {}): PinNote {
   const now = Date.now();
 
   return {
+    revision: seed.revision ?? 0,
+    lifecycle: seed.lifecycle ?? "active",
+    placement: seed.placement ?? "center",
+    reminder: seed.reminder ?? null,
     id: seed.id ?? createId(),
     title: seed.title ?? defaultTitle,
     content: seed.content ?? defaultContent,
@@ -128,11 +152,12 @@ export async function flushNoteSave(id?: string) {
   pendingSave = pendingSave.catch(() => undefined).then(async () => {
     for (const note of notes) {
       const next = { ...note, updatedAt: Date.now() };
-      await invoke("upsert_note", {
-        json: JSON.stringify(next),
-        setActive: false,
-        setClosed: false,
-      });
+      const revision = Math.max(revisions.get(note.id) ?? 0, note.revision);
+      const result = await invoke<PinNote>("note_operation", { request: {
+        id: note.id, op: revision === 0 ? "create" : "save", expectedRevision: revision,
+        note: next, patch: next,
+      } });
+      if (result) revisions.set(note.id, result.revision);
       // A newer draft may have arrived while the native write was in flight.
       if (pendingNotes.get(note.id) === note) pendingNotes.delete(note.id);
     }
@@ -144,39 +169,27 @@ export async function flushNoteSave(id?: string) {
 export async function saveNoteNow(note: PinNote) {
   pendingNotes.set(note.id, { ...note, window: { ...note.window } });
   await flushNoteSave(note.id);
+  note.revision = revisions.get(note.id) ?? note.revision;
 }
 
 export async function getRecentNote() {
   const file = await loadNotes();
-  const note = file.notes[file.lastActiveNoteId] ?? file.notes[file.lastClosedNoteId] ?? Object.values(file.notes)[0] ?? createNote();
+  const active = Object.values(file.notes).filter(n => n.lifecycle === "active");
+  const note = active.find(n => n.id === file.lastActiveNoteId) ?? active.find(n => n.id === file.lastClosedNoteId) ?? active[0] ?? createNote();
   return { note, file };
 }
 
 export async function patchNoteNow(id: string, patch: Partial<PinNote>) {
-  const raw = await invoke<string>("patch_note", {
-    id,
-    json: JSON.stringify({ ...patch, updatedAt: Date.now() }),
-    setActive: true,
-    setClosed: false,
-  });
-  return createNote(JSON.parse(raw) as Partial<PinNote>);
+  const { notes } = await loadNotes();
+  return (await noteOperation(notes[id], "save", { patch }))!;
 }
 
 export async function markNoteActive(note: PinNote) {
-  await invoke("patch_note", {
-    id: note.id,
-    json: JSON.stringify({ lastFocusedAt: Date.now() }),
-    setActive: true,
-    setClosed: false,
-  });
+  await invoke("note_operation", { request: { id: note.id, op: "focus" } });
 }
 
 export async function markNoteClosed(note: PinNote) {
-  await invoke("upsert_note", {
-    json: JSON.stringify({ ...note, updatedAt: Date.now() }),
-    setActive: true,
-    setClosed: true,
-  });
+  await markNoteActive(note);
 }
 
 export async function deleteNoteNow(id: string) {
@@ -185,9 +198,10 @@ export async function deleteNoteNow(id: string) {
   pendingNotes.delete(id);
   await pendingSave.catch(() => undefined);
 
-  await invoke("delete_note", { id });
+  const current = (await loadNotes()).notes[id];
+  if (current) await noteOperation(current, "trash");
   const file = await loadNotes();
-  const fallback = Object.values(file.notes).sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)[0] ?? createNote();
+  const fallback = Object.values(file.notes).filter(n => n.lifecycle === "active").sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)[0] ?? createNote();
   if (!file.notes[fallback.id]) await saveNoteNow(fallback);
   return fallback;
 }
@@ -218,7 +232,7 @@ async function migrateLegacyNote(): Promise<NotesFile> {
 
 function normalizeNotes(file: Partial<NotesFile>): NotesFile {
   const notes = Object.fromEntries(
-    Object.entries(file.notes ?? {}).map(([id, note]) => [id, createNote({ ...note, id })]),
+    Object.entries(file.notes ?? {}).map(([id, note]) => [id, createNote({ ...note, placement: note.placement ?? "desktop", id })]),
   );
   const fallbackId = Object.keys(notes)[0] ?? "";
   const lastActiveNoteId =
@@ -227,7 +241,8 @@ function normalizeNotes(file: Partial<NotesFile>): NotesFile {
     file.lastClosedNoteId && notes[file.lastClosedNoteId] ? file.lastClosedNoteId : lastActiveNoteId;
 
   return {
-    version: 1,
+    version: 2,
+    history: file.history ?? [],
     notes,
     lastActiveNoteId,
     lastClosedNoteId,

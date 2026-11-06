@@ -8,6 +8,8 @@
     visible: boolean;
     current: boolean;
     updatedAt: number;
+    content: string;
+    lifecycle: 'active' | 'archived' | 'trash';
   };
 
   type Props = {
@@ -18,9 +20,14 @@
     onDelete: (id: string) => void;
     onRefresh: () => void;
     onClose: () => void;
+    onAction: (id:string,op:string) => void;
+    undoId?: string;
   };
 
-  let { open, items, onShow, onHide, onDelete, onRefresh, onClose }: Props = $props();
+  let { open, items, onShow, onHide, onDelete, onRefresh, onClose, onAction, undoId }: Props = $props();
+  let query = $state('');
+  let filter = $state('active');
+  const filtered = $derived(items.filter(n => n.lifecycle === filter && `${n.title}\n${n.content}`.toLowerCase().includes(query.toLowerCase())));
 
   $effect(() => {
     if (open) onRefresh();
@@ -42,17 +49,24 @@
     </header>
 
     <div class="note-list">
-      {#if items.length === 0}
+      <input aria-label="搜索标题和正文" placeholder="搜索标题和正文" bind:value={query} />
+      <select aria-label="便签范围" bind:value={filter}><option value="active">全部便签</option><option value="archived">归档</option><option value="trash">回收站</option></select>
+      {#if undoId}<button onclick={() => onAction(undoId!, 'restore')}>撤销移除</button>{/if}
+      {#if filtered.length === 0}
         <p class="empty">暂无便签</p>
       {:else}
-        {#each items as item (item.id)}
+        {#each filtered as item (item.id)}
           <article class:current={item.current} class="note-item" transition:reveal>
-            <button class="note-main" type="button" title={item.title} onclick={() => onShow(item.id)}>
+            <button class="note-main" type="button" title={item.title} onclick={() => item.lifecycle === 'active' ? onShow(item.id) : onAction(item.id,'restore')}>
               <span>{item.title || "未命名便签"}</span>
               {#if item.current}
                 <small>当前</small>
               {/if}
             </button>
+            {#if item.lifecycle !== 'active'}
+              <button onclick={() => onAction(item.id,'restore')}>恢复</button>
+              {#if item.lifecycle === 'trash'}<button onclick={() => onAction(item.id,'purge')}>永久删除</button>{/if}
+            {:else}
             <button
               class="icon-btn"
               type="button"
@@ -75,6 +89,7 @@
             >
               <Trash2 size={15} />
             </button>
+            {/if}
           </article>
         {/each}
       {/if}

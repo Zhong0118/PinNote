@@ -4,6 +4,7 @@ import { isMacPlatform } from "./settings";
 import { requestWindowVisibility } from "./windowVisibility";
 import { CAPSULE } from "./windowGeometry";
 import type { PinNote } from "./notesStore";
+import { noteOperation } from './notesStore';
 
 export function noteWindowLabel(noteId: string) {
   return `note-${noteId}`;
@@ -15,6 +16,8 @@ export async function findNoteWindow(noteId: string) {
 }
 
 export async function openNoteWindow(note: PinNote, options: { offset?: boolean } = {}) {
+  if(note.lifecycle !== 'active') throw new Error('请先恢复便签');
+  if(note.placement !== 'desktop') await noteOperation(note,'desktop');
   const label = noteWindowLabel(note.id);
   const existing = await findNoteWindow(note.id);
 

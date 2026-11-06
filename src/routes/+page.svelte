@@ -1,5 +1,8 @@
 <script lang="ts">
   import { createQuitGuard } from "$lib/quitGuard";
+  import { noteOperation, hasPendingSave, discardPendingSave } from '$lib/notesStore';
+  import { edgeTarget, edgeLayout } from '$lib/edgeQueue';
+  import { showPreview } from '$lib/previewWindow';
   import { invoke } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow, PhysicalPosition, LogicalPosition, LogicalSize, availableMonitors, type Window } from "@tauri-apps/api/window";
@@ -42,6 +45,11 @@
 
   let transitioning = $state(false);
   let modeChange: Promise<void> | undefined;
+  let dragging = false;
+  let layingOut = false;
+  let edgeHint = $state('');
+  let previewTimer: ReturnType<typeof setTimeout>;
+  let undoId = $state('');
   let geometryRevision = 0;
   let note = $state<PinNote>(createNote());
   let sourceMode = $state(false);
@@ -158,6 +166,21 @@
       event.preventDefault();
       await closeCurrentNote();
     });
+    const changes = listen<{id:string;note:PinNote|null;op:string}>('notes-changed', async ({payload}) => {
+      if (payload.id === note.id && ready && payload.op !== 'focus') {
+        if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
+          discardPendingSave(note.id); ready = false; await win.hide();
+        } else if (!hasPendingSave(note.id) && payload.note.revision > note.revision) {
+          const contentChanged = note.content !== payload.note.content;
+          note = payload.note; if (contentChanged) editorRevision++;
+        }
+      }
+      if(notesOpen) await refreshNoteList();
+      await layoutEdges();
+    });
+    const expand = listen<{id:string}>('expand-note-requested', ({payload}) => {
+      if(payload.id === note.id && note.window.collapsed) { toggleCollapsed(); void win.setFocus(); }
+    });
 
     async function prepareToQuit(attempt: number) {
       if (!quitGuard.begin(attempt)) return;
@@ -193,6 +216,7 @@
 
     return () => {
       clearTimeout(windowStateTimer);
+      clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f());
       if (isMainWindow) void unregisterGlobalShortcuts();
       quitPromise.then((fn) => fn());
       quitFailedPromise.then((fn) => fn());
@@ -244,6 +268,7 @@
     await saveBeforeWindowAction();
     const { note: seed } = await getRecentNote();
     const next = createNote({
+      placement: 'desktop',
       content: "",
       theme: seed.theme,
       customColor: seed.customColor,
@@ -305,7 +330,7 @@
   }
 
   async function showAllNotes(file: Awaited<ReturnType<typeof loadNotes>>) {
-    const notes = Object.values(file.notes).sort((a, b) => a.createdAt - b.createdAt);
+    const notes = Object.values(file.notes).filter(n => n.lifecycle === 'active' && n.placement === 'desktop').sort((a, b) => a.createdAt - b.createdAt);
 
     for (const target of notes) {
       if (target.id === note.id && isMainWindow) {
@@ -338,7 +363,7 @@
 
     for (const win of windows) {
       const id = win.label === "main" ? mainNoteId : noteIdFromWindowLabel(win.label);
-      if (!id || !file.notes[id] || !(await win.isVisible())) continue;
+      if (!id || file.notes[id]?.lifecycle !== 'active' || file.notes[id]?.placement !== 'desktop' || !(await win.isVisible())) continue;
       result.push({ id, label: win.label, lastFocusedAt: file.notes[id].lastFocusedAt });
     }
 
@@ -365,6 +390,8 @@
       .map((item) => ({
         id: item.id,
         title: item.title,
+        content: item.content,
+        lifecycle: item.lifecycle,
         visible: visibleIds.has(item.id),
         current: item.id === note.id,
         updatedAt: item.updatedAt,
@@ -402,7 +429,7 @@
   async function deleteNoteById(id: string) {
     const target = noteListItems.find((item) => item.id === id);
     const title = target?.title?.trim() || "未命名便签";
-    if (!window.confirm(`删除便签「${title}」？此操作不可撤销。`)) return;
+    undoId = id;
 
     if (id === note.id) {
       await deleteCurrentNote(false);
@@ -514,9 +541,11 @@
 
   async function deleteCurrentNote(shouldConfirm = true) {
     const title = note.title.trim() || "未命名便签";
-    if (shouldConfirm && !window.confirm(`删除便签「${title}」？此操作不可撤销。`)) return;
+    void shouldConfirm; void title;
 
     try {
+      await saveBeforeWindowAction();
+      undoId = note.id;
       isDeleting = true;
       await modeChange;
       geometryRevision += 1;
@@ -544,10 +573,19 @@
     if (event.button !== 0 || isInteractiveElement(event.target)) return;
 
     try {
+      dragging = true; hoverPreview(false);
       await getCurrentWindow().startDragging();
+      const bounds = await readWindowBounds();
+      const edge = edgeTarget(bounds, normalizeDisplays(await availableMonitors(), isMacPlatform()));
+      if(edge) {
+        if(!note.window.collapsed) await changeWindowMode();
+        note.window = { ...note.window, edge };
+      } else { note.window = { ...note.window, edge: null }; }
+      await saveNoteNow(note);
+      await layoutEdges();
     } catch {
       // Browser preview cannot drag a native window.
-    }
+    } finally { dragging = false; edgeHint = ''; }
   }
 
   async function startResize(event: PointerEvent, direction: Parameters<Window["startResizeDragging"]>[0]) {
@@ -683,7 +721,8 @@
   }
 
   function scheduleWindowCapture() {
-    if (!ready || isDeleting || transitioning) return;
+    if (!ready || isDeleting || transitioning || layingOut) return;
+    if(dragging) { void readWindowBounds().then(async b => { edgeHint = edgeTarget(b, normalizeDisplays(await availableMonitors(), isMacPlatform())) ? '松手贴边' : ''; }); return; }
     clearTimeout(windowStateTimer);
     windowStateTimer = setTimeout(() => void captureWindowState().catch(() => { status = "窗口位置保存失败，请重试"; }), 150);
   }
@@ -695,6 +734,7 @@
     const id = note.id;
     const bounds = await readWindowBounds();
     if (revision !== geometryRevision || id !== note.id || transitioning || isDeleting) return;
+    if(note.window.edge) return;
     note = { ...note, window: rememberBounds(note.window, bounds), updatedAt: Date.now() };
     queueNoteSave();
   }
@@ -710,6 +750,32 @@
   function shortcutSignature(shortcuts: AppSettings["shortcuts"]) {
     return `${normalizeShortcut(shortcuts.toggleWindow)}\n${normalizeShortcut(shortcuts.newNote)}`;
   }
+  async function layoutEdges() {
+    if (!ready || layingOut || dragging || transitioning || !note.window.collapsed || !note.window.edge) return;
+    layingOut = true;
+    try {
+      const entries = edgeLayout(Object.values((await loadNotes()).notes), normalizeDisplays(await availableMonitors(), isMacPlatform()));
+      const target = entries.get(note.id);
+      if(target?.overflow) await getCurrentWindow().hide();
+      else if(target) { await setWindowBounds(target.bounds,true); edgeHint = target.extra ? `${note.title} · +${target.extra}（所有便签）` : ''; }
+    } finally { layingOut = false; }
+  }
+  function hoverPreview(inside: boolean) {
+    clearTimeout(previewTimer);
+    void emit('preview-hover',{id:note.id,inside});
+    if(inside && !dragging && note.window.collapsed) previewTimer = setTimeout(() => void showPreview(note), 450);
+  }
+  async function lifecycle(id:string, op:string) {
+    try {
+      if(id === note.id) await saveBeforeWindowAction();
+      else { const win = await findNoteWindow(id); if(win) await requestWindowVisibility(win.label,false); }
+      const target = (await loadNotes()).notes[id];
+      if(op === 'purge' && !window.confirm('永久删除后无法恢复，确定删除？')) return;
+      await noteOperation(target,op);
+      if(op === 'trash' || op === 'archive') undoId = id;
+      await refreshNoteList();
+    } catch(error) { status = String(error); }
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -723,6 +789,10 @@
   collapsed={Boolean(note.window.collapsed)}
   {transitioning}
   onToggleCollapsed={toggleCollapsed}
+  {edgeHint}
+  onHover={hoverPreview}
+  onArchive={() => lifecycle(note.id,'archive')}
+  onReturn={() => lifecycle(note.id,'center')}
   onNewNote={createNewNoteWindow}
   title={note.title}
   {status}
@@ -763,6 +833,8 @@
   onDelete={deleteNoteById}
   onRefresh={refreshNoteList}
   onClose={() => (notesOpen = false)}
+  onAction={lifecycle}
+  {undoId}
 />
 
 <TemplateDialog

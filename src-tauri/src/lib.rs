@@ -1,4 +1,5 @@
 mod updater;
+mod notes;
 
 use std::collections::HashSet;
 use std::fs;
@@ -302,7 +303,10 @@ fn save_notes(
 
 #[tauri::command]
 fn load_notes(app: AppHandle) -> Result<Option<String>, String> {
-    read_optional(data_file(&app, "notes.json")?)
+    let state = app.state::<NotesFileLock>();
+    let _guard = state.0.lock().map_err(|_| "Cannot lock notes")?;
+    if !data_file(&app, "notes.json")?.exists() { return Ok(None); }
+    Ok(Some(notes::load(&app)?.to_string()))
 }
 
 #[tauri::command]
@@ -711,6 +715,7 @@ pub fn run() {
             load_note,
             save_notes,
             load_notes,
+            notes::note_operation,
             load_templates,
             upsert_template,
             delete_template,

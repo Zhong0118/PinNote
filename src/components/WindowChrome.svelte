@@ -26,13 +26,17 @@
     onQuit: () => void;
     onToggleCollapsed?: () => void;
     onNewNote?: () => void;
+    onArchive?: () => void;
+    onReturn?: () => void;
+    onHover?: (inside: boolean) => void;
+    edgeHint?: string;
     onStartDrag: (event: PointerEvent) => void;
     onStartResize: (event: PointerEvent, direction: ResizeDirection) => void;
     children: import("svelte").Snippet;
   };
   let { disabled = false, collapsed = false, transitioning = false, title, status, sourceMode, settings,
     onTitleChange, onTogglePin, onToggleSource, onOpenNotes, onOpenTemplates, onExport, onOpenSettings,
-    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onStartDrag, onStartResize, children }: Props = $props();
+    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, edgeHint = '', onStartDrag, onStartResize, children }: Props = $props();
   let visibleStatus = $state(false);
   const statusIsError = $derived(/失败|错误|无法|不能/.test(status));
   $effect(() => {
@@ -95,9 +99,10 @@
         title={statusIsError ? status : title || "未命名便签"} aria-describedby={statusIsError ? "capsule-error" : undefined}
         onpointerdown={capsuleDown} onpointermove={capsuleMove} onpointerup={capsuleEnd}
         onpointercancel={capsuleEnd} onlostpointercapture={() => (origin = null)} onclick={expandCapsule}
+        onpointerenter={() => onHover?.(true)} onpointerleave={() => onHover?.(false)}
         onkeydown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!transitioning) onToggleCollapsed(); } }}
         >
-        <span>{title || "未命名便签"}</span>
+        <span>{edgeHint || title || "未命名便签"}</span>
         {#if statusIsError}
           <CircleAlert class="capsule-error-icon" size={14} strokeWidth={1.8} aria-hidden="true" />
         {:else}
@@ -117,7 +122,7 @@
         </button>
         {#if !collapsed}
           <Toolbar alwaysOnTop={settings.alwaysOnTop} {sourceMode} {onTogglePin} {onToggleSource} {onOpenNotes}
-            {onOpenTemplates} {onExport} {onOpenSettings} {onDelete} {onQuit} {onNewNote} />
+            {onOpenTemplates} {onExport} {onOpenSettings} {onDelete} {onQuit} {onNewNote} {onArchive} {onReturn} />
         {/if}
       </div>
     </header>
