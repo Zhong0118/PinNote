@@ -49,6 +49,7 @@ export async function openNoteWindow(note: PinNote, options: { offset?: boolean 
     visible: false,
     visibleOnAllWorkspaces: isMacPlatform(),
   });
+  await new Promise<void>((resolve,reject) => { created.once('tauri://created',()=>resolve()); created.once('tauri://error', e=>reject(e.payload)); });
   await requestWindowVisibility(label, true);
   await created.setFocus();
 }

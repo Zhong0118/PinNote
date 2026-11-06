@@ -6,9 +6,10 @@
   type Props = {
     value: string;
     onChange: (value: string) => void;
+    initialPosition?: {from:number;to:number;scroll:number};
   };
 
-  let { value, onChange }: Props = $props();
+  let { value, onChange, initialPosition }: Props = $props();
   let root = $state<HTMLDivElement>();
   let failed = $state(false);
   let disposed = false;
@@ -22,6 +23,11 @@
     const markdown = editorInstance.action((ctx: any) =>
       ctx.get(serializerCtxRef)(ctx.get(editorViewCtxRef).state.doc));
     if (markdown !== value) onChange(markdown);
+  }
+  export function capture() {
+    if(!editorInstance || disposed) return;
+    const selection=editorInstance.action((ctx:any)=>ctx.get(editorViewCtxRef).state.selection);
+    return {from:selection.from,to:selection.to,scroll:root?.scrollTop??0};
   }
 
   onMount(() => {
@@ -115,13 +121,19 @@
             update: (view, previous) => {
               if (view.state.doc.eq(previous.doc)) return;
               clearTimeout(updateTimer);
-              updateTimer = setTimeout(flush, 200);
+              flush();
             },
             destroy: () => clearTimeout(updateTimer),
           }),
         })))
         .create();
       if (disposed) await editorInstance.destroy();
+      else if(initialPosition) {
+        const {TextSelection}=await import('@milkdown/kit/prose/state');
+        editorInstance.action((ctx:any)=>{const view=ctx.get(editorViewCtxRef);const size=view.state.doc.content.size;
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,Math.min(initialPosition!.from,size),Math.min(initialPosition!.to,size))));});
+        if(root) root.scrollTop=initialPosition.scroll;
+      }
     } catch (e) {
       console.error("Milkdown setup failed:", e);
       if (!disposed) failed = true;

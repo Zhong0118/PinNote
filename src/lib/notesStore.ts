@@ -227,7 +227,7 @@ async function migrateLegacyNote(): Promise<NotesFile> {
     notes: { [note.id]: note },
   });
   await saveNotes(file);
-  return file;
+  return loadNotes();
 }
 
 function normalizeNotes(file: Partial<NotesFile>): NotesFile {

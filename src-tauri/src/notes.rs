@@ -81,6 +81,12 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
     match op {
         "save" => {
             if before["lifecycle"] != "active" { return Err("便签不在普通列表，草稿未覆盖".into()); }
+            if let Some(owner) = request["owner"].as_str() {
+                let expected = if before["placement"] == "desktop" { format!("note-{id}") } else { "main".into() };
+                if (request["patch"].get("content").is_some() || request["patch"].get("title").is_some()) && owner != expected {
+                    return Err("EDITOR_MOVED: 编辑位置已改变，草稿未覆盖".into());
+                }
+            }
             for field in ["title", "content", "theme", "customColor", "opacity", "alwaysOnTop", "window"] {
                 if let Some(value) = request["patch"].get(field) { note[field] = value.clone(); }
             }
@@ -125,7 +131,12 @@ pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub fn note_operation(app: AppHandle, request: Value) -> Result<Value, String> { operation(&app, request) }
+pub fn note_operation(app: AppHandle, window: tauri::WebviewWindow, request: Value) -> Result<Value, String> {
+    let mut request = request;
+    request["source"] = json!("ui");
+    request["owner"] = json!(window.label());
+    operation(&app, request)
+}
 
 #[cfg(test)]
 mod tests {
@@ -145,4 +156,13 @@ mod tests {
     }
     #[test]
     fn invalid_migration_preserves_data() { assert!(normalize(&mut json!({"notes":[]})).is_err()); }
+    #[test]
+    fn editor_location_changes_reject_old_writes() {
+        let mut f=file();
+        assert!(mutate(&mut f,&json!({"id":"a","op":"save","owner":"main","expectedRevision":1,"patch":{"content":"wrong editor"}})).is_err());
+        mutate(&mut f,&json!({"id":"a","op":"center","expectedRevision":1})).unwrap();
+        assert!(mutate(&mut f,&json!({"id":"a","op":"save","owner":"note-a","expectedRevision":2,"patch":{"content":"old window"}})).is_err());
+        mutate(&mut f,&json!({"id":"a","op":"save","owner":"main","expectedRevision":2,"patch":{"content":"center"}})).unwrap();
+        assert_eq!(f["notes"]["a"]["content"],"center");
+    }
 }

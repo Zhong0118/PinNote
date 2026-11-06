@@ -3,6 +3,7 @@
   import { noteOperation, hasPendingSave, discardPendingSave } from '$lib/notesStore';
   import { edgeTarget, edgeLayout } from '$lib/edgeQueue';
   import { showPreview } from '$lib/previewWindow';
+  import { openCenter } from '$lib/centerWindow';
   import { invoke } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow, PhysicalPosition, LogicalPosition, LogicalSize, availableMonitors, type Window } from "@tauri-apps/api/window";
@@ -88,6 +89,7 @@
       status = "已就绪";
       await applyNativeWindowState(true).catch(() => { status = "窗口位置恢复失败，可继续编辑"; });
       if (isMainWindow) await invoke("set_main_note_id", { id: note.id });
+      if(note.placement !== 'desktop') throw new Error('便签已收回中心');
       await markNoteActive(note);
       // A window created after the native save snapshot must never become editable
       // while an installation/exit is already in progress.
@@ -168,6 +170,7 @@
     });
     const changes = listen<{id:string;note:PinNote|null;op:string}>('notes-changed', async ({payload}) => {
       if (payload.id === note.id && ready && payload.op !== 'focus') {
+        editor?.flush();
         if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
           discardPendingSave(note.id); ready = false; await win.hide();
         } else if (!hasPendingSave(note.id) && payload.note.revision > note.revision) {
@@ -377,9 +380,8 @@
   }
 
   async function openNoteList() {
-    templatesOpen = false;
-    notesOpen = true;
-    await refreshNoteList();
+    await saveBeforeWindowAction();
+    await openCenter();
   }
 
   async function refreshNoteList() {
@@ -540,33 +542,8 @@
   }
 
   async function deleteCurrentNote(shouldConfirm = true) {
-    const title = note.title.trim() || "未命名便签";
-    void shouldConfirm; void title;
-
-    try {
-      await saveBeforeWindowAction();
-      undoId = note.id;
-      isDeleting = true;
-      await modeChange;
-      geometryRevision += 1;
-      const fallback = await deleteNoteNow(note.id);
-      status = "便签已删除";
-      if (isMainWindow) {
-        const existing = await WebviewWindow.getByLabel(noteWindowLabel(fallback.id));
-        ready = !existing;
-        await invoke("set_main_note_id", { id: ready ? fallback.id : null });
-        note = ready ? fallback : createNote({ id: "" });
-        editorRevision += 1;
-        isDeleting = false;
-        if (ready) await applyNativeWindowState(true);
-        await getCurrentWindow().hide();
-      } else {
-        await getCurrentWindow().destroy();
-      }
-    } catch {
-      isDeleting = false;
-      status = "删除失败，请稍后重试";
-    }
+    void shouldConfirm;
+    await lifecycle(note.id,'trash');
   }
 
   async function startDrag(event: PointerEvent) {
@@ -772,6 +749,10 @@
       const target = (await loadNotes()).notes[id];
       if(op === 'purge' && !window.confirm('永久删除后无法恢复，确定删除？')) return;
       await noteOperation(target,op);
+      if(op === 'center' || op === 'archive' || op === 'trash') {
+        await openCenter();
+        if(id === note.id) { isDeleting = true; await getCurrentWindow().destroy(); }
+      }
       if(op === 'trash' || op === 'archive') undoId = id;
       await refreshNoteList();
     } catch(error) { status = String(error); }

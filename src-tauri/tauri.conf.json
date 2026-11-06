@@ -14,14 +14,15 @@
     "windows": [
       {
         "title": "PinNote",
-        "width": 420,
-        "height": 560,
-        "minWidth": 180,
-        "minHeight": 40,
-        "alwaysOnTop": true,
-        "decorations": false,
+        "url": "center",
+        "width": 960,
+        "height": 660,
+        "minWidth": 560,
+        "minHeight": 380,
+        "alwaysOnTop": false,
+        "decorations": true,
         "resizable": true,
-        "transparent": true,
+        "transparent": false,
         "backgroundColor": "#00000000",
         "shadow": false,
         "visible": false

@@ -298,7 +298,10 @@ fn save_notes(
         .0
         .lock()
         .map_err(|_| "Cannot lock notes file".to_string())?;
-    atomic_write(data_file(&app, "notes.json")?, json)
+    if data_file(&app,"notes.json")?.exists() { return Err("整库覆盖已禁用，请使用便签操作服务".into()); }
+    let mut file: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    notes::normalize(&mut file)?;
+    atomic_write(data_file(&app, "notes.json")?, file.to_string())
 }
 
 #[tauri::command]
