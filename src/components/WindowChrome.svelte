@@ -10,6 +10,12 @@
   type Props = {
     disabled?: boolean;
     collapsed?: boolean;
+    /** Set while the note is docked to a screen edge; collapsed it renders as a tab. */
+    dockedSide?: 'left' | 'right';
+    /** Expanded content size held fixed while the native frame animates around it. */
+    freeze?: { width: number; height: number };
+    /** The frame is growing open: fade the editor in alongside it. */
+    opening?: boolean;
     transitioning?: boolean;
     title: string;
     status: string;
@@ -39,11 +45,14 @@
     onStartResize: (event: PointerEvent, direction: ResizeDirection) => void;
     children: import("svelte").Snippet;
   };
-  let { disabled = false, collapsed = false, transitioning = false, title, status, sourceMode, settings,
+  let { disabled = false, collapsed = false, dockedSide, freeze, opening = false, transitioning = false, title, status, sourceMode, settings,
     onTitleChange, onTogglePin, onToggleSource, onOpenNotes, onOpenTemplates, onExport, onOpenSettings,
     onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, onReminder, onClearCompleted, onDock, locating=false, edgeHint = '', edgeOverflow = 0, onStartDrag, onStartResize, children }: Props = $props();
   let visibleStatus = $state(false);
   const statusIsError = $derived(/失败|错误|无法|不能/.test(status));
+  const tab = $derived(collapsed && Boolean(dockedSide));
+  // The tab shows a short vertical label: the first few characters of the title.
+  const tabLabel = $derived(Array.from((title || '未命名').trim() || '未命名').slice(0, 3).join(''));
   $effect(() => {
     visibleStatus = Boolean(status) && !/正在|已就绪|快捷键已就绪/.test(status);
     if (!statusIsError) {
@@ -96,12 +105,30 @@
   }
 </script>
 
-<main inert={disabled} class="window-shell theme-{settings.theme}" class:collapsed class:transitioning
+<main inert={disabled} class="window-shell theme-{settings.theme} dock-{dockedSide ?? 'none'}" class:collapsed class:tab class:transitioning
+  class:frozen={Boolean(freeze)} class:opening style:--freeze-w={freeze ? `${freeze.width}px` : undefined} style:--freeze-h={freeze ? `${freeze.height}px` : undefined}
   style:--pin-opacity={settings.opacity} style:--pin-custom={settings.customColor}>
   <section class="note-window" class:locating class:edge-ready={!!edgeHint} aria-label="PinNote 便签">
     {#if edgeHint && !collapsed}<div class="edge-indicator" role="status">{edgeHint}</div>{/if}
     {#if locating}<div class="locate-indicator" role="status">已定位到这张便签</div>{/if}
-    {#if collapsed}
+    {#if tab}
+      <div bind:this={capsule} class="edge-tab" data-capsule-drag role="button" tabindex="0" aria-label={`展开便签 ${title || "未命名便签"}`}
+        title={statusIsError ? status : `${title || "未命名便签"} · 悬停预览，点击展开，向内拖出可解除停靠`}
+        aria-describedby={statusIsError ? "capsule-error" : undefined}
+        onpointerdown={capsuleDown} onpointermove={capsuleMove} onpointerup={capsuleEnd}
+        onpointercancel={capsuleEnd} onlostpointercapture={() => (origin = null)} onclick={expandCapsule}
+        onpointerenter={() => onHover?.(true)} onpointerleave={() => onHover?.(false)}
+        onkeydown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!transitioning) onToggleCollapsed(); } }}
+        >
+        <i class="tab-accent" aria-hidden="true"></i>
+        <span class="tab-label">{tabLabel}</span>
+        {#if statusIsError}<i class="tab-error" aria-hidden="true"></i>{/if}
+        {#if edgeOverflow}<button class="tab-overflow" title={`还有 ${edgeOverflow} 张停靠便签，在便签中心查看`} onclick={e=>{e.stopPropagation();onOpenNotes();}}>+{edgeOverflow}</button>{/if}
+      </div>
+      {#if statusIsError}
+        <span id="capsule-error" class="visually-hidden" role="alert">{status}</span>
+      {/if}
+    {:else if collapsed}
       <div bind:this={capsule} class="capsule" data-capsule-drag role="button" tabindex="0" aria-label={`展开便签 ${title || "未命名便签"}`}
         title={statusIsError ? status : title || "未命名便签"} aria-describedby={statusIsError ? "capsule-error" : undefined}
         onpointerdown={capsuleDown} onpointermove={capsuleMove} onpointerup={capsuleEnd}
@@ -173,13 +200,32 @@
   .collapse-button:hover { color: var(--pin-text); background: var(--pin-hover); transform: scale(1.06); }
   .collapse-button:active { transform: scale(0.93); }
   .collapse-button:focus-visible, .capsule:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
-  .editor-frame { min-height: 0; overflow: hidden; transition: opacity 100ms ease; }
+  .editor-frame { min-height: 0; overflow: hidden; transition: opacity 120ms ease; }
   .status-toast { position: absolute; z-index: 80; right: 12px; bottom: 10px; max-width: calc(100% - 24px); padding: 5px 9px; border: 1px solid var(--pin-border); border-radius: 8px; color: var(--pin-muted); background: var(--pin-bg); font-size: 11px; box-shadow: 0 2px 8px #00000006; }
   .status-toast.error { color: #dc2626; overflow-wrap: anywhere; max-height: 50%; overflow: auto; }
   .collapsed .note-window { border-radius: 20px; grid-template-rows: 1fr; }
   .collapsed .dragbar, .collapsed .editor-frame { display: none; }
   .transitioning .editor-frame, .transitioning .header-actions { opacity: 0; }
   .header-actions { transition: opacity 100ms ease; }
+  /* Theme accent shown on capsules and edge tabs. */
+  .window-shell { --pin-dot: #a1a1aa; }
+  .theme-mint { --pin-dot: #72bca0; } .theme-rose { --pin-dot: #df9d9a; } .theme-sky { --pin-dot: #7dafe1; }
+  .theme-grape { --pin-dot: #b69bd6; } .theme-ink { --pin-dot: #8a8a8a; } .theme-custom { --pin-dot: var(--pin-custom); }
+  @keyframes pin-appear { from { opacity: 0; } }
+  /* Edge tab: flat against the screen edge, rounded toward the desktop. */
+  .tab .note-window { grid-template-rows: 1fr; border-radius: 0 12px 12px 0; border-left-width: 0; background: color-mix(in srgb, var(--pin-bg) 96%, transparent); }
+  .tab.dock-right .note-window { border-radius: 12px 0 0 12px; border-left-width: 1px; border-right-width: 0; }
+  .tab .dragbar, .tab .editor-frame { display: none; }
+  .edge-tab { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 0; user-select: none; touch-action: none; cursor: pointer; animation: pin-appear 160ms ease-out; transition: background 140ms; }
+  .edge-tab:hover { background: var(--pin-hover); }
+  .edge-tab:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
+  .tab-accent { position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--pin-dot); transition: width 140ms; }
+  .dock-right .tab-accent { left: auto; right: 0; border-radius: 3px 0 0 3px; }
+  .edge-tab:hover .tab-accent { width: 4px; }
+  .tab-label { writing-mode: vertical-rl; max-height: 100%; overflow: hidden; font-size: 12px; font-weight: 600; letter-spacing: 1px; line-height: 1; color: var(--pin-heading); }
+  .tab-error { width: 6px; height: 6px; border-radius: 50%; background: #dc2626; flex: 0 0 auto; }
+  .tab-overflow { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); border: 0; padding: 0 3px; border-radius: 6px; font-size: 9px; line-height: 14px; color: #2563eb; background: #eff6ff; cursor: pointer; }
+  .capsule { animation: pin-appear 160ms ease-out; }
   .capsule { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border-radius: inherit; user-select: none; touch-action: none; cursor: grab; transition: background 140ms; }
   .capsule:hover { background: var(--pin-hover); }
   .capsule:active { cursor: grabbing; }
@@ -200,5 +246,13 @@
   :global(::-webkit-scrollbar-track) { background: transparent; }
   :global(::-webkit-scrollbar-thumb) { border: 2px solid transparent; border-radius: 999px; background-clip: content-box; background-color: #8885; }
   :global(::-webkit-scrollbar-thumb:hover) { background-color: #8888; }
-  @media (prefers-reduced-motion: reduce) { .note-window, .dragbar, .editor-frame, .header-actions, .collapse-button, .capsule { transition: none; } }
+  /* Morph: content keeps its expanded layout, anchored where the window folds to
+     (the collapse button side, or the docked edge), and is clipped by the frame. */
+  .frozen .dragbar, .frozen .editor-frame { width: var(--freeze-w); justify-self: end; }
+  .frozen.dock-left .dragbar, .frozen.dock-left .editor-frame { justify-self: start; }
+  .frozen .editor-frame { height: calc(var(--freeze-h) - 40px); align-self: start; }
+  .transitioning .editor-frame { transition: opacity 140ms ease-in; }
+  .transitioning.opening .editor-frame, .transitioning.opening .header-actions { opacity: 1; transition: opacity 220ms cubic-bezier(.2,.85,.25,1) 40ms; }
+  @starting-style { .transitioning.opening .editor-frame, .transitioning.opening .header-actions { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .note-window, .dragbar, .editor-frame, .header-actions, .collapse-button, .capsule, .edge-tab, .tab-accent { transition: none; animation: none; } }
 </style>

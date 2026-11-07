@@ -8,7 +8,8 @@
     "preview-*",
     "settings",
     "note-*",
-    "settings-*"
+    "settings-*",
+    "center-dock"
   ],
   "permissions": [
     "core:default",
@@ -37,6 +38,8 @@
     "global-shortcut:allow-unregister-all",
     "core:window:allow-center",
     "core:window:allow-set-min-size",
-    "core:window:allow-set-resizable"
+    "core:window:allow-set-resizable",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-set-title-bar-style"
   ]
 }

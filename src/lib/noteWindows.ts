@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { isMacPlatform } from "./settings";
 import { requestWindowVisibility } from "./windowVisibility";
-import { CAPSULE } from "./windowGeometry";
+import { CAPSULE, EDGE_TAB, NOTE_MIN } from "./windowGeometry";
 import type { PinNote } from "./notesStore";
 import { noteOperation } from './notesStore';
 import { emitTo } from '@tauri-apps/api/event';
@@ -35,12 +35,12 @@ export async function openNoteWindow(note: PinNote, options: { offset?: boolean;
   const created = new WebviewWindow(label, {
     url: `/?noteId=${encodeURIComponent(note.id)}`,
     title: note.title || "PinNote",
-    width: note.window.collapsed ? CAPSULE.width : note.window.width,
-    height: note.window.collapsed ? CAPSULE.height : note.window.height,
+    width: note.window.collapsed ? (note.window.edge ? EDGE_TAB : CAPSULE).width : note.window.width,
+    height: note.window.collapsed ? (note.window.edge ? EDGE_TAB : CAPSULE).height : note.window.height,
     x,
     y,
-    minWidth: CAPSULE.width,
-    minHeight: CAPSULE.height,
+    minWidth: NOTE_MIN.width,
+    minHeight: NOTE_MIN.height,
     preventOverflow: true,
     alwaysOnTop: note.alwaysOnTop,
     decorations: false,

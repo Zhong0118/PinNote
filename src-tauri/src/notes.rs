@@ -207,7 +207,7 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
         file["notes"][id] = note.clone();
         return Ok(note);
     }
-    if request["expectedRevision"].as_u64() != before["revision"].as_u64() {
+    if op != "window" && request["expectedRevision"].as_u64() != before["revision"].as_u64() {
         return Err(format!(
             "VERSION_CONFLICT: 便签已更改（版本 {}），草稿保留，请重新读取或导出",
             before["revision"]
@@ -227,12 +227,30 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
     }
     let mut note = before.clone();
     match op {
+        "window" => {
+            if before["lifecycle"] != "active" {
+                return Err("请先恢复便签".into());
+            }
+            let window = request["patch"]["window"].clone();
+            if !window.is_object() {
+                return Err("Invalid window".into());
+            }
+            note["window"] = window;
+            // Geometry is last-writer-wins presentation state, like appearance: it must
+            // neither conflict with nor invalidate a body draft being edited elsewhere.
+            file["notes"][id] = note.clone();
+            return Ok(note);
+        }
         "save" => {
             if before["lifecycle"] != "active" {
                 return Err("便签不在普通列表，草稿未覆盖".into());
             }
             if let Some(owner) = request["owner"].as_str() {
-                let expected = if before["placement"] == "desktop" {
+                // A desktop note edits in its own window only while expanded. As a
+                // capsule or edge tab it is just an entry point; the center owns edits.
+                let expected = if before["placement"] == "desktop"
+                    && before["window"]["collapsed"] != json!(true)
+                {
                     format!("note-{id}")
                 } else {
                     "main".into()
@@ -358,11 +376,20 @@ pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
     {
         return Err("EDITOR_BUSY: 用户有未保存草稿，请稍后重新读取版本再试".into());
     }
+    let before = file["notes"].get(request["id"].as_str().unwrap_or("")).cloned();
     let note = mutate(&mut file, &request)?;
     atomic_write(data_file(app, "notes.json")?, file.to_string())?;
+    // Edge queues only need to re-layout when docking-relevant state changed,
+    // not on every body save.
+    let layout = before.as_ref().is_none_or(|b| {
+        ["lifecycle", "placement"].iter().any(|k| b[k] != note[k])
+            || ["collapsed", "edge"]
+                .iter()
+                .any(|k| b["window"][k] != note["window"][k])
+    });
     let _ = app.emit(
         "notes-changed",
-        json!({"id":request["id"],"note":note,"op":request["op"]}),
+        json!({"id":request["id"],"note":note,"op":request["op"],"layout":layout}),
     );
     Ok(note)
 }
@@ -459,6 +486,19 @@ mod tests {
         .unwrap();
         assert_eq!(f["notes"]["b"]["lifecycle"], "trash");
         assert_eq!(f["notes"]["b"]["content"], "original");
+    }
+    #[test]
+    fn collapsed_desktop_notes_are_edited_by_the_center() {
+        let mut f = file();
+        mutate(&mut f,&json!({"id":"a","op":"window","patch":{"window":{"collapsed":true,"width":420,"height":560}}})).unwrap();
+        assert_eq!(f["notes"]["a"]["revision"], 1, "geometry must not bump the body revision");
+        assert!(mutate(&mut f,&json!({"id":"a","op":"save","owner":"note-a","expectedRevision":1,"patch":{"content":"capsule"}})).is_err());
+        mutate(&mut f,&json!({"id":"a","op":"save","owner":"main","expectedRevision":1,"patch":{"content":"center"}})).unwrap();
+        // A stale window write never conflicts with or overwrites the body.
+        mutate(&mut f,&json!({"id":"a","op":"window","expectedRevision":0,"patch":{"window":{"collapsed":false,"width":420,"height":560}}})).unwrap();
+        assert_eq!(f["notes"]["a"]["content"], "center");
+        assert!(mutate(&mut f,&json!({"id":"a","op":"save","owner":"main","expectedRevision":2,"patch":{"content":"late center"}})).is_err());
+        mutate(&mut f,&json!({"id":"a","op":"save","owner":"note-a","expectedRevision":2,"patch":{"content":"window"}})).unwrap();
     }
     #[test]
     fn editor_location_changes_reject_old_writes() {

@@ -1,6 +1,12 @@
 import type { NoteWindowState } from './notesStore';
 
 export const CAPSULE = { width: 180, height: 40 };
+/** A docked note is a slim bookmark tab: flat against the screen edge, rounded inward. */
+export const EDGE_TAB = { width: 28, height: 64 };
+export const EDGE_PITCH = 70;
+export const EDGE_INSET = 12;
+/** Smallest frame any note window may take (edge tab or capsule). */
+export const NOTE_MIN = { width: Math.min(CAPSULE.width, EDGE_TAB.width), height: Math.min(CAPSULE.height, EDGE_TAB.height) };
 export const EDITOR_MIN = { width: 260, height: 180 };
 export type Bounds = { x: number; y: number; width: number; height: number; scaleFactor: number; space?: 'logical'; nativeScale?: number };
 export type Display = { scaleFactor: number; workArea: { position: { x: number; y: number }; size: { width: number; height: number } } };
@@ -82,6 +88,6 @@ export function restoreBounds(state: NoteWindowState, current: Bounds, displays:
     x: state.x == null ? current.x : state.x * current.scaleFactor,
     y: state.y == null ? current.y : state.y * current.scaleFactor,
   };
-  const size = state.collapsed ? CAPSULE : { width: Math.max(EDITOR_MIN.width, state.width), height: Math.max(EDITOR_MIN.height, state.height) };
+  const size = state.collapsed ? (state.edge ? EDGE_TAB : CAPSULE) : { width: Math.max(EDITOR_MIN.width, state.width), height: Math.max(EDITOR_MIN.height, state.height) };
   return fitBounds({ ...current, ...position, ...size }, displays);
 }

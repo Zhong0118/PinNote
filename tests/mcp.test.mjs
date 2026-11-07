@@ -32,3 +32,17 @@ test('MCP connects over loopback and propagates version conflicts',async()=>{
     assert.equal(received[0].token,'test-only');assert.equal(received[1].arguments.expectedRevision,1);
   }finally{await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true});}
 });
+test('MCP decodes UTF-8 replies split inside a multi-byte character',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'pinnote-mcp-'));
+  const server=createServer(socket=>{socket.once('data',()=>{
+    const bytes=Buffer.from(JSON.stringify({result:{id:'a',content:'原始记录 📝'}})+'\n','utf8');
+    const cut=bytes.indexOf(Buffer.from('原','utf8'))+1;
+    socket.write(bytes.subarray(0,cut));setTimeout(()=>socket.end(bytes.subarray(cut)),20);
+  });});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const path=join(dir,'connection.json');await writeFile(path,JSON.stringify({port:server.address().port,token:'test-only'}));
+    const [reply]=await request(path,[{method:'tools/call',params:{name:'read_note',arguments:{id:'a'}}}]);
+    assert.equal(JSON.parse(reply.result.content[0].text).content,'原始记录 📝');
+  }finally{await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true});}
+});

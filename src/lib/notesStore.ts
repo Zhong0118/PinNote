@@ -53,7 +53,7 @@ let pendingSave: Promise<void> = Promise.resolve();
 const revisions = new Map<string, number>();
 export function hasPendingSave(id: string) { return pendingNotes.has(id); }
 export function discardPendingSave(id: string) {
-  clearTimeout(timers.get(id)); timers.delete(id); pendingNotes.delete(id);
+  clearTimeout(timers.get(id)); timers.delete(id); pendingNotes.delete(id); scopes.delete(id);
   void invoke('note_draft',{id,dirty:false}).catch(()=>{});
 }
 export async function noteOperation(note: PinNote, op: string, extra: Record<string, unknown> = {}) {
@@ -129,9 +129,22 @@ export function createNote(seed: Partial<PinNote> = {}): PinNote {
   };
 }
 
-export function scheduleNoteSave(note: PinNote, onResult?: (error?: unknown) => void) {
-  if(!pendingNotes.has(note.id)) void invoke('note_draft',{id:note.id,dirty:true}).catch(()=>{});
+/**
+ * Which part of a note a save writes.
+ * - `body`: title + content (the center never writes desktop geometry).
+ * - `window`: geometry only; never conflicts with a body draft edited elsewhere.
+ * - `all`: an expanded desktop window owning both.
+ */
+export type SaveScope = "all" | "body" | "window";
+const scopes = new Map<string, SaveScope>();
+const mergeScope = (a: SaveScope | undefined, b: SaveScope): SaveScope => !a || a === b ? b : "all";
+
+export function scheduleNoteSave(note: PinNote, onResult?: (error?: unknown) => void, scope: SaveScope = "all") {
+  const merged = mergeScope(pendingNotes.has(note.id) ? scopes.get(note.id) : undefined, scope);
+  const bodyAlreadyDirty = pendingNotes.has(note.id) && scopes.get(note.id) !== "window";
+  if (merged !== "window" && !bodyAlreadyDirty) void invoke('note_draft',{id:note.id,dirty:true}).catch(()=>{});
   pendingNotes.set(note.id, { ...note, window: { ...note.window } });
+  scopes.set(note.id, merged);
   clearTimeout(timers.get(note.id));
   timers.set(
     note.id,
@@ -160,23 +173,32 @@ export async function flushNoteSave(id?: string) {
     for (const snapshot of notes) {
       const note = pendingNotes.get(snapshot.id);
       if (!note) continue;
+      const scope = scopes.get(note.id) ?? "all";
       const next = { ...note, updatedAt: Date.now() };
       const revision = Math.max(revisions.get(note.id) ?? 0, note.revision);
+      const op = revision === 0 ? "create" : scope === "window" ? "window" : "save";
+      const patch = scope === "window" ? { window: next.window }
+        : scope === "body" ? { title: next.title, content: next.content }
+        : { title: next.title, content: next.content, window: next.window };
       const result = await invoke<PinNote>("note_operation", { request: {
-        id: note.id, op: revision === 0 ? "create" : "save", expectedRevision: revision,
-        note: next, patch: {title:next.title,content:next.content,window:next.window},
+        id: note.id, op, expectedRevision: revision, note: next, patch,
       } });
       if (result) revisions.set(note.id, result.revision);
       // A newer draft may have arrived while the native write was in flight.
-      if (pendingNotes.get(note.id) === note) { pendingNotes.delete(note.id); await invoke('note_draft',{id:note.id,dirty:false}); }
+      if (pendingNotes.get(note.id) === note) {
+        pendingNotes.delete(note.id); scopes.delete(note.id);
+        if (scope !== "window") await invoke('note_draft',{id:note.id,dirty:false});
+      }
     }
   });
 
   return pendingSave;
 }
 
-export async function saveNoteNow(note: PinNote) {
+export async function saveNoteNow(note: PinNote, scope: SaveScope = "all") {
+  const merged = mergeScope(pendingNotes.has(note.id) ? scopes.get(note.id) : undefined, scope);
   pendingNotes.set(note.id, { ...note, window: { ...note.window } });
+  scopes.set(note.id, merged);
   await flushNoteSave(note.id);
   note.revision = revisions.get(note.id) ?? note.revision;
 }
@@ -205,6 +227,7 @@ export async function deleteNoteNow(id: string) {
   clearTimeout(timers.get(id));
   timers.delete(id);
   pendingNotes.delete(id);
+  scopes.delete(id);
   await pendingSave.catch(() => undefined);
 
   const current = (await loadNotes()).notes[id];

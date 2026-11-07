@@ -71,6 +71,8 @@
     void setup();
 
     return () => {
+      // Callers flush() before switching notes or closing; flushing here could
+      // write this editor's text into whichever note the props now point at.
       disposed = true;
       clearTimeout(updateTimer);
       void editorInstance?.destroy();
@@ -159,8 +161,10 @@
           view: () => ({
             update: (view, previous) => {
               if (view.state.doc.eq(previous.doc)) return;
+              // Serializing the whole document is O(size): do it once typing pauses,
+              // not on every keystroke. Explicit flush() calls still save immediately.
               clearTimeout(updateTimer);
-              flush();
+              updateTimer = setTimeout(flush, 250);
             },
             destroy: () => clearTimeout(updateTimer),
           }),
@@ -184,22 +188,29 @@
   {#if readonly}<p class="render-error">预览加载失败，请在独立窗口查看</p>{:else}<SourceEditor {value} {onChange} />{/if}
 {:else}
   <div class="editor-layout" class:readonly>
-    {#if !readonly || progress.total}
+    {#if progress.total || showTaskInput}
       <div class="task-tools">
-        {#if progress.total}<span class="task-progress"><ListTodo size={14}/>{progress.done===progress.total?'待办已全部完成':`${progress.total-progress.done} 项待办`}<span class="count">{progress.done}/{progress.total}</span></span>{/if}
+        {#if progress.total}<span class="task-progress"><ListTodo size={14}/>{progress.done===progress.total?'待办已全部完成':'已完成'}<span class="count">{progress.done}/{progress.total}</span></span>{/if}
         {#if !readonly}<button class="add-task" onclick={()=>showTaskInput=!showTaskInput} aria-expanded={showTaskInput}><Plus size={14}/>添加待办</button>{/if}
         {#if progress.total && onReminder}<button aria-label="提醒这张待办便签" title="为这张便签设置提醒" onclick={onReminder}><Bell size={14}/></button>{/if}
         {#if progress.done && !readonly}<button title="移除已完成项 · 可撤销" aria-label="移除已完成待办" onclick={clearCompleted}><CheckCheck size={14}/></button>{/if}
       </div>
     {/if}
     {#if showTaskInput && !readonly}<form class="task-entry" onsubmit={e=>{e.preventDefault();void addTask();}}><input bind:this={taskField} bind:value={taskInput} aria-label="待办内容" placeholder="写下下一件要做的事" oncompositionstart={()=>composingTask=true} oncompositionend={()=>composingTask=false} onkeydown={e=>{if(e.isComposing&&e.key==='Enter')e.preventDefault();}}/><button type="submit" disabled={!taskInput.trim()}>添加</button><small>Enter 添加 · 正文中也可以输入 - [ ] 创建待办</small></form>{/if}
+    {#if !readonly && !progress.total && !showTaskInput}
+      <!-- Plain notes stay clean: the to-do entry only surfaces on hover or keyboard focus. -->
+      <button class="quiet-task" title="添加待办（也可输入 - [ ] ）" onclick={()=>{showTaskInput=true;requestAnimationFrame(()=>taskField?.focus());}}><Plus size={13}/>待办</button>
+    {/if}
    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
     <div class="milkdown-host" bind:this={root} role="application" onclick={handleTaskClick} onkeydown={taskKey}></div>
   </div>
 {/if}
 
 <style>
-  .editor-layout{height:100%;min-height:0;display:flex;flex-direction:column}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:6px;padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background 140ms,transform 140ms}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:7px;background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:#737373;font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
+  .editor-layout{position:relative;height:100%;min-height:0;display:flex;flex-direction:column}
+  .quiet-task{position:absolute;z-index:2;top:4px;right:14px;display:inline-flex;align-items:center;gap:3px;border:0;border-radius:6px;padding:2px 7px;font:inherit;font-size:11px;color:var(--pin-muted,#737373);background:color-mix(in srgb,var(--pin-bg,#fff) 88%,transparent);cursor:pointer;opacity:0;transition:opacity 140ms}
+  .editor-layout:hover .quiet-task,.quiet-task:focus-visible{opacity:.85}.quiet-task:hover{color:var(--pin-accent,#2563eb);opacity:1}
+  @media(prefers-reduced-motion:reduce){.quiet-task{transition:none}}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:6px;padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background 140ms,transform 140ms}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:7px;background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:#737373;font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
   .milkdown-host {
     flex:1;
     min-height: 0;
@@ -214,6 +225,9 @@
 
   .milkdown-host :global(.editor) {
     min-height: 100%;
+    /* Comfortable reading measure in wide windows; narrow notes simply fill. */
+    max-width: 820px;
+    margin: 0 auto;
     display: flow-root;
     outline: 0;
     color: var(--pin-text);

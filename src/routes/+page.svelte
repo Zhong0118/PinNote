@@ -1,7 +1,9 @@
 <script lang="ts">
   import { createQuitGuard } from "$lib/quitGuard";
   import { noteOperation, hasPendingSave, discardPendingSave } from '$lib/notesStore';
-  import { edgeTarget, edgeLayout, edgeOrder } from '$lib/edgeQueue';
+  import { edgeTarget, edgeLayout, edgeOrder, dockedEditorBounds } from '$lib/edgeQueue';
+  import { releaseCenterEditor } from '$lib/editorHandoff';
+  import { animateWindow, type Curve } from '$lib/nativeMotion';
   import { showPreview } from '$lib/previewWindow';
   import { openCenter } from '$lib/centerWindow';
   import ReminderDialog from '../components/ReminderDialog.svelte';
@@ -41,16 +43,26 @@
     saveNoteNow,
     scheduleNoteSave,
     type PinNote,
+    type NoteWindowState,
+    type SaveScope,
   } from "$lib/notesStore";
   import { requestWindowVisibility, listenWindowVisibility } from "$lib/windowVisibility";
   import { noteWindowLabel, findNoteWindow, openNoteWindow } from "$lib/noteWindows";
 
-  import { CAPSULE, EDITOR_MIN, displayFor, fitBounds, normalizeBounds, normalizeDisplays, switchBounds, rememberBounds, restoreBounds, type Bounds } from "$lib/windowGeometry";
+  import { CAPSULE, EDITOR_MIN, NOTE_MIN, displayFor, fitBounds, normalizeBounds, normalizeDisplays, switchBounds, rememberBounds, restoreBounds, type Bounds, type Display } from "$lib/windowGeometry";
+
+  type Edge = NonNullable<NoteWindowState["edge"]>;
+  const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let transitioning = $state(false);
   let modeChange: Promise<void> | undefined;
   let dragging = false;
   let layingOut = false;
+  let relayout = false;
+  // While the native frame animates, the content keeps its expanded size and is
+  // clipped by the moving frame, so nothing reflows mid-animation.
+  let freeze = $state<{ width: number; height: number }>();
+  let opening = $state(false);
   let edgeHint = $state('');
   let previewTimer: ReturnType<typeof setTimeout>;
   let hovering = false;
@@ -105,9 +117,10 @@
       const pending = await invoke<number | null>("pending_quit");
       if (pending != null) void prepareToQuit(pending);
       // Complete the initial reveal before accepting tray requests or edits.
-      if (!isMainWindow || !(await invoke<boolean>("startup_hidden"))) await win.show();
       ready = true;
-      await layoutEdges();
+      // Place a docked tab in its slot before the first paint instead of jumping after it.
+      await layoutEdges(false);
+      if ((!isMainWindow || !(await invoke<boolean>("startup_hidden"))) && !overflowHidden) await win.show();
     });
     void initialization.catch(async (error) => {
       status = `加载失败，原数据已保留：${String(error)}`;
@@ -177,24 +190,30 @@
       event.preventDefault();
       await closeCurrentNote();
     });
-    const changes = listen<{id:string;note:PinNote|null;op:string}>('notes-changed', async ({payload}) => {
+    const changes = listen<{id:string;note:PinNote|null;op:string;layout?:boolean}>('notes-changed', async ({payload}) => {
       if (payload.id === note.id && ready && payload.op !== 'focus') {
         if(payload.op==='appearance'&&payload.note){const {theme,customColor,opacity,alwaysOnTop}=payload.note;note={...note,theme,customColor,opacity,alwaysOnTop};return;}
         editor?.flush();
         if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
           if(hasPendingSave(note.id)) { status='便签状态已变化，本地草稿已保留，请先导出';return; }
           discardPendingSave(note.id); ready = false; isDeleting = true; await win.destroy();
-        } else if (!hasPendingSave(note.id) && payload.note.revision > note.revision) {
+        } else if (payload.note.revision > note.revision && (!hasPendingSave(note.id) || note.window.collapsed)) {
+          // Body edits made in the center while this note is a capsule/tab. Geometry
+          // stays owned by this window.
           const contentChanged = note.content !== payload.note.content;
-          note = payload.note; if (contentChanged) editorRevision++;
+          note = { ...payload.note, window: note.window }; if (contentChanged) editorRevision++;
         }
       }
       if(notesOpen) await refreshNoteList();
-      if(payload.op !== 'focus') await layoutEdges();
+      if(payload.layout) await layoutEdges();
     });
     const expand = listen<{id:string}>('expand-note-requested', ({payload}) => {
       if(payload.id === note.id && note.window.collapsed) { toggleCollapsed(); void win.setFocus(); }
     });
+    // The center asks to take over editing: collapse back to the capsule or edge slot.
+    const collapseRequest = listen<{id:string}>('collapse-note-requested', ({payload}) => {
+      if(payload.id === note.id && ready && !note.window.collapsed) toggleCollapsed();
+    }, { target: win.label });
     const locate=listen<{id:string}>('locate-note-requested',async({payload})=>{
       if(payload.id!==note.id||!ready)return;
       try{
@@ -247,7 +266,7 @@
 
     return () => {
       clearTimeout(windowStateTimer);
-      clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f());
+      clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f()); collapseRequest.then(f=>f());
       clearTimeout(locateTimer);locate.then(f=>f());
       clearInterval(monitorTimer);
       if (isMainWindow) void unregisterGlobalShortcuts();
@@ -485,12 +504,14 @@
     await refreshNoteList();
   }
 
-  function queueNoteSave() {
+  // A collapsed note is only an entry point: it writes geometry, never the body.
+  function queueNoteSave(scope: SaveScope = note.window.collapsed ? "window" : "all") {
     if (!ready || isDeleting) return;
-    status = "正在保存…";
+    if (scope !== "window") status = "正在保存…";
     scheduleNoteSave(note, (error) => {
-      status = error ? "保存失败，请重试或导出便签" : "已自动保存";
-    });
+      if (error) status = "保存失败，请重试或导出便签";
+      else if (scope !== "window") status = "已自动保存";
+    }, scope);
   }
 
   function updateTitle(value: string) {
@@ -592,7 +613,7 @@
     try {
       dragging = true; hoverPreview(false);
       clearTimeout(windowStateTimer);
-      const beforeDrag = rememberBounds(structuredClone($state.snapshot(note.window)),await readWindowBounds());
+      const start = await readWindowBounds();
       await getCurrentWindow().startDragging();
       // Native startDragging can resolve before mouse-up (notably on macOS).
       // Track the native button, not DOM pointerup which leaves this webview.
@@ -602,27 +623,55 @@
         await new Promise(resolve=>setTimeout(resolve,60));
       }
       const bounds = await readWindowBounds();
+      dragging = false; edgeHint = '';
+      // A press without movement (e.g. on the title bar of a note opened from its tab)
+      // must not re-dock or undock it.
+      if (Math.abs(bounds.x - start.x) < 4 * bounds.scaleFactor && Math.abs(bounds.y - start.y) < 4 * bounds.scaleFactor) return;
       const displays=normalizeDisplays(await availableMonitors(), isMacPlatform());
       const edge = edgeTarget(bounds, displays);
-      dragging = false;
-      if(edge)await dockToEdge(edge.side,beforeDrag,bounds);
-      else {note.window={...rememberBounds({...note.window,edge:null},bounds),edge:null};await saveNoteNow(note);}
+      if(edge) await dockToEdge(edge.side,bounds);
+      else await undock(bounds, displays);
     } catch(error) {
       status=`贴边或移动失败：${String(error)}`;
     } finally { dragging = false; edgeHint = ''; }
   }
-  async function dockToEdge(side:'left'|'right',saved=structuredClone($state.snapshot(note.window)),bounds?:Bounds) {
+
+  /** Dragging off the edge is the only way to leave a slot; a tab becomes a free capsule. */
+  async function undock(bounds: Bounds, displays: Display[]) {
+    let target = bounds;
+    if (note.window.collapsed && note.window.edge) {
+      const fromRight = note.window.edge.side === 'right';
+      target = fitBounds({ ...bounds, ...CAPSULE, x: fromRight ? bounds.x + bounds.width * bounds.scaleFactor - CAPSULE.width * bounds.scaleFactor : bounds.x }, displays, bounds);
+      layingOut = true;
+      try {
+        note = { ...note, window: { ...note.window, edge: null } };
+        await tick();
+        await setWindowBounds(target, true, !reducedMotion(), "out", 220);
+      } finally { layingOut = false; }
+    }
+    note = { ...note, window: { ...rememberBounds({ ...note.window, edge: null }, target), edge: null } };
+    await saveNoteNow(note, "window");
+  }
+
+  async function dockToEdge(side:'left'|'right', bounds?:Bounds) {
     try {
-      editor?.flush();await flushNoteSave(note.id);
+      editor?.flush();
       const current=bounds??await readWindowBounds();const displays=normalizeDisplays(await availableMonitors(),isMacPlatform());
-      if(!bounds && !saved.edge)saved=rememberBounds(saved,current);
       const display=displayFor(current,displays);if(!display)throw new Error('无法读取显示器工作区');
       const p=display.workArea.position;
-      const edge={side,display:`${p.x}:${p.y}`,order:current.y};
+      const edge:Edge={side,display:`${p.x}:${p.y}`,order:current.y};
       edge.order=edgeOrder(note.id,edge,current,Object.values((await loadNotes()).notes),displays);
-      if(!note.window.collapsed)await changeWindowMode();
-      if(!note.window.collapsed)throw new Error('收起失败，请先保存便签');
-      note.window={...saved,collapsed:true,edge};await saveNoteNow(note);await layoutEdges();
+      if(!note.window.collapsed) {
+        // Shrink straight into the slot: one continuous motion, no intermediate capsule.
+        await modeChange;
+        modeChange = changeWindowMode(edge).finally(() => { modeChange = undefined; });
+        await modeChange;
+        if(!note.window.collapsed)throw new Error('收起失败，请先保存便签');
+      } else {
+        note={...note,window:{...note.window,edge}};
+        await saveNoteNow(note,"window");
+        await layoutEdges();
+      }
       status=`已收纳到${side==='left'?'左':'右'}侧 · 向内拖动可移出`;
     }catch(error){status=`贴边失败：${String(error)}`;}
   }
@@ -675,13 +724,13 @@
     return normalizeBounds({ x: position.x, y: position.y, width: logical.width, height: logical.height, scaleFactor }, isMacPlatform());
   }
 
-  async function setWindowBounds(bounds: Bounds, collapsed: boolean, animate = false) {
+  async function setWindowBounds(bounds: Bounds, collapsed: boolean, animate = false, curve: Curve = "inOut", duration = 220) {
     const win = getCurrentWindow();
     // Disable native resizing before shrinking: Windows otherwise enforces its resize-frame minimum.
     await win.setResizable(false);
-    await win.setMinSize(new LogicalSize(CAPSULE.width, CAPSULE.height));
+    await win.setMinSize(new LogicalSize(NOTE_MIN.width, NOTE_MIN.height));
     if (animate && isMacPlatform()) {
-      await invoke("animate_note_window", { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+      await animateWindow({ bounds, curve, duration });
     } else {
       await win.setPosition((isMacPlatform() ? new LogicalPosition(bounds.x, bounds.y) : new PhysicalPosition(bounds.x, bounds.y)));
       await win.setSize(new LogicalSize(bounds.width, bounds.height));
@@ -707,8 +756,20 @@
     modeChange = changeWindowMode().finally(() => { modeChange = undefined; });
   }
 
-  async function changeWindowMode() {
+  /** Where the window goes next: its edge slot, a frame opening inward from it, or a free capsule. */
+  async function modeTarget(current: Bounds, state: NoteWindowState, displays: Display[]): Promise<Bounds> {
+    if (state.edge) {
+      const peers = Object.values((await loadNotes()).notes).map(n => n.id === note.id ? { ...note, window: state } : n);
+      const slot = edgeLayout(peers, displays).get(note.id);
+      if (slot) return state.collapsed ? slot.bounds : dockedEditorBounds(slot, state, displays);
+    }
+    return switchBounds(current, state, Boolean(state.collapsed), displays);
+  }
+
+  async function changeWindowMode(dockEdge?: Edge) {
     transitioning = true;
+    // The capsule/tab unmounts without a pointerleave; dismiss its hover preview explicitly.
+    hoverPreview(false);
     geometryRevision += 1;
     clearTimeout(windowStateTimer);
     notesOpen = false;
@@ -716,42 +777,68 @@
     editor?.flush();
     const previous = note.window;
     let current: Bounds | undefined;
+    let moved = false;
     try {
       current = await readWindowBounds();
-      const saved = rememberBounds(previous, current);
       const collapsed = !previous.collapsed;
+      // Expanding keeps the slot: collapsing again returns to it; only dragging away undocks.
+      const edge = dockEdge ?? previous.edge ?? null;
+      const saved = { ...rememberBounds(previous, current), edge };
       const displays = normalizeDisplays(await availableMonitors(), isMacPlatform());
-      const target = !collapsed && previous.edge
-        ? restoreBounds({...saved,collapsed:false},current,displays)
-        : switchBounds(current, saved, collapsed, displays);
-      // Persist the live editor before changing the window; a failed write keeps it open.
-      note = { ...note, window: saved };
-      await saveNoteNow(note);
-      const animate = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      // Finish the content fade before resizing. The native frame animation then
-      // owns both position and size, instead of separate visible IPC jumps.
-      await tick();
-      if (animate) await new Promise((resolve) => setTimeout(resolve, 100));
-      note = { ...note, window: { ...saved, collapsed, edge:collapsed?saved.edge:null } };
-      await tick();
-      await setWindowBounds(target, collapsed, animate);
-      note = { ...note, window: rememberBounds({ ...saved, collapsed, edge:collapsed?saved.edge:null }, target) };
-      queueNoteSave();
-      await flushNoteSave(note.id);
-    } catch {
+      const animate = !reducedMotion();
+      if (collapsed) {
+        // Persist the live editor before shrinking; a failed write keeps it open.
+        note = { ...note, window: saved };
+        await saveNoteNow(note, "all");
+      } else {
+        // The center may be editing this note; take the editor back with its latest text.
+        await releaseCenterEditor(note.id);
+        const fresh = (await loadNotes()).notes[note.id];
+        if (fresh && (fresh.content !== note.content || fresh.title !== note.title || fresh.revision > note.revision)) {
+          const contentChanged = fresh.content !== note.content;
+          note = { ...fresh, window: saved };
+          if (contentChanged) editorRevision++;
+        }
+      }
+      const next = { ...saved, collapsed };
+      const target = await modeTarget(current, next, displays);
+      if (collapsed) {
+        // Fold the expanded note into the capsule/tab spot, then swap in the capsule.
+        freeze = { width: current.width, height: current.height };
+        await tick();
+        moved = true;
+        await setWindowBounds(target, true, animate, "inOut", 220);
+        note = { ...note, window: next };
+      } else {
+        // Lay out the header and editor at their final size first; the growing
+        // frame reveals them while the editor fades in.
+        freeze = { width: target.width, height: target.height };
+        note = { ...note, window: next };
+        opening = true;
+        await tick();
+        moved = true;
+        await setWindowBounds(target, false, animate, "out", 260);
+      }
+      freeze = undefined; opening = false;
+      note = { ...note, window: rememberBounds(next, target) };
+      transitioning = false;
+      await saveNoteNow(note, "window");
+    } catch (error) {
+      freeze = undefined; opening = false;
       note = { ...note, window: previous };
-      if (current) await setWindowBounds(current, Boolean(previous.collapsed)).catch(() => undefined);
+      if (current && moved) await setWindowBounds(current, Boolean(previous.collapsed)).catch(() => undefined);
       // Replace any failed compact-state save with the rolled-back state for the next retry.
-      queueNoteSave();
-      status = "窗口切换失败，已保留原便签，请重试";
+      queueNoteSave("window");
+      status = `窗口切换失败，已保留原便签：${error instanceof Error ? error.message : String(error)}`;
     } finally {
       transitioning = false;
     }
+    if (note.window.collapsed && note.window.edge) await layoutEdges();
   }
 
   async function openCurrentSettings() {
     editor?.flush();
-    await saveNoteNow(note);
+    await saveNoteNow(note, note.window.collapsed ? "window" : "all");
     await markNoteActive(note);
     await openSettingsWindow(note.id);
   }
@@ -776,9 +863,10 @@
     const id = note.id;
     const bounds = await readWindowBounds();
     if (revision !== geometryRevision || id !== note.id || transitioning || isDeleting) return;
-    if(note.window.edge) return;
+    // A docked tab's place is its slot; an expanded docked note still remembers its size.
+    if(note.window.edge && note.window.collapsed) return;
     note = { ...note, window: rememberBounds(note.window, bounds), updatedAt: Date.now() };
-    queueNoteSave();
+    queueNoteSave("window");
   }
 
   async function saveBeforeWindowAction() {
@@ -792,21 +880,34 @@
   function shortcutSignature(shortcuts: AppSettings["shortcuts"]) {
     return `${normalizeShortcut(shortcuts.toggleWindow)}\n${normalizeShortcut(shortcuts.newNote)}`;
   }
-  async function layoutEdges() {
-    if (!ready || layingOut || dragging || transitioning || !note.window.collapsed || !note.window.edge) return;
+  async function layoutEdges(animate = true) {
+    if (!ready || dragging || transitioning || !note.window.collapsed || !note.window.edge) return;
+    if (layingOut) { relayout = true; return; }
     layingOut = true;
     try {
-      const entries = edgeLayout(Object.values((await loadNotes()).notes), normalizeDisplays(await availableMonitors(), isMacPlatform()));
-      const target = entries.get(note.id);
-      if(target?.overflow) { overflowHidden=true; await getCurrentWindow().hide(); }
-      else if(target) { await setWindowBounds(target.bounds,true); edgeOverflow = target.extra; if(overflowHidden){overflowHidden=false;await getCurrentWindow().show();} }
-    } finally { layingOut = false; }
+      do {
+        relayout = false;
+        const win = getCurrentWindow();
+        const entries = edgeLayout(Object.values((await loadNotes()).notes), normalizeDisplays(await availableMonitors(), isMacPlatform()));
+        const target = entries.get(note.id);
+        if(target?.overflow) { if(!overflowHidden){ overflowHidden=true; await win.hide(); } }
+        else if(target) {
+          edgeOverflow = target.extra;
+          const current = await readWindowBounds();
+          const b = target.bounds;
+          const changed = Math.abs(current.x - b.x) > 1 || Math.abs(current.y - b.y) > 1 || Math.abs(current.width - b.width) > 1 || Math.abs(current.height - b.height) > 1;
+          // Peers glide into freed slots; unchanged tabs are left alone.
+          if (changed) await setWindowBounds(b, true, animate && !overflowHidden && !reducedMotion() && await win.isVisible(), "inOut", 200);
+          if(overflowHidden){overflowHidden=false;await win.show();}
+        }
+      } while (relayout && note.window.collapsed && note.window.edge);
+    } finally { layingOut = false; relayout = false; }
   }
   function hoverPreview(inside: boolean) {
     hovering = inside;
     clearTimeout(previewTimer);
     void emit('preview-hover',{id:note.id,inside});
-    if(inside && !dragging && note.window.collapsed) previewTimer = setTimeout(() => void showPreview(note).then(()=>{if(!hovering)void emit('preview-hover',{id:note.id,inside:false});}), 450);
+    if(inside && !dragging && note.window.collapsed) previewTimer = setTimeout(() => void showPreview(note).then(()=>{if(!hovering)void emit('preview-hover',{id:note.id,inside:false});}), 350);
   }
   async function lifecycle(id:string, op:string) {
     try {
@@ -834,6 +935,9 @@
 <WindowChrome
   disabled={!ready}
   collapsed={Boolean(note.window.collapsed)}
+  dockedSide={note.window.edge?.side}
+  {freeze}
+  {opening}
   {transitioning}
   onToggleCollapsed={toggleCollapsed}
   {edgeHint}

@@ -467,18 +467,39 @@ fn quit_save_complete(
     Ok(())
 }
 
-/// macOS can interpolate a complete native frame without position/size IPC jumps.
+/// macOS can interpolate a complete native frame (and opacity) without
+/// position/size IPC jumps. Omitted frame values keep the current frame, so the
+/// same command also performs pure fades. `duration` 0 applies immediately.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn animate_note_window(
     window: tauri::WebviewWindow,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    x: Option<f64>,
+    y: Option<f64>,
+    width: Option<f64>,
+    height: Option<f64>,
+    alpha: Option<f64>,
+    duration: Option<f64>,
+    curve: Option<String>,
 ) -> Result<(), String> {
-    if ![x, y, width, height].iter().all(|v| v.is_finite()) || width < 180.0 || height < 40.0 {
+    let values = [x, y, width, height, alpha];
+    if !values.iter().flatten().all(|v| v.is_finite())
+        || width.is_some_and(|w| w < 24.0)
+        || height.is_some_and(|h| h < 24.0)
+        || alpha.is_some_and(|a| !(0.0..=1.0).contains(&a))
+    {
         return Err("Invalid note window bounds".into());
     }
+    // Milliseconds from the UI; clamp so a bad value can never freeze the window.
+    let ms = duration.unwrap_or(240.0);
+    let seconds = if ms <= 0.0 { 0.0 } else { ms.clamp(60.0, 600.0) / 1000.0 };
+    // Cubic-bezier control points. Opening decelerates into place; closing and
+    // repositioning use a symmetric curve so neither end feels abrupt.
+    let points: (f32, f32, f32, f32) = match curve.as_deref() {
+        Some("inOut") => (0.45, 0.0, 0.2, 1.0),
+        Some("in") => (0.4, 0.0, 1.0, 1.0),
+        _ => (0.2, 0.85, 0.25, 1.0),
+    };
     #[cfg(target_os = "macos")]
     {
         let position = window.outer_position().map_err(|e| e.to_string())?;
@@ -492,24 +513,45 @@ async fn animate_note_window(
                     // SAFETY: Tauri owns this NSWindow, and this closure runs on its UI thread.
                     let ns_window = unsafe { &*pointer.cast::<objc2_app_kit::NSWindow>() };
                     let mut frame = ns_window.frame();
-                    frame.origin.x += x - f64::from(position.x) / scale;
+                    let (target_w, target_h) =
+                        (width.unwrap_or(frame.size.width), height.unwrap_or(frame.size.height));
+                    let current_x = f64::from(position.x) / scale;
+                    let current_y = f64::from(position.y) / scale;
+                    frame.origin.x += x.unwrap_or(current_x) - current_x;
                     // Cocoa's origin is bottom-left; keep the requested desktop top edge.
                     frame.origin.y +=
-                        frame.size.height - height - (y - f64::from(position.y) / scale);
-                    frame.size.width = width;
-                    frame.size.height = height;
+                        frame.size.height - target_h - (y.unwrap_or(current_y) - current_y);
+                    frame.size.width = target_w;
+                    frame.size.height = target_h;
+                    if seconds == 0.0 {
+                        ns_window.setFrame_display(frame, true);
+                        if let Some(alpha) = alpha {
+                            ns_window.setAlphaValue(alpha);
+                        }
+                        let _ = tx.try_send(Ok(()));
+                        return Ok(());
+                    }
                     use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext};
                     // Yield the AppKit run loop during resizing so WKWebView can repaint
                     // every intermediate frame instead of jumping at the animation end.
                     let animator = ns_window.animator();
                     NSAnimationContext::beginGrouping();
                     let context = NSAnimationContext::currentContext();
-                    context.setDuration(0.24);
+                    context.setDuration(seconds);
+                    let timing = objc2_quartz_core::CAMediaTimingFunction::functionWithControlPoints(
+                        points.0, points.1, points.2, points.3,
+                    );
+                    context.setTimingFunction(Some(&timing));
                     let finished = tx.clone();
                     context.setCompletionHandler(Some(&block2::RcBlock::new(move || {
                         let _ = finished.try_send(Ok(()));
                     })));
-                    animator.setFrame_display(frame, true);
+                    if x.is_some() || y.is_some() || width.is_some() || height.is_some() {
+                        animator.setFrame_display(frame, true);
+                    }
+                    if let Some(alpha) = alpha {
+                        animator.setAlphaValue(alpha);
+                    }
                     NSAnimationContext::endGrouping();
                     Ok(())
                 })();
@@ -524,12 +566,18 @@ async fn animate_note_window(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        window
-            .set_size(tauri::LogicalSize::new(width, height))
-            .map_err(|e| e.to_string())?;
-        window
-            .set_position(tauri::PhysicalPosition::new(x, y))
-            .map_err(|e| e.to_string())
+        let _ = (seconds, points, alpha);
+        if let (Some(width), Some(height)) = (width, height) {
+            window
+                .set_size(tauri::LogicalSize::new(width, height))
+                .map_err(|e| e.to_string())?;
+        }
+        if let (Some(x), Some(y)) = (x, y) {
+            window
+                .set_position(tauri::PhysicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 }
 
@@ -578,6 +626,15 @@ pub fn run() {
         .args(["--hidden"]);
 
     tauri::Builder::default()
+        // Must be registered first: a second launch hands over to the running app
+        // instead of opening another writer for the same notes.json and MCP port.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(NotesFileLock(Mutex::new(())))
         .manage(notes::Drafts::default())
         .manage(TemplatesFileLock(Mutex::new(())))

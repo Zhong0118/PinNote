@@ -25,6 +25,8 @@ async function native(name,args){
   try{descriptor=JSON.parse(await readFile(connectionFile,'utf8'));}catch{throw new Error('PINNOTE_UNAVAILABLE: 请启动 PinNote 并在设置中启用集成；找不到连接文件');}
   return new Promise((resolve,reject)=>{
     const socket=createConnection({host:'127.0.0.1',port:descriptor.port});let buffer='';
+    // Decode as one UTF-8 stream: a CJK/emoji code point may straddle two TCP chunks.
+    socket.setEncoding('utf8');
     socket.setTimeout(8000,()=>socket.destroy(new Error('PinNote connection timed out')));
     socket.on('error',()=>reject(new Error('PINNOTE_UNAVAILABLE: PinNote 未运行或连接失败，请启动应用并重试')));
     socket.on('connect',()=>socket.write(JSON.stringify({token:descriptor.token,name,arguments:args})+'\n'));

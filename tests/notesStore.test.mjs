@@ -141,3 +141,19 @@ test('deletion cannot replace concurrent edits to another note with a stale file
   await store.deleteNoteNow('a');
   assert.equal(file.notes.b.content, 'concurrent edit');
 });
+
+test('save scopes keep body and geometry writes apart', async () => {
+  const requests = [];
+  const store = loadStore(async (command, args) => { requests.push(args.request); return { ...args.request.note, revision: 3 }; });
+  const note = store.createNote({ id: 'b', revision: 2, content: 'body' });
+  await store.saveNoteNow(note, 'window');
+  assert.equal(requests.at(-1).op, 'window');
+  assert.deepEqual(Object.keys(requests.at(-1).patch), ['window']);
+  await store.saveNoteNow({ ...note, content: 'center' }, 'body');
+  assert.equal(requests.at(-1).op, 'save');
+  assert.deepEqual(Object.keys(requests.at(-1).patch), ['title', 'content']);
+  store.scheduleNoteSave({ ...note, content: 'mixed' }, undefined, 'body');
+  store.scheduleNoteSave({ ...note, content: 'mixed' }, undefined, 'window');
+  await store.flushNoteSave('b');
+  assert.deepEqual(Object.keys(requests.at(-1).patch), ['title', 'content', 'window']);
+});
