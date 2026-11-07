@@ -92,6 +92,19 @@ test('queued save takes a snapshot of the draft', async () => {
   await saving;
   assert.equal(saved.content, 'original');
 });
+test('changing color cannot promote a stale draft to a newer content revision',async()=>{
+  let expected;
+  const store=loadStore(async(command,args)=>{
+    if(args.request.op==='appearance')return {id:'a',revision:9,theme:'sky',customColor:'#2563eb',opacity:1,alwaysOnTop:true};
+    expected=args.request.expectedRevision;
+    throw new Error('VERSION_CONFLICT');
+  });
+  const draft=store.createNote({id:'a',revision:2,content:'local draft'});
+  await store.noteOperation(draft,'appearance',{patch:{theme:'sky'}});
+  assert.equal(draft.revision,2);assert.equal(draft.content,'local draft');
+  await assert.rejects(store.saveNoteNow(draft),/VERSION_CONFLICT/);
+  assert.equal(expected,2);
+});
 
 for (const raw of ['{broken', 'null', '{"notes":[]}']) {
   test(`invalid notes file is preserved instead of replaced: ${raw}`, async () => {

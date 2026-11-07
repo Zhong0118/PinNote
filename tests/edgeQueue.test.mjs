@@ -34,3 +34,7 @@ test('reordering uses neighbors rather than stale original drag coordinates',()=
   const bounds={x:4040,y:136,width:180,height:40,scaleFactor:2};
   assert.equal(edgeOrder('c',edge,bounds,peers,[display]),1500);
 });
+test('dragging beyond the work area keeps the edge target',()=>{
+  assert.equal(edgeTarget({x:1940,y:50,width:180,height:40,scaleFactor:2},[display]).side,'left');
+  assert.equal(edgeTarget({x:4120,y:50,width:180,height:40,scaleFactor:2},[display]).side,'right');
+});

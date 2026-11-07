@@ -5,6 +5,7 @@ import { requestWindowVisibility } from "./windowVisibility";
 import { CAPSULE } from "./windowGeometry";
 import type { PinNote } from "./notesStore";
 import { noteOperation } from './notesStore';
+import { emitTo } from '@tauri-apps/api/event';
 
 export function noteWindowLabel(noteId: string) {
   return `note-${noteId}`;
@@ -15,7 +16,7 @@ export async function findNoteWindow(noteId: string) {
   return WebviewWindow.getByLabel(mainId === noteId ? "main" : noteWindowLabel(noteId));
 }
 
-export async function openNoteWindow(note: PinNote, options: { offset?: boolean } = {}) {
+export async function openNoteWindow(note: PinNote, options: { offset?: boolean; locate?: boolean } = {}) {
   if(note.lifecycle !== 'active') throw new Error('请先恢复便签');
   if(note.placement !== 'desktop') await noteOperation(note,'desktop');
   const label = noteWindowLabel(note.id);
@@ -23,6 +24,7 @@ export async function openNoteWindow(note: PinNote, options: { offset?: boolean 
 
   if (existing) {
     await requestWindowVisibility(existing.label, true);
+    if(options.locate)await emitTo(existing.label,'locate-note-requested',{id:note.id});
     await existing.setFocus();
     return;
   }
@@ -51,5 +53,6 @@ export async function openNoteWindow(note: PinNote, options: { offset?: boolean 
   });
   await new Promise<void>((resolve,reject) => { created.once('tauri://created',()=>resolve()); created.once('tauri://error', e=>reject(e.payload)); });
   await requestWindowVisibility(label, true);
+  if(options.locate)await emitTo(label,'locate-note-requested',{id:note.id});
   await created.setFocus();
 }

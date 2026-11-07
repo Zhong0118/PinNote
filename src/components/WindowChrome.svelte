@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, Maximize2, Minimize2 } from "lucide-svelte";
+  import { CircleAlert, Maximize2, Minimize2, GripVertical } from "lucide-svelte";
   import type { Window } from "@tauri-apps/api/window";
   type ResizeDirection = Parameters<Window["startResizeDragging"]>[0];
   import Toolbar from "./Toolbar.svelte";
@@ -33,13 +33,15 @@
     edgeOverflow?: number;
     onReminder?: () => void;
     onClearCompleted?: () => void;
+    onDock?: (side:'left'|'right')=>void;
+    locating?: boolean;
     onStartDrag: (event: PointerEvent) => void;
     onStartResize: (event: PointerEvent, direction: ResizeDirection) => void;
     children: import("svelte").Snippet;
   };
   let { disabled = false, collapsed = false, transitioning = false, title, status, sourceMode, settings,
     onTitleChange, onTogglePin, onToggleSource, onOpenNotes, onOpenTemplates, onExport, onOpenSettings,
-    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, onReminder, onClearCompleted, edgeHint = '', edgeOverflow = 0, onStartDrag, onStartResize, children }: Props = $props();
+    onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, onReminder, onClearCompleted, onDock, locating=false, edgeHint = '', edgeOverflow = 0, onStartDrag, onStartResize, children }: Props = $props();
   let visibleStatus = $state(false);
   const statusIsError = $derived(/失败|错误|无法|不能/.test(status));
   $effect(() => {
@@ -96,7 +98,9 @@
 
 <main inert={disabled} class="window-shell theme-{settings.theme}" class:collapsed class:transitioning
   style:--pin-opacity={settings.opacity} style:--pin-custom={settings.customColor}>
-  <section class="note-window" aria-label="PinNote 便签">
+  <section class="note-window" class:locating class:edge-ready={!!edgeHint} aria-label="PinNote 便签">
+    {#if edgeHint && !collapsed}<div class="edge-indicator" role="status">{edgeHint}</div>{/if}
+    {#if locating}<div class="locate-indicator" role="status">已定位到这张便签</div>{/if}
     {#if collapsed}
       <div bind:this={capsule} class="capsule" data-capsule-drag role="button" tabindex="0" aria-label={`展开便签 ${title || "未命名便签"}`}
         title={statusIsError ? status : title || "未命名便签"} aria-describedby={statusIsError ? "capsule-error" : undefined}
@@ -118,6 +122,7 @@
       {/if}
     {/if}
     <header class="dragbar" inert={collapsed || transitioning} aria-hidden={collapsed} role="presentation" onpointerdown={onStartDrag}>
+      <span class="drag-grip" title="拖动便签 · 靠近左右边缘可收纳"><GripVertical size={14}/></span>
       <input class="title-input" aria-label="便签标题" placeholder="未命名便签" value={title}
         oninput={(event) => onTitleChange(event.currentTarget.value)} />
       <div class="header-actions">
@@ -126,7 +131,7 @@
         </button>
         {#if !collapsed}
           <Toolbar alwaysOnTop={settings.alwaysOnTop} {sourceMode} {onTogglePin} {onToggleSource} {onOpenNotes}
-            {onOpenTemplates} {onExport} {onOpenSettings} {onDelete} {onQuit} {onNewNote} {onArchive} {onReturn} {onReminder} {onClearCompleted} />
+            {onOpenTemplates} {onExport} {onOpenSettings} {onDelete} {onQuit} {onNewNote} {onArchive} {onReturn} {onReminder} {onClearCompleted} {onDock} />
         {/if}
       </div>
     </header>
@@ -146,6 +151,8 @@
 </main>
 
 <style>
+  .drag-grip{display:grid;place-items:center;flex:0 0 14px;margin-left:-8px;margin-right:-8px;color:var(--pin-muted);opacity:.5;cursor:grab}.drag-grip:hover{opacity:1}
+  .note-window.locating,.note-window.edge-ready{box-shadow:inset 0 0 0 2px #3b82f6}.note-window.locating{animation:locate-glow 600ms ease-in-out 3}.edge-indicator,.locate-indicator{position:absolute;z-index:130;top:43px;left:50%;transform:translateX(-50%);background:#2563eb;color:white;padding:4px 10px;border-radius:8px;font-size:11px;white-space:nowrap;pointer-events:none}.collapsed .locate-indicator{display:none}@keyframes locate-glow{50%{box-shadow:inset 0 0 0 4px #93c5fd}}@media(prefers-reduced-motion:reduce){.note-window.locating{animation:none}}
   :global(*) { box-sizing: border-box; }
   :global(html), :global(body) { width: 100%; height: 100%; margin: 0; }
   :global(body) { overflow: hidden; color: #171717; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 14px; line-height: 1.55; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }

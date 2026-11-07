@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -15,6 +15,9 @@
   import { createQuitGuard } from '$lib/quitGuard';
   import ReminderDialog from '../../components/ReminderDialog.svelte';
   import { checklistProgress } from '$lib/checklist';
+  import NoteColorPicker from '../../components/NoteColorPicker.svelte';
+  import {noteBackground} from '$lib/noteAppearance';
+  import type {NoteTheme} from '$lib/settings';
   let reminderOpen=$state(false);
   let due=$state<PinNote[]>([]);
   const quitGuard = createQuitGuard();
@@ -76,7 +79,14 @@
   async function desktop() {
     if(!draft) return;
     await persist(); const note=(await loadNotes()).notes[draft.id];
-    await openNoteWindow(note); await select(note.id);
+    await openNoteWindow(note,{locate:true}); await select(note.id);status='已展开并高亮桌面便签';
+  }
+  async function changeColor(theme:NoteTheme,customColor?:string) {
+    if(!draft)return;
+    const current=(await loadNotes()).notes[draft.id];
+    await noteOperation(current,'appearance',{patch:{theme,...(customColor?{customColor}:{})}});
+    draft={...draft,theme:current.theme,customColor:current.customColor};
+    await refresh();status='颜色已同步到桌面便签';
   }
   async function recall() {
     if(!draft) return;
@@ -128,6 +138,7 @@
       status='已就绪';
     })().catch(e=>{status=String(e); void getCurrentWindow().show();});
     const changes=listen<{id:string;op:string;note:PinNote|null}>('notes-changed',async({payload})=>{
+      if(payload.op==='appearance'&&payload.id===draft?.id&&payload.note){draft={...draft,theme:payload.note.theme,customColor:payload.note.customColor,opacity:payload.note.opacity,alwaysOnTop:payload.note.alwaysOnTop};await refresh();return;}
       editor?.flush(); await refresh();
       if(payload.op==='trash'||payload.op==='archive') {const h=(await loadNotes()).history?.filter(h=>h.note.id===payload.id).at(-1);if(h)undo={id:payload.id,at:h.at};}
       if(draft?.id===payload.id && !hasPendingSave(payload.id) && payload.note && payload.note.revision>draft.revision) {
@@ -165,15 +176,17 @@
       <div class="list">
         {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={12}/></button></div>{/each}
         {#each visible as note(note.id)}
+          {@const tasks=checklistProgress(note.content)}
           <button class="note-row" class:chosen={selected===note.id} onclick={()=>run(()=>select(note.id))} draggable="true" ondragstart={e=>e.dataTransfer?.setData('text/pinnote',note.id)}>
-            <span>{note.title||'未命名便签'}{#if note.placement==='desktop'}<Monitor size={12}/>{/if}</span><small>{note.content.replace(/[#*`\[\]]/g,'').slice(0,100)||'空白便签'}</small>
+             <span class="row-heading"><i class="note-dot" style:background={note.theme==='paper'?'#d4d4d8':note.theme==='custom'?note.customColor:({mint:'#72bca0',rose:'#df9d9a',sky:'#7dafe1',grape:'#b69bd6',ink:'#555'}[note.theme])}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={12}/>{/if}</span><small>{note.content.replace(/[#*`\[\]]/g,'').slice(0,100)||'空白便签'}</small>
+             {#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}
           </button>
         {:else}<p class="empty">{query?'没有匹配的便签':'这里还没有便签'}</p>{/each}
       </div>
       <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={14}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={14}/>回收站</button><button aria-label="设置" onclick={()=>openSettingsWindow()}><Settings size={15}/></button></footer>
     </aside>
   {/if}
-  <section class="work" inert={busy}>
+  <section class="work" class:ink={draft?.theme==='ink'} style:--pin-bg={draft?noteBackground(draft.theme,draft.customColor):'#fff'} inert={busy}>
     <header class="tabs"><button aria-label="折叠列表" title="折叠列表" onclick={()=>sidebar=!sidebar}><PanelLeft size={17}/></button>
       <div class="tab-strip">
         {#each tabs as id(id)}
@@ -188,6 +201,7 @@
     {#if draft}
       <div class="title-row">
         <input aria-label="便签标题" value={draft.title} readonly={!editable} oninput={e=>update({title:e.currentTarget.value})}/>
+        {#if draft.lifecycle==='active'}<NoteColorPicker theme={draft.theme} customColor={draft.customColor} onChange={changeColor}/>{/if}
         {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{new Date(draft.reminder.at).toLocaleString()}</button>{/if}
         {#if draft.lifecycle==='active'}
           <button class="desktop" disabled={busy} onclick={()=>run(desktop)} ondragover={e=>e.preventDefault()} ondrop={e=>{e.preventDefault();const id=e.dataTransfer?.getData('text/pinnote');void run(async()=>{if(id)await select(id);await desktop();});}}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
@@ -205,24 +219,26 @@
         </div>{/if}
       </div>
       {#if editable}
-        {#key `${selected}:${revision}`}<MilkdownEditor bind:this={editor} value={draft.content} onChange={content=>update({content})} initialPosition={positions.get(selected)}/>{/key}
+        {#key `${selected}:${revision}`}<MilkdownEditor bind:this={editor} value={draft.content} onChange={content=>update({content})} initialPosition={positions.get(selected)} onReminder={()=>reminderOpen=true}/>{/key}
       {:else}
         <div class="preview" transition:reveal>
           {#if draft.placement==='desktop'&&draft.lifecycle==='active'}<div class="notice">正在独立窗口编辑 <button onclick={()=>run(recall)}>收回中心</button></div>{/if}
           {#if draft.lifecycle!=='active'}<div class="notice">{draft.lifecycle==='trash'?'已在回收站':'已归档'} <button onclick={()=>run(()=>operation('restore'))}>恢复</button></div>{/if}
-          {#if progress.total}<small>清单 {progress.done}/{progress.total}</small>{/if}<pre>{draft.content||'空白便签'}</pre>
+          {#key `${selected}:${revision}`}<MilkdownEditor readonly value={draft.content} onChange={()=>{}} onReminder={draft.lifecycle==='active'?()=>reminderOpen=true:undefined}/>{/key}
         </div>
       {/if}
     {:else}<div class="empty-work"><p>选择一张便签，开始书写</p><button onclick={()=>run(create)}><Plus size={15}/>新建便签</button></div>{/if}
     <div class="status" role="status">{status}{#if undo}<button onclick={()=>run(undoLast)}>撤销移除</button>{/if}</div>
   </section>
 </main>
-{#if reminderOpen&&draft}<ReminderDialog onClose={()=>reminderOpen=false} onSet={async at=>{await persist();const note=(await loadNotes()).notes[draft!.id];await noteOperation(note,'reminder',{at});draft=note;await refresh();}}/>{/if}
+{#if reminderOpen&&draft}<ReminderDialog currentAt={draft.reminder?.at} onClose={()=>reminderOpen=false} onSet={async at=>{await persist();const note=(await loadNotes()).notes[draft!.id];await noteOperation(note,'reminder',{at});draft=note;await refresh();}}/>{/if}
 
 <style>
  :global(*){box-sizing:border-box}:global(body){margin:0;font:13px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;color:#171717;background:#fff}
- .time{font-size:11px;color:#2563eb;background:#eff6ff}.due{display:flex;flex-wrap:wrap;font-size:11px;background:#eff6ff;border-radius:6px;margin:4px}.due button{font-size:11px}
+  .time{font-size:11px;color:#2563eb;background:#eff6ff}.due{display:flex;flex-wrap:wrap;font-size:11px;background:#eff6ff;border-radius:6px;margin:4px}.due button{font-size:11px}
+  .note-row .row-heading{justify-content:flex-start}.row-heading b{flex:1;overflow:hidden;text-overflow:ellipsis;font-weight:500}.preview :global(pre){white-space:pre-wrap;overflow-wrap:anywhere}
+ .work{background:var(--pin-bg);color:var(--pin-text);transition:background 180ms,color 180ms}.work.ink{--pin-text:#f5f5f5;--pin-heading:#fff;--pin-muted:#aaa;--pin-border:#ffffff20;--pin-accent:#93b4ff;--pin-accent-strong:#b6cdff;--pin-active:#343434}.title-row input{background:transparent}.tabs{background:#fafafa;color:#171717}.note-dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0}.note-row .list-progress{color:#2563eb;font-size:10px}.preview{display:flex;flex-direction:column;min-height:0}.preview :global(.editor-layout){flex:1;min-height:0}.preview .notice{margin-bottom:8px;color:var(--pin-muted);background:color-mix(in srgb,var(--pin-text),transparent 96%)}@media(prefers-reduced-motion:reduce){.work{transition:none}}
  main{--pin-text:#171717;--pin-heading:#111;--pin-muted:#737373;--pin-accent:#2563eb;--pin-accent-strong:#1d4ed8;--pin-border:#e5e7eb;--pin-bg:#fff;display:grid;grid-template-columns:230px minmax(0,1fr);height:100vh;overflow:hidden}main.folded{grid-template-columns:minmax(0,1fr)}
  aside{background:#fafafa;border-right:1px solid #ededee;display:flex;flex-direction:column;min-height:0}.search{display:flex;align-items:center;gap:8px;padding:14px 10px}.search input{min-width:0;width:100%;background:transparent}input{font:inherit;border:0;outline:0;color:inherit}input:focus{box-shadow:0 1px #2563eb}
- button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:6px;background:transparent;color:inherit;padding:6px 8px;font:inherit;cursor:pointer;transition:background 140ms,transform 140ms}button:hover{background:#eee}button:active{transform:scale(.97)}button:focus-visible{outline:2px solid #2563eb;outline-offset:-2px}button:disabled{opacity:.5;cursor:wait}.active,.chosen{color:#2563eb!important;background:#eff6ff!important}nav{display:flex;padding:0 8px 10px;gap:5px}nav button{font-size:12px;flex:1}.list{flex:1;overflow:auto;padding:0 7px}.note-row{display:block;width:100%;text-align:left;padding:10px;margin:2px 0}.note-row span{display:flex;align-items:center;justify-content:space-between;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.note-row small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#888;margin-top:3px;font-size:12px}footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:#737373}footer button:last-child{margin-left:auto}.work{display:grid;grid-template-rows:42px auto minmax(0,1fr) 30px;min-width:0;min-height:0}.tabs{display:flex;gap:5px;align-items:center;padding:5px 8px;border-bottom:1px solid #eee;min-width:0}.tab-strip{display:flex;min-width:0;overflow:hidden;flex:1;gap:4px}.tab{display:flex;min-width:110px;max-width:180px;border-radius:6px}.tab button:first-child{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.tab button:last-child{padding:5px}.tabs select{max-width:110px;border:0;background:#f5f5f5;border-radius:5px}.title-row{display:flex;align-items:center;gap:8px;padding:16px 20px;position:relative}.title-row input{flex:1;min-width:0;font-size:17px;font-weight:600}.desktop{font-size:12px;color:#2563eb}.more{border-radius:50%;background:#f5f5f5}.menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px #0001}.menu button{display:block;text-align:left;width:100%;font-size:12px}.danger{color:#dc2626}.preview{overflow:auto;padding:0 22px 22px}.preview pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.notice{color:#737373;font-size:12px;background:#fafafa;padding:8px;border-radius:6px}.notice button{color:#2563eb}.empty,.empty-work{color:#888;padding:16px}.empty-work{grid-row:2/4;display:flex;align-items:center;justify-content:center;flex-direction:column}.empty-work button{color:#2563eb}.status{grid-row:4;padding:4px 16px;color:#737373;font-size:11px;overflow:auto;border-top:1px solid #f5f5f5}.status button{font-size:11px;color:#2563eb;padding:0 8px}@media(max-width:700px){main{grid-template-columns:190px minmax(0,1fr)}.title-row{padding:12px}.desktop{font-size:11px}}@media(prefers-reduced-motion:reduce){button{transition:none}}
+ button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:6px;background:transparent;color:inherit;padding:6px 8px;font:inherit;cursor:pointer;transition:background 140ms,transform 140ms}button:hover{background:#eee}button:active{transform:scale(.97)}button:focus-visible{outline:2px solid #2563eb;outline-offset:-2px}button:disabled{opacity:.5;cursor:wait}.active,.chosen{color:#2563eb!important;background:#eff6ff!important}nav{display:flex;padding:0 8px 10px;gap:5px}nav button{font-size:12px;flex:1}.list{flex:1;overflow:auto;padding:0 7px}.note-row{display:block;width:100%;text-align:left;padding:10px;margin:2px 0}.note-row span{display:flex;align-items:center;justify-content:space-between;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.note-row small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#888;margin-top:3px;font-size:12px}footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:#737373}footer button:last-child{margin-left:auto}.work{display:grid;grid-template-rows:42px auto minmax(0,1fr) 30px;min-width:0;min-height:0}.tabs{display:flex;gap:5px;align-items:center;padding:5px 8px;border-bottom:1px solid #eee;min-width:0}.tab-strip{display:flex;min-width:0;overflow:hidden;flex:1;gap:4px}.tab{display:flex;min-width:110px;max-width:180px;border-radius:6px}.tab button:first-child{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.tab button:last-child{padding:5px}.tabs select{max-width:110px;border:0;background:#f5f5f5;border-radius:5px}.title-row{display:flex;align-items:center;gap:8px;padding:16px 20px;position:relative}.title-row input{flex:1;min-width:0;font-size:17px;font-weight:600}.desktop{font-size:12px;color:#2563eb}.more{border-radius:50%;background:#f5f5f5}.menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px #0001}.menu button{display:block;text-align:left;width:100%;font-size:12px}.danger{color:#dc2626}.preview{overflow:auto;padding:0 22px 22px}.notice{color:#737373;font-size:12px;background:#fafafa;padding:8px;border-radius:6px}.notice button{color:#2563eb}.empty,.empty-work{color:#888;padding:16px}.empty-work{grid-row:2/4;display:flex;align-items:center;justify-content:center;flex-direction:column}.empty-work button{color:#2563eb}.status{grid-row:4;padding:4px 16px;color:#737373;font-size:11px;overflow:auto;border-top:1px solid #f5f5f5}.status button{font-size:11px;color:#2563eb;padding:0 8px}@media(max-width:700px){main{grid-template-columns:190px minmax(0,1fr)}.title-row{padding:12px}.desktop{font-size:11px}}@media(prefers-reduced-motion:reduce){button{transition:none}}
 </style>

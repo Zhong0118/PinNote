@@ -60,7 +60,12 @@ export async function noteOperation(note: PinNote, op: string, extra: Record<str
   const result = await invoke<PinNote | null>("note_operation", { request: {
     id: note.id, op, expectedRevision: Math.max(revisions.get(note.id) ?? 0, note.revision), ...extra,
   } });
-  if (result) { revisions.set(note.id, result.revision); Object.assign(note, result); }
+  if (result) {
+    if(op==='appearance') {
+      const {theme,customColor,opacity,alwaysOnTop}=result;
+      Object.assign(note,{theme,customColor,opacity,alwaysOnTop});
+    } else { revisions.set(note.id, result.revision); Object.assign(note, result); }
+  }
   return result;
 }
 
@@ -159,7 +164,7 @@ export async function flushNoteSave(id?: string) {
       const revision = Math.max(revisions.get(note.id) ?? 0, note.revision);
       const result = await invoke<PinNote>("note_operation", { request: {
         id: note.id, op: revision === 0 ? "create" : "save", expectedRevision: revision,
-        note: next, patch: next,
+        note: next, patch: {title:next.title,content:next.content,window:next.window},
       } });
       if (result) revisions.set(note.id, result.revision);
       // A newer draft may have arrived while the native write was in flight.
@@ -185,7 +190,7 @@ export async function getRecentNote() {
 
 export async function patchNoteNow(id: string, patch: Partial<PinNote>) {
   const { notes } = await loadNotes();
-  return (await noteOperation(notes[id], "save", { patch }))!;
+  return (await noteOperation(notes[id], "appearance", { patch }))!;
 }
 
 export async function markNoteActive(note: PinNote) {

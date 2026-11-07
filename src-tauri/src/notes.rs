@@ -166,6 +166,47 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
         }
         return Ok(file["notes"][id].clone());
     }
+    if op == "appearance" {
+        if before["lifecycle"] != "active" {
+            return Err("请先恢复便签".into());
+        }
+        let mut note = before.clone();
+        let patch = &request["patch"];
+        if let Some(theme) = patch.get("theme") {
+            if !matches!(
+                theme.as_str(),
+                Some("paper" | "mint" | "rose" | "sky" | "grape" | "ink" | "custom")
+            ) {
+                return Err("Invalid theme".into());
+            }
+            note["theme"] = theme.clone();
+        }
+        if let Some(color) = patch.get("customColor") {
+            let text = color.as_str().ok_or("Invalid color")?;
+            if text.len() != 7
+                || !text.starts_with('#')
+                || !text[1..].chars().all(|c| c.is_ascii_hexdigit())
+            {
+                return Err("Invalid color".into());
+            }
+            note["customColor"] = color.clone();
+        }
+        if let Some(opacity) = patch.get("opacity") {
+            if !opacity.as_f64().is_some_and(|v| (0.0..=1.0).contains(&v)) {
+                return Err("Invalid opacity".into());
+            }
+            note["opacity"] = opacity.clone();
+        }
+        if let Some(pin) = patch.get("alwaysOnTop") {
+            if !pin.is_boolean() {
+                return Err("Invalid pin state".into());
+            }
+            note["alwaysOnTop"] = pin.clone();
+        }
+        // Independent presentation metadata must not invalidate an unsaved body.
+        file["notes"][id] = note.clone();
+        return Ok(note);
+    }
     if request["expectedRevision"].as_u64() != before["revision"].as_u64() {
         return Err(format!(
             "VERSION_CONFLICT: 便签已更改（版本 {}），草稿保留，请重新读取或导出",
@@ -203,15 +244,7 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
                     return Err("EDITOR_MOVED: 编辑位置已改变，草稿未覆盖".into());
                 }
             }
-            for field in [
-                "title",
-                "content",
-                "theme",
-                "customColor",
-                "opacity",
-                "alwaysOnTop",
-                "window",
-            ] {
+            for field in ["title", "content", "window"] {
                 if let Some(value) = request["patch"].get(field) {
                     note[field] = value.clone();
                 }
@@ -385,6 +418,24 @@ mod tests {
     fn invalid_migration_preserves_data() {
         assert!(normalize(&mut json!({"notes":[]})).is_err());
         assert!(normalize(&mut json!({"version":3,"notes":{}})).is_err());
+    }
+    #[test]
+    fn appearance_updates_do_not_conflict_with_or_get_overwritten_by_body_drafts() {
+        let mut f = file();
+        mutate(
+            &mut f,
+            &json!({"id":"a","op":"appearance","patch":{"theme":"sky"}}),
+        )
+        .unwrap();
+        assert_eq!(f["notes"]["a"]["revision"], 1);
+        mutate(&mut f,&json!({"id":"a","op":"save","expectedRevision":1,"patch":{"content":"new draft","theme":"paper"}})).unwrap();
+        assert_eq!(f["notes"]["a"]["theme"], "sky");
+        assert_eq!(f["notes"]["a"]["content"], "new draft");
+        assert!(mutate(
+            &mut f,
+            &json!({"id":"a","op":"appearance","patch":{"customColor":"invalid"}})
+        )
+        .is_err());
     }
     #[test]
     fn agent_versions_can_be_restored_without_reopening_windows() {

@@ -14,6 +14,7 @@
    if(state.failWrites)throw new Error('模拟磁盘写入失败');
    const r=args.request;let n=state.notes[r.id];
    if(r.op==='focus')return n;
+   if(r.op==='appearance'){Object.assign(n,r.patch);return structuredClone(n);}
    if(r.op==='create')n={...r.note,revision:0};
    else if(n.revision!==r.expectedRevision)throw new Error('VERSION_CONFLICT');
    if(['trash','archive'].includes(r.op))state.history.push({at:Date.now(),op:r.op,note:structuredClone(n)});
@@ -32,4 +33,23 @@
   if(cmd==='plugin:window|is_visible')return true;
   return null;
  }};
+ if(new URLSearchParams(location.search).has('noteId')){
+  state.notes.a.placement='desktop';
+  state.position={x:600,y:180};state.size={width:840,height:1120};
+  state.dropPosition={x:0,y:180};
+  window.__TAURI_INTERNALS__.metadata={currentWindow:{label:'note-a'},currentWebview:{label:'note-a',windowLabel:'note-a'}};
+  const original=window.__TAURI_INTERNALS__.invoke;
+  window.__TAURI_INTERNALS__.invoke=async(cmd,args={})=>{
+   if(cmd==='plugin:window|outer_position')return state.position;
+   if(cmd==='plugin:window|inner_size')return state.size;
+   if(cmd==='plugin:window|scale_factor')return 2;
+   if(cmd==='plugin:window|available_monitors')return [{name:'test',position:{x:0,y:0},size:{width:2880,height:1800},scaleFactor:2,workArea:{position:{x:0,y:50},size:{width:2880,height:1650}}}];
+   if(cmd==='plugin:window|start_dragging'){state.position=state.dropPosition;return;}
+   if(cmd==='pointer_pressed')return false;
+   if(cmd==='plugin:window|set_position'){const p=args.value.position;state.position={x:p.x*(p.type==='Logical'?2:1),y:p.y*(p.type==='Logical'?2:1)};return;}
+   if(cmd==='plugin:window|set_size'){const s=args.value.size;state.size={width:s.width*2,height:s.height*2};return;}
+   if(cmd==='animate_note_window'){state.position={x:args.x*2,y:args.y*2};state.size={width:args.width*2,height:args.height*2};return;}
+   return original(cmd,args);
+  };
+ }
 })();

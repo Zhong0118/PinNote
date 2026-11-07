@@ -5,8 +5,12 @@ export function edgeTarget(bounds: Bounds, displays: Display[]): NoteWindowState
   const display = displayFor(bounds, displays);
   if (!display) return null;
   const { position: p, size: s } = display.workArea;
-  const threshold = 28 * display.scaleFactor;
-  const side = Math.abs(bounds.x - p.x) < threshold ? 'left' : Math.abs(bounds.x + bounds.width * display.scaleFactor - p.x - s.width) < threshold ? 'right' : null;
+  const threshold = 48 * display.scaleFactor;
+  // Native dragging may overshoot the work area (Dock/taskbar or screen edge).
+  // Crossing an edge should keep the snap target instead of losing it at 28px.
+  const left=bounds.x-p.x;
+  const right=p.x+s.width-(bounds.x+bounds.width*display.scaleFactor);
+  const side = left<=threshold && left<=right ? 'left' : right<=threshold ? 'right' : null;
   return side ? { side, display: `${p.x}:${p.y}`, order: bounds.y } : null;
 }
 

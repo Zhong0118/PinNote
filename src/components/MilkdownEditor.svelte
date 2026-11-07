@@ -2,14 +2,23 @@
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import SourceEditor from "./SourceEditor.svelte";
+  import { ListTodo, Plus, Bell, CheckCheck } from 'lucide-svelte';
+  import { checklistProgress } from '$lib/checklist';
 
   type Props = {
     value: string;
     onChange: (value: string) => void;
     initialPosition?: {from:number;to:number;scroll:number};
+    readonly?: boolean;
+    onReminder?: () => void;
   };
 
-  let { value, onChange, initialPosition }: Props = $props();
+  let { value, onChange, initialPosition, readonly = false, onReminder }: Props = $props();
+  let taskInput=$state('');
+  let showTaskInput=$state(false);
+  let taskField=$state<HTMLInputElement>();
+  let composingTask=false;
+  const progress=$derived(checklistProgress(value));
   let root = $state<HTMLDivElement>();
   let failed = $state(false);
   let disposed = false;
@@ -19,7 +28,7 @@
   let serializerCtxRef: any;
 
   export function flush() {
-    if (!editorInstance || disposed) return;
+    if (!editorInstance || disposed || readonly) return;
     const markdown = editorInstance.action((ctx: any) =>
       ctx.get(serializerCtxRef)(ctx.get(editorViewCtxRef).state.doc));
     if (markdown !== value) onChange(markdown);
@@ -30,7 +39,7 @@
     return {from:selection.from,to:selection.to,scroll:root?.scrollTop??0};
   }
   export function clearCompleted() {
-    if(!editorInstance || disposed) return;
+    if(!editorInstance || disposed || readonly) return;
     editorInstance.action((ctx:any)=>{
       const view=ctx.get(editorViewCtxRef); const ranges:Array<{from:number;to:number}>=[];
       view.state.doc.descendants((node:any,pos:number)=>{if(node.type.name==='list_item'&&node.attrs.checked===true){ranges.push({from:pos,to:pos+node.nodeSize});return false;}});
@@ -39,13 +48,23 @@
     });
   }
   function taskKey(event: KeyboardEvent) {
-    if(event.isComposing || !(event.metaKey||event.ctrlKey) || !event.shiftKey || event.key!=='Enter' || !editorInstance) return;
+    if(readonly || event.isComposing || !(event.metaKey||event.ctrlKey) || !event.shiftKey || event.key!=='Enter' || !editorInstance) return;
     editorInstance.action((ctx:any)=>{
       const view=ctx.get(editorViewCtxRef); const from=view.state.selection.$from;
       for(let depth=from.depth;depth>0;depth--){const node=from.node(depth);
         if(node.type.name==='list_item'&&node.attrs.checked!=null){event.preventDefault();view.dispatch(view.state.tr.setNodeMarkup(from.before(depth),undefined,{...node.attrs,checked:!node.attrs.checked}));return;}
       }
     });
+  }
+  async function addTask() {
+    const text=taskInput.trim();if(!text||!editorInstance||readonly||composingTask)return;
+    editorInstance.action((ctx:any)=>{
+      const view=ctx.get(editorViewCtxRef);const schema=view.state.schema;
+      const item=schema.nodes.list_item.create({checked:false},schema.nodes.paragraph.create(null,schema.text(text)));
+      const list=schema.nodes.bullet_list.create(null,item);
+      view.dispatch(view.state.tr.insert(view.state.doc.content.size,list).scrollIntoView());
+    });
+    taskInput='';taskField?.focus();
   }
 
   onMount(() => {
@@ -59,6 +78,7 @@
   });
 
   function handleTaskClick(event: MouseEvent) {
+    if(readonly)return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
     const li = target.closest('li[data-item-type="task"]') as HTMLElement | null;
@@ -107,7 +127,7 @@
 
     try {
       const [
-        { Editor, rootCtx, defaultValueCtx, editorViewCtx, serializerCtx },
+        { Editor, rootCtx, defaultValueCtx, editorViewCtx, serializerCtx, editorViewOptionsCtx },
         { commonmark },
         { gfm },
         { $prose: prosePlugin },
@@ -130,6 +150,7 @@
         .config((ctx: any) => {
           ctx.set(rootCtx, root);
           ctx.set(defaultValueCtx, value);
+          ctx.update(editorViewOptionsCtx, (options:any)=>({...options,editable:()=>!readonly}));
         })
         .use(commonmark)
         .use(gfm)
@@ -160,15 +181,27 @@
 </script>
 
 {#if failed}
-  <SourceEditor {value} {onChange} />
+  {#if readonly}<p class="render-error">预览加载失败，请在独立窗口查看</p>{:else}<SourceEditor {value} {onChange} />{/if}
 {:else}
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
-   <div class="milkdown-host" bind:this={root} role="application" onclick={handleTaskClick} onkeydown={taskKey}></div>
+  <div class="editor-layout" class:readonly>
+    {#if !readonly || progress.total}
+      <div class="task-tools">
+        {#if progress.total}<span class="task-progress"><ListTodo size={14}/>{progress.done===progress.total?'待办已全部完成':`${progress.total-progress.done} 项待办`}<span class="count">{progress.done}/{progress.total}</span></span>{/if}
+        {#if !readonly}<button class="add-task" onclick={()=>showTaskInput=!showTaskInput} aria-expanded={showTaskInput}><Plus size={14}/>添加待办</button>{/if}
+        {#if progress.total && onReminder}<button aria-label="提醒这张待办便签" title="为这张便签设置提醒" onclick={onReminder}><Bell size={14}/></button>{/if}
+        {#if progress.done && !readonly}<button title="移除已完成项 · 可撤销" aria-label="移除已完成待办" onclick={clearCompleted}><CheckCheck size={14}/></button>{/if}
+      </div>
+    {/if}
+    {#if showTaskInput && !readonly}<form class="task-entry" onsubmit={e=>{e.preventDefault();void addTask();}}><input bind:this={taskField} bind:value={taskInput} aria-label="待办内容" placeholder="写下下一件要做的事" oncompositionstart={()=>composingTask=true} oncompositionend={()=>composingTask=false} onkeydown={e=>{if(e.isComposing&&e.key==='Enter')e.preventDefault();}}/><button type="submit" disabled={!taskInput.trim()}>添加</button><small>Enter 添加 · 正文中也可以输入 - [ ] 创建待办</small></form>{/if}
+   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
+    <div class="milkdown-host" bind:this={root} role="application" onclick={handleTaskClick} onkeydown={taskKey}></div>
+  </div>
 {/if}
 
 <style>
+  .editor-layout{height:100%;min-height:0;display:flex;flex-direction:column}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:6px;padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background 140ms,transform 140ms}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:7px;background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:#737373;font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
   .milkdown-host {
-    height: 100%;
+    flex:1;
     min-height: 0;
     overflow: auto;
     padding: 8px 16px 18px;
@@ -180,7 +213,7 @@
   }
 
   .milkdown-host :global(.editor) {
-    min-height: calc(100vh - 68px);
+    min-height: 100%;
     display: flow-root;
     outline: 0;
     color: var(--pin-text);

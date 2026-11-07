@@ -18,10 +18,11 @@
     onReturn?: () => void;
     onReminder?: () => void;
     onClearCompleted?: () => void;
+    onDock?: (side:'left'|'right') => void;
   };
 
   let { alwaysOnTop, sourceMode, onTogglePin, onToggleSource, onOpenNotes,
-    onOpenTemplates, onExport, onOpenSettings, onDelete, onQuit, onNewNote, onArchive, onReturn, onReminder, onClearCompleted }: Props = $props();
+    onOpenTemplates, onExport, onOpenSettings, onDelete, onQuit, onNewNote, onArchive, onReturn, onReminder, onClearCompleted, onDock }: Props = $props();
   let open = $state(false);
   let trigger: HTMLButtonElement;
   const actions = $derived([
@@ -36,6 +37,7 @@
     { label: "设置", icon: Settings, run: onOpenSettings },
     { label: "隐藏便签", icon: EyeOff, run: onQuit },
     ...(onReturn ? [{label:"收回中心", icon:List, run:onReturn}] : []),
+    ...(onDock ? [{label:'收纳到左侧',icon:EyeOff,run:()=>onDock('left')},{label:'收纳到右侧',icon:EyeOff,run:()=>onDock('right')}] : []),
     ...(onArchive ? [{label:"归档", icon:List, run:onArchive}] : []),
     { label: "删除便签", icon: Trash2, run: onDelete, danger: true },
   ]);

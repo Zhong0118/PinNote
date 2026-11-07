@@ -45,7 +45,7 @@
   import { requestWindowVisibility, listenWindowVisibility } from "$lib/windowVisibility";
   import { noteWindowLabel, findNoteWindow, openNoteWindow } from "$lib/noteWindows";
 
-  import { CAPSULE, EDITOR_MIN, fitBounds, normalizeBounds, normalizeDisplays, switchBounds, rememberBounds, restoreBounds, type Bounds } from "$lib/windowGeometry";
+  import { CAPSULE, EDITOR_MIN, displayFor, fitBounds, normalizeBounds, normalizeDisplays, switchBounds, rememberBounds, restoreBounds, type Bounds } from "$lib/windowGeometry";
 
   let transitioning = $state(false);
   let modeChange: Promise<void> | undefined;
@@ -56,6 +56,8 @@
   let hovering = false;
   let edgeOverflow = $state(0);
   let overflowHidden = false;
+  let locating=$state(false);
+  let locateTimer:ReturnType<typeof setTimeout>;
   let undoId = $state('');
   let geometryRevision = 0;
   let note = $state<PinNote>(createNote());
@@ -133,7 +135,6 @@
       if (!ready || event.payload.id !== note.id) return;
       const { theme, customColor, opacity, alwaysOnTop } = event.payload;
       note = { ...note, theme, customColor, opacity, alwaysOnTop };
-      queueNoteSave();
       status = "便签设置已同步";
     });
 
@@ -178,6 +179,7 @@
     });
     const changes = listen<{id:string;note:PinNote|null;op:string}>('notes-changed', async ({payload}) => {
       if (payload.id === note.id && ready && payload.op !== 'focus') {
+        if(payload.op==='appearance'&&payload.note){const {theme,customColor,opacity,alwaysOnTop}=payload.note;note={...note,theme,customColor,opacity,alwaysOnTop};return;}
         editor?.flush();
         if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
           if(hasPendingSave(note.id)) { status='便签状态已变化，本地草稿已保留，请先导出';return; }
@@ -192,6 +194,15 @@
     });
     const expand = listen<{id:string}>('expand-note-requested', ({payload}) => {
       if(payload.id === note.id && note.window.collapsed) { toggleCollapsed(); void win.setFocus(); }
+    });
+    const locate=listen<{id:string}>('locate-note-requested',async({payload})=>{
+      if(payload.id!==note.id||!ready)return;
+      try{
+        await modeChange;
+        if(note.window.collapsed)await changeWindowMode();
+        await getCurrentWindow().show();await getCurrentWindow().setFocus();
+        locating=true;clearTimeout(locateTimer);locateTimer=setTimeout(()=>locating=false,2200);
+      }catch(error){status=`定位失败：${error}`;}
     });
     let displaySignature = '';
     const monitorTimer=setInterval(()=>void (async()=>{
@@ -237,6 +248,7 @@
     return () => {
       clearTimeout(windowStateTimer);
       clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f());
+      clearTimeout(locateTimer);locate.then(f=>f());
       clearInterval(monitorTimer);
       if (isMainWindow) void unregisterGlobalShortcuts();
       quitPromise.then((fn) => fn());
@@ -511,9 +523,9 @@
     }
   }
 
-  function togglePin() {
+  async function togglePin() {
     note = { ...note, alwaysOnTop: !note.alwaysOnTop, updatedAt: Date.now() };
-    queueNoteSave();
+    try{await noteOperation({...note},'appearance',{patch:{alwaysOnTop:note.alwaysOnTop}});}catch(error){status=String(error);return;}
     status = note.alwaysOnTop ? "已置顶" : "已取消置顶";
   }
 
@@ -575,29 +587,44 @@
   }
 
   async function startDrag(event: PointerEvent) {
-    if (event.button !== 0 || isInteractiveElement(event.target)) return;
+    if (event.button !== 0 || isInteractiveElement(event.target) || dragging || transitioning) return;
 
     try {
       dragging = true; hoverPreview(false);
-      const beforeDrag = structuredClone($state.snapshot(note.window));
+      clearTimeout(windowStateTimer);
+      const beforeDrag = rememberBounds(structuredClone($state.snapshot(note.window)),await readWindowBounds());
       await getCurrentWindow().startDragging();
       // Native startDragging can resolve before mouse-up (notably on macOS).
       // Track the native button, not DOM pointerup which leaves this webview.
-      while(await invoke<boolean>('pointer_pressed')) await new Promise(resolve=>setTimeout(resolve,60));
+      while(await invoke<boolean>('pointer_pressed')) {
+        const b=await readWindowBounds();const edge=edgeTarget(b,normalizeDisplays(await availableMonitors(),isMacPlatform()));
+        edgeHint=edge?`松手收纳到${edge.side==='left'?'左':'右'}侧`:'';
+        await new Promise(resolve=>setTimeout(resolve,60));
+      }
       const bounds = await readWindowBounds();
       const displays=normalizeDisplays(await availableMonitors(), isMacPlatform());
       const edge = edgeTarget(bounds, displays);
-      if(edge) {
-        edge.order=edgeOrder(note.id,edge,bounds,Object.values((await loadNotes()).notes),displays);
-        if(!note.window.collapsed) await changeWindowMode();
-        note.window = { ...beforeDrag, collapsed:true, edge };
-      } else { note.window = { ...rememberBounds({...note.window,edge:null},bounds), edge: null }; }
-      await saveNoteNow(note);
       dragging = false;
-      await layoutEdges();
-    } catch {
-      // Browser preview cannot drag a native window.
+      if(edge)await dockToEdge(edge.side,beforeDrag,bounds);
+      else {note.window={...rememberBounds({...note.window,edge:null},bounds),edge:null};await saveNoteNow(note);}
+    } catch(error) {
+      status=`贴边或移动失败：${String(error)}`;
     } finally { dragging = false; edgeHint = ''; }
+  }
+  async function dockToEdge(side:'left'|'right',saved=structuredClone($state.snapshot(note.window)),bounds?:Bounds) {
+    try {
+      editor?.flush();await flushNoteSave(note.id);
+      const current=bounds??await readWindowBounds();const displays=normalizeDisplays(await availableMonitors(),isMacPlatform());
+      if(!bounds && !saved.edge)saved=rememberBounds(saved,current);
+      const display=displayFor(current,displays);if(!display)throw new Error('无法读取显示器工作区');
+      const p=display.workArea.position;
+      const edge={side,display:`${p.x}:${p.y}`,order:current.y};
+      edge.order=edgeOrder(note.id,edge,current,Object.values((await loadNotes()).notes),displays);
+      if(!note.window.collapsed)await changeWindowMode();
+      if(!note.window.collapsed)throw new Error('收起失败，请先保存便签');
+      note.window={...saved,collapsed:true,edge};await saveNoteNow(note);await layoutEdges();
+      status=`已收纳到${side==='left'?'左':'右'}侧 · 向内拖动可移出`;
+    }catch(error){status=`贴边失败：${String(error)}`;}
   }
 
   async function startResize(event: PointerEvent, direction: Parameters<Window["startResizeDragging"]>[0]) {
@@ -744,7 +771,7 @@
 
   async function captureWindowState() {
     clearTimeout(windowStateTimer);
-    if (!ready || isDeleting || transitioning) return;
+    if (!ready || isDeleting || transitioning || dragging) return;
     const revision = geometryRevision;
     const id = note.id;
     const bounds = await readWindowBounds();
@@ -811,6 +838,8 @@
   onToggleCollapsed={toggleCollapsed}
   {edgeHint}
   {edgeOverflow}
+  {locating}
+  onDock={side=>void dockToEdge(side)}
   onHover={hoverPreview}
   onArchive={() => lifecycle(note.id,'archive')}
   onReturn={() => lifecycle(note.id,'center')}
@@ -843,12 +872,12 @@
       {#if sourceMode}
         <SourceEditor value={note.content} onChange={updateContent} />
       {:else}
-        <MilkdownEditor bind:this={editor} value={note.content} onChange={updateContent} />
+        <MilkdownEditor bind:this={editor} value={note.content} onChange={updateContent} onReminder={()=>reminderOpen=true}/>
       {/if}
     {/key}
   {/if}
 </WindowChrome>
-{#if reminderOpen}<ReminderDialog onClose={()=>reminderOpen=false} onSet={async at=>{await saveBeforeWindowAction();const current=(await loadNotes()).notes[note.id];await noteOperation(current,'reminder',{at});note=current;}}/>{/if}
+{#if reminderOpen}<ReminderDialog currentAt={note.reminder?.at} onClose={()=>reminderOpen=false} onSet={async at=>{await saveBeforeWindowAction();const current=(await loadNotes()).notes[note.id];await noteOperation(current,'reminder',{at});note=current;}}/>{/if}
 <style>.reminder-tag{border:0;border-radius:5px;background:#eff6ff;color:#2563eb;font-size:11px;padding:3px 8px;margin:6px 16px;cursor:pointer}</style>
 
 <NoteListPopover
