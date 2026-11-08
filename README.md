@@ -4,13 +4,21 @@
 
 **便签中心负责查找和整理，独立便签负责随手编辑，边缘胶囊负责随时查看。三种形态共享同一张便签。**
 
-当前版本 **1.2.0** · [下载安装包](https://github.com/Zhong0118/PinNote/releases/latest) · [1.2.0 更新说明](https://github.com/Zhong0118/PinNote/releases/tag/v1.2.0)
+当前版本 **1.3.0** · [下载安装包](https://github.com/Zhong0118/PinNote/releases/latest) · [1.3.0 更新说明](RELEASE_NOTES.md)
 
 ## 界面
 
-便签中心：搜索、工作 Tab、背景颜色与正文待办。
+便签中心：搜索、工作 Tab、背景颜色与正文待办；标题栏右侧为置顶、收起到边缘和窗口选项。
 
-<img src="image/center-1.2.png" alt="PinNote 1.2 便签中心，浅蓝便签包含 Markdown 标题、任务清单和代码" width="1040" />
+<img src="image/center-1.3.png" alt="PinNote 1.3 便签中心，浅色主题，便签包含 Markdown 标题、任务清单和代码" width="800" />
+
+深色主题下便签颜色作为底色调保留：
+
+<img src="image/center-dark-1.3.png" alt="PinNote 1.3 便签中心深色主题，薄荷色便签" width="800" />
+
+设置在中心窗口内打开：
+
+<img src="image/settings-1.3.png" alt="PinNote 1.3 中心内的设置视图，外观分类：主题、阴影与减少动态" width="800" />
 
 轻量提醒：快捷时间和自定义日期、时间。
 
@@ -18,13 +26,21 @@
 
 独立便签与收起后的胶囊：
 
-<img src="image/note-1.2.png" alt="独立 Markdown 便签与待办入口" width="420" />
+<img src="image/note-1.3.png" alt="独立 Markdown 便签，标题栏为颜色圆点、标题、置顶、收起和更多菜单" width="420" />
 
-<img src="image/capsule-1.2.png" alt="180×40 的横向短标题胶囊" width="180" />
+<img src="image/capsule-1.3.png" alt="180×40 胶囊：颜色、标题、置顶和展开" width="180" />
 
 以上截图来自实际 Svelte / Milkdown 界面，使用示例内容与模拟系统接口，不含个人便签；截图不代表原生多屏或通知验收。
 
-## 1.2 带来了什么
+## 1.3 更新
+
+- 中心窗口简化为“常规窗口 ⇄ 边缘把手”，拖到屏幕边缘即可收起，把手可沿边拖动、向内拉出恢复；小条移到窗口选项菜单。
+- 设置并入便签中心，新增浅色／深色／跟随系统主题、阴影强度、减少动态与新便签默认值；保存失败可见并可重试。
+- 便签标题栏加入置顶按钮，胶囊改为颜色、标题、置顶、展开；颜色改用系统原生菜单。
+- agent 修改记录区分“撤销这次修改”和“恢复到此前版本”。
+- 资源占用明显下降：所有便签共用一个预览窗口，收起的便签释放编辑器，便签变更按条同步；脚本场景下内存约从 945 MB 降至 530 MB。
+
+## 主要功能
 
 - **便签中心**：搜索标题和正文，筛选全部／桌面便签；工作 Tab 可切换、关闭、拖动重排，过多时使用溢出入口。关闭 Tab 不删除便签。
 - **桌面与中心切换**：放到桌面、定位窗口、收回中心共用同一 ID。桌面便签收起为胶囊或边缘标签时，中心可以直接编辑；独立窗口展开编辑时中心只读，并提供“在这里编辑”把编辑移回中心。
@@ -163,11 +179,11 @@ pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --loc
 
 ## 验证范围
 
-1.2.0 本地通过：69 项 Node 测试、22 项 Rust 单元测试和 1 项更新器集成测试、Svelte 类型检查、clippy、macOS release 构建。浏览器回归覆盖工作台预览、颜色、待办、提醒、保存失败与窗口操作路径。隔离原生应用的 MCP 实际连接验证了备份迁移、读写权限、冲突、恢复与后台提醒处理。
+1.3.0 本地通过：86 项 Node 测试、23 项 Rust 单元测试和 1 项更新器集成测试、Svelte 类型检查、clippy、前端构建与 macOS debug 构建；1.3 尚未重新执行 release 打包。原生 macOS 上用调试场景验证了中心收起／展开、把手贴边与换边、把手位置记忆、拉出与快速连续操作。1.2.0 时的浏览器回归与 MCP 实际连接验收结论仍然适用。浏览器回归覆盖工作台预览、颜色、待办、提醒、保存失败与窗口操作路径。隔离原生应用的 MCP 实际连接验证了备份迁移、读写权限、冲突、恢复与后台提醒处理。
 
-原生 Windows 桌面交互、混合 DPI 多屏拖动和热拔插、中文输入法连续组词、预览焦点连续性及系统通知实际展示仍需实机验收。自动化几何测试和模拟 IPC 不替代这些检查。
+原生 Windows 桌面交互、真实鼠标拖动吸附与把手拉出、原生颜色菜单、混合 DPI 多屏拖动和热拔插、中文输入法连续组词、预览焦点连续性、帧率、各窗口的深色外观及系统通知实际展示仍需实机验收。自动化几何测试和模拟 IPC 不替代这些检查。
 
-详细记录见 [DEVELOPMENT.md](DEVELOPMENT.md)。浏览器脚本位于 `scripts/verify-*-browser.mjs`；实际 MCP 验收使用 `scripts/verify-mcp-live.mjs`，仅对隔离测试目录运行。调试构建支持 `PINNOTE_TEST_DATA_DIR`，正式构建忽略它。
+详细记录见 [DEVELOPMENT.md](DEVELOPMENT.md)。浏览器脚本位于 `scripts/verify-*-browser.mjs`；实际 MCP 验收使用 `scripts/verify-mcp-live.mjs`，仅对隔离测试目录运行。调试构建支持 `PINNOTE_TEST_DATA_DIR`，正式构建忽略它；性能对比脚本位于 `scripts/perf/`，用法见 DEVELOPMENT.md。
 
 ## License
 
