@@ -1,9 +1,11 @@
+import { perfCount } from "./perf";
 import { invoke } from "@tauri-apps/api/core";
 import { defaultContent, defaultTitle } from "./defaultNote";
 import { defaultSettings, type NoteTheme } from "./settings";
 
 export type NoteWindowState = {
-  edge?: { side: "left" | "right"; display: string; order: number } | null;
+  /** `top` (work-area ratio, set by the newest `topAt`) is where the queue on that edge starts. */
+  edge?: { side: "left" | "right"; display: string; order: number; top?: number; topAt?: number } | null;
   collapsed?: boolean;
   position?: { x: number; y: number };
   positionSpace?: "logical";
@@ -56,10 +58,36 @@ export function discardPendingSave(id: string) {
   clearTimeout(timers.get(id)); timers.delete(id); pendingNotes.delete(id); scopes.delete(id);
   void invoke('note_draft',{id,dirty:false}).catch(()=>{});
 }
+export type NoteChange = { id: string; note: PinNote | null; op: string; layout?: boolean };
+let snapshot: Promise<NotesFile> | undefined;
+let following = false;
+/**
+ * This window's copy of the library: read once, then kept current from each
+ * operation's result and `notes-changed` payloads instead of reloading the file.
+ */
+export function notesSnapshot(): Promise<NotesFile> {
+  if (!following) {
+    following = true;
+    void import("@tauri-apps/api/event").then(({ listen }) => listen<NoteChange>("notes-changed", ({ payload }) => applyNoteChange(payload))).catch(() => { following = false; });
+  }
+  snapshot ??= loadNotes().catch((error) => { snapshot = undefined; throw error; });
+  return snapshot;
+}
+/** Apply one change to the snapshot (idempotent; safe to call from several listeners). */
+export async function applyNoteChange(change: Pick<NoteChange, "id" | "note">) {
+  if (!snapshot) return;
+  const file = await snapshot.catch(() => undefined);
+  if (!file) return;
+  const known = file.notes[change.id];
+  if (!change.note) delete file.notes[change.id];
+  else if (!known || known.revision <= change.note.revision) file.notes[change.id] = change.note;
+}
+
 export async function noteOperation(note: PinNote, op: string, extra: Record<string, unknown> = {}) {
   const result = await invoke<PinNote | null>("note_operation", { request: {
     id: note.id, op, expectedRevision: Math.max(revisions.get(note.id) ?? 0, note.revision), ...extra,
   } });
+  void applyNoteChange({ id: note.id, note: result });
   if (result) {
     if(op==='appearance') {
       const {theme,customColor,opacity,alwaysOnTop}=result;
@@ -70,6 +98,7 @@ export async function noteOperation(note: PinNote, op: string, extra: Record<str
 }
 
 export async function loadNotes(): Promise<NotesFile> {
+  perfCount("ipc.loadNotes");
   const raw = await invoke<string | null>("load_notes");
   if (raw !== null) {
     const file = JSON.parse(raw) as Partial<NotesFile>;
@@ -84,6 +113,7 @@ export async function loadNotes(): Promise<NotesFile> {
       }
     }
     const normalized = normalizeNotes(file);
+    snapshot = Promise.resolve(structuredClone(normalized));
     return normalized;
   }
 
@@ -180,10 +210,11 @@ export async function flushNoteSave(id?: string) {
       const patch = scope === "window" ? { window: next.window }
         : scope === "body" ? { title: next.title, content: next.content }
         : { title: next.title, content: next.content, window: next.window };
+      // Only a new note needs the full record; every other save sends just its fields.
       const result = await invoke<PinNote>("note_operation", { request: {
-        id: note.id, op, expectedRevision: revision, note: next, patch,
+        id: note.id, op, expectedRevision: revision, patch, ...(op === "create" ? { note: next } : {}),
       } });
-      if (result) revisions.set(note.id, result.revision);
+      if (result) { revisions.set(note.id, result.revision); void applyNoteChange({ id: note.id, note: result }); }
       // A newer draft may have arrived while the native write was in flight.
       if (pendingNotes.get(note.id) === note) {
         pendingNotes.delete(note.id); scopes.delete(note.id);

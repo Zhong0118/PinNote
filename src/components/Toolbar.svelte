@@ -1,16 +1,13 @@
 <script lang="ts">
-  import { Code2, Download, EyeOff, LayoutTemplate, List, MoreHorizontal, Pin, Plus, Settings, Trash2 } from "lucide-svelte";
+  import { Archive, Bell, CheckCheck, Code2, Download, EyeOff, LayoutTemplate, List, MoreHorizontal, PanelLeftClose, PanelRightClose, Plus, Trash2, Undo2 } from "lucide-svelte";
   import { popup, reveal } from "$lib/motion";
 
   type Props = {
-    alwaysOnTop: boolean;
     sourceMode: boolean;
-    onTogglePin: () => void;
     onToggleSource: () => void;
     onOpenNotes: () => void;
     onOpenTemplates: () => void;
     onExport: () => void;
-    onOpenSettings: () => void;
     onDelete: () => void;
     onQuit: () => void;
     onNewNote?: () => void;
@@ -21,26 +18,25 @@
     onDock?: (side:'left'|'right') => void;
   };
 
-  let { alwaysOnTop, sourceMode, onTogglePin, onToggleSource, onOpenNotes,
-    onOpenTemplates, onExport, onOpenSettings, onDelete, onQuit, onNewNote, onArchive, onReturn, onReminder, onClearCompleted, onDock }: Props = $props();
+  let { sourceMode, onToggleSource, onOpenNotes,
+    onOpenTemplates, onExport, onDelete, onQuit, onNewNote, onArchive, onReturn, onReminder, onClearCompleted, onDock }: Props = $props();
   let open = $state(false);
   let trigger: HTMLButtonElement;
+  // Everyday actions first; window placement and lifecycle after a divider.
   const actions = $derived([
     ...(onNewNote ? [{ label: "新建便签", icon: Plus, run: onNewNote }] : []),
-    { label: alwaysOnTop ? "取消置顶" : "置顶", icon: Pin, run: onTogglePin, active: alwaysOnTop },
-    { label: "所有便签", icon: List, run: onOpenNotes },
+    ...(onReminder ? [{label:"设置提醒",icon:Bell,run:onReminder}] : []),
     { label: "模板", icon: LayoutTemplate, run: onOpenTemplates },
-    ...(onReminder ? [{label:"设置提醒",icon:MoreHorizontal,run:onReminder}] : []),
-    ...(onClearCompleted ? [{label:"移除已完成项（可撤销）",icon:List,run:onClearCompleted}] : []),
+    ...(onClearCompleted ? [{label:"移除已完成项（可撤销）",icon:CheckCheck,run:onClearCompleted}] : []),
     { label: sourceMode ? "返回编辑" : "Markdown 源码", icon: Code2, run: onToggleSource, active: sourceMode },
     { label: "导出 Markdown", icon: Download, run: onExport },
-    { label: "设置", icon: Settings, run: onOpenSettings },
+    { divider: true, label: "在便签中心查看", icon: List, run: onOpenNotes },
+    ...(onReturn ? [{label:"收回中心", icon:Undo2, run:onReturn}] : []),
+    ...(onDock ? [{label:'收纳到左侧',icon:PanelLeftClose,run:()=>onDock('left')},{label:'收纳到右侧',icon:PanelRightClose,run:()=>onDock('right')}] : []),
     { label: "隐藏便签", icon: EyeOff, run: onQuit },
-    ...(onReturn ? [{label:"收回中心", icon:List, run:onReturn}] : []),
-    ...(onDock ? [{label:'收纳到左侧',icon:EyeOff,run:()=>onDock('left')},{label:'收纳到右侧',icon:EyeOff,run:()=>onDock('right')}] : []),
-    ...(onArchive ? [{label:"归档", icon:List, run:onArchive}] : []),
+    ...(onArchive ? [{label:"归档", icon:Archive, run:onArchive}] : []),
     { label: "删除便签", icon: Trash2, run: onDelete, danger: true },
-  ]);
+  ] as Array<{label:string;icon:typeof Plus;run:()=>void;active?:boolean;danger?:boolean;divider?:boolean}>);
 
   function select(action: () => void) {
     trigger.focus();
@@ -58,6 +54,7 @@
   {#if open}
     <div class="menu" role="menu" aria-label="便签操作" tabindex="-1" use:popup={() => (open = false)} transition:reveal>
       {#each actions as action}
+        {#if action.divider}<hr aria-hidden="true" />{/if}
         <button type="button" role="menuitem" class:active={action.active} class:danger={action.danger}
           onclick={() => select(action.run)}>
           <action.icon size={15} strokeWidth={1.7} />
@@ -71,16 +68,17 @@
 <style>
   .toolbar { display: flex; align-items: center; cursor: default; }
   button { border: 0; font: inherit; cursor: pointer; transition: background 140ms, color 140ms, transform 140ms; }
-  button:hover { background: var(--pin-hover, #f3f4f6); }
+  button:hover { background: var(--pin-hover, var(--hover)); }
   button:active { transform: scale(0.96); }
-  button:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
-  .menu-trigger { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; color: var(--pin-text, #171717); background: var(--pin-hover, #f3f4f6); }
-  .menu-trigger:hover, .menu-trigger[aria-expanded="true"] { color: var(--pin-accent, #2563eb); background: var(--pin-active, #eff6ff); transform: scale(1.04); }
-  .menu { position: fixed; z-index: 120; right: 8px; top: 43px; width: min(206px, calc(100vw - 16px)); max-height: calc(100vh - 51px); overflow: auto; padding: 5px; border: 1px solid var(--pin-border, #e5e7eb); border-radius: 12px; color: var(--pin-text, #171717); background: var(--pin-bg, #fff); box-shadow: 0 8px 28px #00000014; transform-origin: top right; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .menu-trigger { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; color: var(--pin-text, var(--text)); background: var(--pin-hover, var(--hover)); }
+  .menu-trigger:hover, .menu-trigger[aria-expanded="true"] { color: var(--pin-accent, var(--accent)); background: var(--pin-active, var(--accent-soft)); transform: scale(1.04); }
+  .menu { position: fixed; z-index: 120; right: 8px; top: 43px; width: min(206px, calc(100vw - 16px)); max-height: calc(100vh - 51px); overflow: auto; padding: 5px; border: 1px solid var(--pin-border, var(--border)); border-radius: 12px; color: var(--pin-text, var(--text)); background: var(--pin-bg, var(--surface-raised)); box-shadow: var(--menu-shadow); transform-origin: top right; }
   .menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 31px; padding: 6px 9px; border-radius: 7px; text-align: left; font-size: 12px; color: inherit; background: transparent; }
-  .menu button:hover { background: var(--pin-hover, #f3f4f6); }
-  .menu button.active { color: var(--pin-accent, #2563eb); }
-  .menu button.danger { color: #dc2626; }
+  .menu button:hover { background: var(--pin-hover, var(--hover)); }
+  .menu button.active { color: var(--pin-accent, var(--accent)); }
+  .menu button.danger { color: var(--danger); }
+  .menu hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--pin-border, var(--border)); }
   .menu button.danger:hover { background: #dc262610; }
   @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>

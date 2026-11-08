@@ -9,7 +9,7 @@ export const EDGE_INSET = 12;
 export const NOTE_MIN = { width: Math.min(CAPSULE.width, EDGE_TAB.width), height: Math.min(CAPSULE.height, EDGE_TAB.height) };
 export const EDITOR_MIN = { width: 260, height: 180 };
 export type Bounds = { x: number; y: number; width: number; height: number; scaleFactor: number; space?: 'logical'; nativeScale?: number };
-export type Display = { scaleFactor: number; workArea: { position: { x: number; y: number }; size: { width: number; height: number } } };
+export type Display = { name?: string | null; scaleFactor: number; workArea: { position: { x: number; y: number }; size: { width: number; height: number } } };
 
 // Windows exposes global physical coordinates; macOS scales each global origin
 // by its own monitor's DPI. Normalize macOS to one global logical coordinate space.
@@ -21,7 +21,7 @@ export function normalizeBounds(bounds: Bounds, isMac: boolean): Bounds {
 
 export function normalizeDisplays(displays: Display[], isMac: boolean): Display[] {
   if (!isMac) return displays;
-  return displays.map(({ scaleFactor, workArea }) => ({ scaleFactor: 1, workArea: {
+  return displays.map(({ name, scaleFactor, workArea }) => ({ name, scaleFactor: 1, workArea: {
     position: { x: workArea.position.x / scaleFactor, y: workArea.position.y / scaleFactor },
     size: { width: workArea.size.width / scaleFactor, height: workArea.size.height / scaleFactor },
   } }));

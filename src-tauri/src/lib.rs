@@ -1,5 +1,6 @@
 mod integration;
 mod notes;
+mod perf;
 mod reminders;
 mod updater;
 
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{
     image::Image,
     menu::MenuBuilder,
@@ -107,6 +108,13 @@ fn data_file(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
 }
 
 fn atomic_write(path: PathBuf, content: String) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    let result = atomic_write_inner(path, content);
+    perf::count("disk.write", Some(started));
+    result
+}
+
+fn atomic_write_inner(path: PathBuf, content: String) -> Result<(), String> {
     static WRITE_ID: AtomicU64 = AtomicU64::new(0);
     let tmp_path = path.with_extension(format!(
         "{}.{}.tmp",
@@ -281,11 +289,12 @@ fn save_notes(
     }
     let mut file: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
     notes::normalize(&mut file)?;
-    atomic_write(data_file(&app, "notes.json")?, file.to_string())
+    notes::store(&app, &file)
 }
 
 #[tauri::command]
 fn load_notes(app: AppHandle) -> Result<Option<String>, String> {
+    perf::count("ipc.load_notes", None);
     let state = app.state::<NotesFileLock>();
     let _guard = state.0.lock().map_err(|_| "Cannot lock notes")?;
     if !data_file(&app, "notes.json")?.exists() {
@@ -607,6 +616,74 @@ fn pointer_pressed() -> bool {
     }
 }
 
+/// Mouse button state plus pointer location in the frontend's normalized space:
+/// global logical points (top-left origin) on macOS, physical pixels on Windows.
+#[tauri::command]
+fn pointer_state() -> Value {
+    let pressed = pointer_pressed();
+    #[cfg(target_os = "macos")]
+    let (x, y) = {
+        use std::ffi::c_void;
+        #[repr(C)]
+        struct CGPoint {
+            x: f64,
+            y: f64,
+        }
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGEventCreate(source: *const c_void) -> *mut c_void;
+            fn CGEventGetLocation(event: *mut c_void) -> CGPoint;
+        }
+        #[link(name = "CoreFoundation", kind = "framework")]
+        extern "C" {
+            fn CFRelease(cf: *const c_void);
+        }
+        // SAFETY: a null source creates a fresh event describing the current pointer;
+        // it is released after reading its location.
+        unsafe {
+            let event = CGEventCreate(std::ptr::null());
+            if event.is_null() {
+                (f64::NAN, f64::NAN)
+            } else {
+                let p = CGEventGetLocation(event);
+                CFRelease(event);
+                (p.x, p.y)
+            }
+        }
+    };
+    #[cfg(target_os = "windows")]
+    let (x, y) = {
+        #[repr(C)]
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetCursorPos(point: *mut Point) -> i32;
+        }
+        let mut point = Point { x: 0, y: 0 };
+        // SAFETY: GetCursorPos writes one POINT into the provided, valid struct.
+        if unsafe { GetCursorPos(&mut point) } != 0 {
+            (point.x as f64, point.y as f64)
+        } else {
+            (f64::NAN, f64::NAN)
+        }
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let (x, y) = (f64::NAN, f64::NAN);
+    if x.is_finite() && y.is_finite() {
+        json!({"pressed":pressed,"x":x,"y":y})
+    } else {
+        json!({"pressed":pressed})
+    }
+}
+
+#[tauri::command]
+fn check_updates(app: AppHandle) {
+    updater::check(app, true);
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
@@ -703,6 +780,7 @@ pub fn run() {
             save_settings,
             load_settings,
             write_markdown_file,
+            check_updates,
             quit_app,
             main_note_id,
             set_main_note_id,
@@ -710,7 +788,11 @@ pub fn run() {
             pending_quit,
             startup_hidden,
             pointer_pressed,
-            animate_note_window
+            pointer_state,
+            animate_note_window,
+            perf::perf_enabled,
+            perf::perf_log,
+            perf::perf_mark
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

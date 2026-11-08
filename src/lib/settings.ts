@@ -8,9 +8,17 @@ export type ShortcutConfig = {
   newNote: string;
 };
 
+export type ThemeMode = "system" | "light" | "dark";
+export type ShadowLevel = "off" | "light" | "standard";
+export type AppearanceSettings = { theme: ThemeMode; centerShadow: ShadowLevel; noteShadow: ShadowLevel; reduceMotion: boolean };
+export type BehaviorSettings = { edgeSnap: boolean; hoverPreview: boolean; restoreSession: boolean };
+
 export type AppSettings = {
   autoStart: boolean;
   shortcuts: ShortcutConfig;
+  appearance: AppearanceSettings;
+  behavior: BehaviorSettings;
+  /** Applied to new notes only; never rewrites existing notes. */
   defaultNote: {
     alwaysOnTop: boolean;
     opacity: number;
@@ -33,9 +41,14 @@ export const macDefaultShortcuts: ShortcutConfig = {
 
 export const defaultShortcuts: ShortcutConfig = windowsDefaultShortcuts;
 
+export const defaultAppearance: AppearanceSettings = { theme: "system", centerShadow: "standard", noteShadow: "standard", reduceMotion: false };
+export const defaultBehavior: BehaviorSettings = { edgeSnap: true, hoverPreview: true, restoreSession: true };
+
 export const defaultSettings: AppSettings = {
   autoStart: false,
   shortcuts: { ...platformDefaultShortcuts() },
+  appearance: { ...defaultAppearance },
+  behavior: { ...defaultBehavior },
   defaultNote: {
     alwaysOnTop: true,
     opacity: 0.96,
@@ -61,22 +74,27 @@ export async function loadSettings() {
     if (!raw) return createDefaultSettings();
 
     const settings = normalizeSettings(JSON.parse(raw) as Partial<AppSettings>);
-    void saveSettings(settings);
+    // Migrate settings from early versions; a failure leaves them readable here.
+    void saveSettings(settings).catch(() => undefined);
     return settings;
   } catch {
     return createDefaultSettings();
   }
 }
 
-export async function saveSettings(settings: AppSettings) {
-  if (!browser) return;
+/** True inside the Tauri app; false in a plain browser preview of the frontend. */
+export const isNativeApp = () => browser && "__TAURI_INTERNALS__" in window;
 
+/**
+ * Persist settings natively. A failure is thrown so the caller can show it and retry;
+ * only a plain browser preview (no native app) keeps them in localStorage.
+ */
+export async function saveSettings(settings: AppSettings): Promise<"saved" | "preview"> {
+  if (!browser) return "preview";
   const json = JSON.stringify(settings);
-  try {
-    await invoke("save_settings", { json });
-  } catch {
-    localStorage.setItem(settingsKey, json);
-  }
+  if (!isNativeApp()) { localStorage.setItem(settingsKey, json); return "preview"; }
+  await invoke("save_settings", { json });
+  return "saved";
 }
 
 function normalizeSettings(settings: Partial<AppSettings>) {
@@ -92,6 +110,8 @@ function normalizeSettings(settings: Partial<AppSettings>) {
     ...createDefaultSettings(),
     ...settings,
     shortcuts,
+    appearance: normalizeAppearance(settings.appearance),
+    behavior: { ...defaultBehavior, ...pickBooleans(settings.behavior, defaultBehavior) },
     defaultNote: {
       ...defaultSettings.defaultNote,
       ...settings.defaultNote,
@@ -103,9 +123,27 @@ function normalizeSettings(settings: Partial<AppSettings>) {
   };
 }
 
+function pickBooleans<T extends Record<string, boolean>>(value: unknown, fallback: T): T {
+  const source = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(fallback).map(([k, v]) => [k, typeof source[k] === "boolean" ? source[k] : v])) as T;
+}
+
+export function normalizeAppearance(value: unknown): AppearanceSettings {
+  const a = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const shadow = (v: unknown, d: ShadowLevel) => (v === "off" || v === "light" || v === "standard" ? v : d);
+  return {
+    theme: a.theme === "light" || a.theme === "dark" || a.theme === "system" ? a.theme : defaultAppearance.theme,
+    centerShadow: shadow(a.centerShadow, defaultAppearance.centerShadow),
+    noteShadow: shadow(a.noteShadow, defaultAppearance.noteShadow),
+    reduceMotion: typeof a.reduceMotion === "boolean" ? a.reduceMotion : defaultAppearance.reduceMotion,
+  };
+}
+
 export function createDefaultSettings(): AppSettings {
   return {
     ...defaultSettings,
+    appearance: { ...defaultAppearance },
+    behavior: { ...defaultBehavior },
     shortcuts: { ...platformDefaultShortcuts() },
     defaultNote: { ...defaultSettings.defaultNote },
   };

@@ -4,6 +4,7 @@
   import SourceEditor from "./SourceEditor.svelte";
   import { ListTodo, Plus, Bell, CheckCheck } from 'lucide-svelte';
   import { checklistProgress } from '$lib/checklist';
+  import { perfCount, perfTime } from '$lib/perf';
 
   type Props = {
     value: string;
@@ -29,8 +30,8 @@
 
   export function flush() {
     if (!editorInstance || disposed || readonly) return;
-    const markdown = editorInstance.action((ctx: any) =>
-      ctx.get(serializerCtxRef)(ctx.get(editorViewCtxRef).state.doc));
+    const markdown = perfTime('md.serialize', () => editorInstance.action((ctx: any) =>
+      ctx.get(serializerCtxRef)(ctx.get(editorViewCtxRef).state.doc)));
     if (markdown !== value) onChange(markdown);
   }
   export function capture() {
@@ -75,6 +76,7 @@
       // write this editor's text into whichever note the props now point at.
       disposed = true;
       clearTimeout(updateTimer);
+      if (editorInstance) perfCount(readonly ? 'editor.destroy.readonly' : 'editor.destroy');
       void editorInstance?.destroy();
     };
   });
@@ -148,6 +150,7 @@
       editorViewCtxRef = editorViewCtx;
       serializerCtxRef = serializerCtx;
 
+      const createStart = performance.now();
       editorInstance = await Editor.make()
         .config((ctx: any) => {
           ctx.set(rootCtx, root);
@@ -170,7 +173,8 @@
           }),
         })))
         .create();
-      if (disposed) await editorInstance.destroy();
+      perfCount(readonly ? 'editor.create.readonly' : 'editor.create', performance.now() - createStart);
+      if (disposed) { perfCount(readonly ? 'editor.destroy.readonly' : 'editor.destroy'); await editorInstance.destroy(); }
       else if(initialPosition) {
         const {TextSelection}=await import('@milkdown/kit/prose/state');
         editorInstance.action((ctx:any)=>{const view=ctx.get(editorViewCtxRef);const size=view.state.doc.content.size;
@@ -321,7 +325,7 @@
     border-radius: 5px;
     padding: 0.08rem 0.28rem;
     color: var(--pin-accent-strong);
-    background: rgba(32, 33, 36, 0.08);
+    background: color-mix(in srgb, var(--pin-text) 8%, transparent);
     font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
     font-size: 0.9em;
   }
@@ -330,7 +334,14 @@
     overflow: auto;
     border-radius: 8px;
     padding: 0.85rem;
-    background: rgba(32, 33, 36, 0.08);
+    background: color-mix(in srgb, var(--pin-text) 8%, transparent);
+  }
+
+  /* Code inside a block already sits on the block's background. */
+  .milkdown-host :global(pre code) {
+    padding: 0;
+    border-radius: 0;
+    background: none;
   }
 
   .milkdown-host :global(table) {

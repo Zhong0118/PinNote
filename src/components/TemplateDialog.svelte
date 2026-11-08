@@ -210,12 +210,12 @@
     max-height: min(380px, calc(100vh - 51px));
     display: flex;
     flex-direction: column;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
-    color: #171717;
-    background: #fff;
-    box-shadow: 0 8px 28px #00000014;
+    color: var(--text);
+    background: var(--surface-raised);
+    box-shadow: var(--menu-shadow);
   }
 
   header,
@@ -224,18 +224,18 @@
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
-    background: #fff;
+    background: var(--surface-raised);
     flex: 0 0 auto;
   }
 
   header {
     justify-content: space-between;
-    border-bottom: 1px solid #ededee;
+    border-bottom: 1px solid var(--hairline);
   }
 
   footer {
     flex-wrap: wrap;
-    border-top: 1px solid #ededee;
+    border-top: 1px solid var(--hairline);
   }
 
   h2 {
@@ -250,7 +250,7 @@
 
   small,
   footer span {
-    color: #737373;
+    color: var(--muted);
     font-size: 12px;
   }
 
@@ -279,15 +279,15 @@
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 0;
-    color: #737373;
+    color: var(--muted);
     background: transparent;
   }
 
   .icon-btn:hover,
   .delete-btn:hover {
-    border-color: #e5e7eb;
-    color: #222;
-    background: #f5f5f5;
+    border-color: var(--border);
+    color: var(--text);
+    background: var(--hover);
   }
 
   .template-list {
@@ -302,14 +302,14 @@
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 6px;
-    border-bottom: 1px solid #ededee;
+    border-bottom: 1px solid var(--hairline);
     padding: 5px 7px;
-    background: #eff6ff;
+    background: var(--accent-soft);
   }
 
   .confirm-row span {
     overflow: hidden;
-    color: #1d4ed8;
+    color: var(--accent);
     font-size: 12px;
     font-weight: 600;
     text-overflow: ellipsis;
@@ -317,16 +317,16 @@
   }
 
   .confirm-row button {
-    border: 1px solid #bfdbfe;
+    border: 1px solid var(--accent-soft-strong);
     border-radius: 5px;
     padding: 2px 6px;
-    color: #1d4ed8;
-    background: #fff;
+    color: var(--accent);
+    background: var(--surface-raised);
     font-size: 12px;
   }
 
   .confirm-row button:hover {
-    background: #dbeafe;
+    background: var(--accent-soft);
   }
 
   .template-item {
@@ -338,7 +338,7 @@
   }
 
   .template-item:hover {
-    background: #f5f5f5;
+    background: var(--hover);
   }
 
   .template-main {
@@ -349,14 +349,14 @@
     padding: 5px 7px;
     min-height: 28px;
     text-align: left;
-    color: #171717;
+    color: var(--text);
     background: transparent;
   }
 
   .template-main:hover,
   .template-main.pending {
-    color: #111;
-    background: #eff6ff;
+    color: var(--text);
+    background: var(--accent-soft);
   }
 
   .template-main span {
@@ -373,23 +373,23 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 4px 7px;
-    color: #222;
-    background: #eff6ff;
+    color: var(--text);
+    background: var(--accent-soft);
     font-size: 12px;
     font-weight: 600;
   }
 
   .secondary-btn {
-    color: #555;
-    background: #fff;
+    color: var(--muted);
+    background: var(--surface-raised);
   }
 
   .create-btn:hover,
   .secondary-btn:hover {
-    background: #eff6ff;
+    background: var(--accent-soft);
   }
 
   .template-form {
@@ -403,7 +403,7 @@
   label {
     display: grid;
     gap: 6px;
-    color: #737373;
+    color: var(--muted);
     font-size: 12px;
     font-weight: 700;
   }
@@ -411,19 +411,19 @@
   input,
   textarea {
     width: 100%;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 6px 8px;
-    color: #171717;
-    background: #fff;
+    color: var(--text);
+    background: var(--surface-raised);
     outline: 0;
   }
 
   input:focus,
   textarea:focus {
-    outline: 2px solid #2563eb;
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
-    border-color: #2563eb;
+    border-color: var(--accent);
   }
 
   textarea {
@@ -436,7 +436,7 @@
 
   button:hover { transform: scale(1.01); }
   button:active { transform: scale(0.97); }
-  button:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 
   @media (max-height: 360px) {

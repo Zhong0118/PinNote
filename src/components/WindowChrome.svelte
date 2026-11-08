@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, Maximize2, Minimize2, GripVertical } from "lucide-svelte";
+  import { CircleAlert, Maximize2, Minimize2, GripVertical, Pin } from "lucide-svelte";
   import type { Window } from "@tauri-apps/api/window";
   type ResizeDirection = Parameters<Window["startResizeDragging"]>[0];
   import Toolbar from "./Toolbar.svelte";
@@ -27,7 +27,8 @@
     onOpenNotes: () => void;
     onOpenTemplates: () => void;
     onExport: () => void;
-    onOpenSettings: () => void;
+    /** Opens the native color menu (never clipped by the small window). */
+    onPickColor: () => void;
     onDelete: () => void;
     onQuit: () => void;
     onToggleCollapsed?: () => void;
@@ -46,7 +47,7 @@
     children: import("svelte").Snippet;
   };
   let { disabled = false, collapsed = false, dockedSide, freeze, opening = false, transitioning = false, title, status, sourceMode, settings,
-    onTitleChange, onTogglePin, onToggleSource, onOpenNotes, onOpenTemplates, onExport, onOpenSettings,
+    onTitleChange, onTogglePin, onToggleSource, onOpenNotes, onOpenTemplates, onExport, onPickColor,
     onDelete, onQuit, onToggleCollapsed = () => {}, onNewNote, onArchive, onReturn, onHover, onReminder, onClearCompleted, onDock, locating=false, edgeHint = '', edgeOverflow = 0, onStartDrag, onStartResize, children }: Props = $props();
   let visibleStatus = $state(false);
   const statusIsError = $derived(/失败|错误|无法|不能/.test(status));
@@ -136,12 +137,15 @@
         onpointerenter={() => onHover?.(true)} onpointerleave={() => onHover?.(false)}
         onkeydown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!transitioning) onToggleCollapsed(); } }}
         >
-        <span>{edgeHint || title || "未命名便签"}</span>
+        <button class="dot-button" type="button" title="便签颜色" aria-label="便签颜色" onclick={e=>{e.stopPropagation();onPickColor();}}><i class="color-dot" aria-hidden="true"></i></button>
+        <span class="capsule-title">{edgeHint || title || "未命名便签"}</span>
         {#if edgeOverflow}<button class="overflow" title="查看溢出的桌面便签" onclick={e=>{e.stopPropagation();onOpenNotes();}}>+{edgeOverflow}</button>{/if}
         {#if statusIsError}
           <CircleAlert class="capsule-error-icon" size={14} strokeWidth={1.8} aria-hidden="true" />
         {:else}
-          <Maximize2 size={13} strokeWidth={1.7} />
+          <button class="mini-button" class:on={settings.alwaysOnTop} type="button" aria-pressed={settings.alwaysOnTop}
+            title={settings.alwaysOnTop?'已置顶 · 点击取消':'置顶'} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={e=>{e.stopPropagation();onTogglePin();}}><Pin size={12} strokeWidth={1.8}/></button>
+          <button class="mini-button" type="button" title="展开" aria-label="展开便签" onclick={e=>{e.stopPropagation();if(!transitioning)onToggleCollapsed();}}><Maximize2 size={12} strokeWidth={1.8} /></button>
         {/if}
       </div>
       {#if statusIsError}
@@ -150,15 +154,20 @@
     {/if}
     <header class="dragbar" inert={collapsed || transitioning} aria-hidden={collapsed} role="presentation" onpointerdown={onStartDrag}>
       <span class="drag-grip" title="拖动便签 · 靠近左右边缘可收纳"><GripVertical size={14}/></span>
+      <button class="dot-button" type="button" title="便签颜色" aria-label="便签颜色" onclick={onPickColor}><i class="color-dot" aria-hidden="true"></i></button>
       <input class="title-input" aria-label="便签标题" placeholder="未命名便签" value={title}
         oninput={(event) => onTitleChange(event.currentTarget.value)} />
       <div class="header-actions">
+        <button class="pin-button" class:on={settings.alwaysOnTop} type="button" aria-pressed={settings.alwaysOnTop}
+          title={settings.alwaysOnTop?'已置顶 · 点击取消（⌘T）':'置顶（⌘T）'} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={onTogglePin}>
+          <Pin size={15} strokeWidth={1.8} />
+        </button>
         <button bind:this={collapseButton} class="collapse-button" type="button" title="收起便签" aria-label="收起便签" onclick={onToggleCollapsed}>
           <Minimize2 size={15} strokeWidth={1.8} />
         </button>
         {#if !collapsed}
-          <Toolbar alwaysOnTop={settings.alwaysOnTop} {sourceMode} {onTogglePin} {onToggleSource} {onOpenNotes}
-            {onOpenTemplates} {onExport} {onOpenSettings} {onDelete} {onQuit} {onNewNote} {onArchive} {onReturn} {onReminder} {onClearCompleted} {onDock} />
+          <Toolbar {sourceMode} {onToggleSource} {onOpenNotes}
+            {onOpenTemplates} {onExport} {onDelete} {onQuit} {onNewNote} {onArchive} {onReturn} {onReminder} {onClearCompleted} {onDock} />
         {/if}
       </div>
     </header>
@@ -190,15 +199,38 @@
   .theme-grape { --pin-page: #eee7f5; --pin-bg: #fbf8ff; --pin-header: #fbf8ff; }
   .theme-ink { --pin-page: #202020; --pin-bg: #272727; --pin-header: #272727; --pin-text: #f5f5f5; --pin-heading: #fff; --pin-muted: #a3a3a3; --pin-border: #ffffff20; --pin-accent: #93b4ff; --pin-accent-strong: #b6cdff; --pin-hover: #343434; --pin-active: #263653; }
   .theme-custom { --pin-page: color-mix(in srgb, var(--pin-custom), white 74%); --pin-bg: color-mix(in srgb, var(--pin-custom), white 94%); --pin-header: var(--pin-bg); }
+  /* Dark app theme: the note keeps its colour as a tint on a dark surface, with light text.
+     The stored note colour is never changed. */
+  :global([data-theme="dark"]) .window-shell { --pin-bg: color-mix(in srgb, var(--pin-dot) 13%, #1f1f21); --pin-header: var(--pin-bg); --pin-page: #18181a;
+    --pin-text: #ececec; --pin-heading: #ffffff; --pin-muted: #a1a1aa; --pin-border: #ffffff1f; --pin-accent: #8fb1ff; --pin-accent-strong: #b6cdff; --pin-hover: #ffffff12; --pin-active: #3b82f62e; }
+  :global([data-theme="dark"]) .window-shell.theme-paper { --pin-bg: #1f1f21; }
+  /* Shadows: "standard" is the native window shadow; "light" a hairline drawn inside the frame. */
+  :global([data-note-shadow="light"]) .note-window { box-shadow: inset 0 0 0 .5px #0000001f, inset 0 -1px 0 #0000000a; }
+  :global([data-note-shadow="off"]) .note-window { border-color: color-mix(in srgb, var(--pin-border), transparent 30%); }
+  /* Edge tabs: light border plus a faint shadow on the side facing the desktop. */
+  .tab.dock-left .note-window { box-shadow: inset -3px 0 4px -3px #0000001f; }
+  .tab.dock-right .note-window { box-shadow: inset 3px 0 4px -3px #0000001f; }
   .note-window { position: relative; display: grid; grid-template-rows: 40px minmax(0, 1fr); width: 100%; height: 100%; border: 1px solid var(--pin-border); border-radius: 16px; overflow: hidden; color: var(--pin-text); background: color-mix(in srgb, var(--pin-bg) calc(var(--pin-opacity) * 100%), transparent); transition: border-radius 180ms, background 180ms; }
-  .dragbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 4px 10px 4px 16px; box-shadow: inset 0 -1px 0 var(--pin-border); cursor: grab; user-select: none; transition: opacity 100ms ease; }
+  .dragbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; padding: 4px 8px 4px 14px; box-shadow: inset 0 -1px 0 var(--pin-border); cursor: grab; user-select: none; transition: opacity 100ms ease; }
   .dragbar:active { cursor: grabbing; }
   .title-input { min-width: 0; flex: 1; width: 0; border: 0; border-radius: 6px; padding: 2px 4px; margin-left: -4px; outline: 0; font: inherit; font-size: 14px; line-height: 20px; font-weight: 600; text-overflow: ellipsis; color: var(--pin-heading); background: transparent; cursor: text; }
   .title-input:focus-visible { box-shadow: 0 1px 0 var(--pin-accent); }
-  .header-actions { display: flex; align-items: center; gap: 5px; }
-  .collapse-button { display: grid; place-items: center; flex: 0 0 auto; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer; transition: color 140ms, background 140ms, transform 140ms; }
-  .collapse-button:hover { color: var(--pin-text); background: var(--pin-hover); transform: scale(1.06); }
-  .collapse-button:active { transform: scale(0.93); }
+  .header-actions { display: flex; align-items: center; gap: 2px; }
+  .pin-button, .collapse-button { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer; transition: color 140ms, background 140ms, transform 140ms; }
+  .pin-button, .collapse-button { padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer; transition: color 140ms, background 140ms, transform 140ms; }
+  .pin-button:hover, .collapse-button:hover { color: var(--pin-text); background: var(--pin-hover); }
+  .pin-button:active, .collapse-button:active { transform: scale(0.93); }
+  .pin-button.on { color: var(--pin-accent); background: var(--pin-active); }
+  .pin-button.on :global(svg) { fill: currentColor; fill-opacity: .18; }
+  .pin-button:focus-visible, .dot-button:focus-visible, .mini-button:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -2px; }
+  .dot-button { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+  .dot-button:hover { background: var(--pin-hover); }
+  .color-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--pin-dot); box-shadow: inset 0 0 0 1px #0000001f; transition: transform 140ms; }
+  .dot-button:hover .color-dot { transform: scale(1.15); }
+  .mini-button { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer; transition: color 140ms, background 140ms; }
+  .mini-button:hover { color: var(--pin-text); background: color-mix(in srgb, var(--pin-text) 8%, transparent); }
+  .mini-button.on { color: var(--pin-accent); }
+  .mini-button.on :global(svg) { fill: currentColor; fill-opacity: .25; }
   .collapse-button:focus-visible, .capsule:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
   .editor-frame { min-height: 0; overflow: hidden; transition: opacity 120ms ease; }
   .status-toast { position: absolute; z-index: 80; right: 12px; bottom: 10px; max-width: calc(100% - 24px); padding: 5px 9px; border: 1px solid var(--pin-border); border-radius: 8px; color: var(--pin-muted); background: var(--pin-bg); font-size: 11px; box-shadow: 0 2px 8px #00000006; }
@@ -226,11 +258,12 @@
   .tab-error { width: 6px; height: 6px; border-radius: 50%; background: #dc2626; flex: 0 0 auto; }
   .tab-overflow { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); border: 0; padding: 0 3px; border-radius: 6px; font-size: 9px; line-height: 14px; color: #2563eb; background: #eff6ff; cursor: pointer; }
   .capsule { animation: pin-appear 160ms ease-out; }
-  .capsule { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border-radius: inherit; user-select: none; touch-action: none; cursor: grab; transition: background 140ms; }
+  .capsule { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 6px 0 8px; border-radius: inherit; user-select: none; touch-action: none; cursor: grab; transition: background 140ms; }
   .capsule:hover { background: var(--pin-hover); }
   .capsule:active { cursor: grabbing; }
+  .capsule .capsule-title { flex: 1; margin-left: 2px; }
   .capsule span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-  .capsule :global(svg) { flex: 0 0 auto; color: var(--pin-muted); }
+  .capsule :global(svg) { flex: 0 0 auto; }
   .overflow{border:0;border-radius:8px;background:#eff6ff;color:#2563eb;padding:2px 6px;cursor:pointer}
   .capsule :global(.capsule-error-icon) { color: #dc2626; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

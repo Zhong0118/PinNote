@@ -18,12 +18,13 @@ function loadStore(invoke) {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     });
     runInNewContext(outputText, {
-      exports, console, crypto: globalThis.crypto,
+      exports, console, crypto: globalThis.crypto, structuredClone,
       setTimeout: (fn) => { timers.set(++timerId, fn); return timerId; },
       clearTimeout: (id) => timers.delete(id),
       require: (name) => {
-        if (name === '@tauri-apps/api/core') return { invoke: (cmd,args) => cmd === 'note_draft' ? Promise.resolve() : invoke(cmd,args) };
+        if (name === '@tauri-apps/api/core') return { invoke: (cmd,args) => cmd === 'note_draft' ? Promise.resolve() : cmd === 'perf_enabled' ? Promise.resolve({ enabled: false, scenario: false }) : invoke(cmd,args) };
         if (name === '$app/environment') return { browser: false };
+        if (name === '@tauri-apps/api/window') return { getCurrentWindow: () => ({ label: 'test' }) };
         if (name.startsWith('.')) return load(resolve(dirname(path), `${name}.ts`));
         throw new Error(`Unexpected import: ${name}`);
       },
@@ -156,4 +157,32 @@ test('save scopes keep body and geometry writes apart', async () => {
   store.scheduleNoteSave({ ...note, content: 'mixed' }, undefined, 'window');
   await store.flushNoteSave('b');
   assert.deepEqual(Object.keys(requests.at(-1).patch), ['title', 'content', 'window']);
+});
+
+test('saving an existing note sends only the changed fields, never the whole record', async () => {
+  const requests = [];
+  const store = loadStore(async (_command, args) => { requests.push(args.request); return { ...args.request.patch, id: 'a', revision: args.request.expectedRevision + 1 }; });
+  const note = store.createNote({ id: 'a', revision: 3, content: 'body', window: { width: 300, height: 200, collapsed: true } });
+  await store.saveNoteNow(note, 'window');
+  await store.saveNoteNow({ ...note, content: 'edited' }, 'body');
+  assert.equal(requests[0].op, 'window'); assert.equal(requests[0].note, undefined);
+  assert.deepEqual(Object.keys(requests[0].patch), ['window']);
+  assert.equal(requests[1].op, 'save'); assert.equal(requests[1].note, undefined);
+  assert.deepEqual(Object.keys(requests[1].patch).sort(), ['content', 'title']);
+});
+
+test('the window snapshot loads once and then follows single-note changes', async () => {
+  let loads = 0;
+  const file = { version: 2, notes: { a: { id: 'a', revision: 1, title: 'A', content: 'one', lifecycle: 'active', placement: 'center', window: {} } }, lastActiveNoteId: 'a', lastClosedNoteId: 'a', history: [] };
+  const store = loadStore(async (command) => { if (command === 'load_notes') { loads++; return JSON.stringify(file); } });
+  const first = await store.notesSnapshot();
+  await store.notesSnapshot();
+  assert.equal(loads, 1, 'no reload per question');
+  await store.applyNoteChange({ id: 'a', note: { ...first.notes.a, revision: 2, content: 'two' } });
+  assert.equal((await store.notesSnapshot()).notes.a.content, 'two');
+  await store.applyNoteChange({ id: 'a', note: { ...first.notes.a, revision: 1, content: 'stale echo' } });
+  assert.equal((await store.notesSnapshot()).notes.a.content, 'two', 'an older revision never replaces a newer one');
+  await store.applyNoteChange({ id: 'a', note: null });
+  assert.equal((await store.notesSnapshot()).notes.a, undefined);
+  assert.equal(loads, 1);
 });

@@ -111,12 +111,12 @@
     max-height: min(390px, calc(100vh - 51px));
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
-    color: #171717;
-    background: #fff;
-    box-shadow: 0 8px 28px #00000014;
+    color: var(--text);
+    background: var(--surface-raised);
+    box-shadow: var(--menu-shadow);
   }
 
   header,
@@ -126,15 +126,15 @@
     justify-content: space-between;
     gap: 8px;
     padding: 6px 8px;
-    background: #fff;
+    background: var(--surface-raised);
   }
 
   header {
-    border-bottom: 1px solid #ededee;
+    border-bottom: 1px solid var(--hairline);
   }
 
   footer {
-    border-top: 1px solid #ededee;
+    border-top: 1px solid var(--hairline);
   }
 
   .title {
@@ -142,7 +142,7 @@
     min-width: 0;
     align-items: center;
     gap: 6px;
-    color: #171717;
+    color: var(--text);
   }
 
   h2 {
@@ -154,7 +154,7 @@
 
   small,
   .empty {
-    color: #737373;
+    color: var(--muted);
     font-size: 12px;
   }
 
@@ -184,7 +184,7 @@
 
   .note-item:hover,
   .note-item.current {
-    background: #f5f5f5;
+    background: var(--hover);
   }
 
   .note-main {
@@ -198,12 +198,12 @@
     border-radius: 6px;
     padding: 5px 7px;
     text-align: left;
-    color: #171717;
+    color: var(--text);
     background: transparent;
   }
 
   .note-main:hover {
-    background: #eff6ff;
+    background: var(--accent-soft);
   }
 
   .note-main span {
@@ -216,7 +216,7 @@
   }
 
   .note-main small {
-    color: #2563eb;
+    color: var(--accent);
     font-weight: 650;
   }
 
@@ -228,25 +228,25 @@
     border: 1px solid transparent;
     border-radius: 5px;
     padding: 0;
-    color: #737373;
+    color: var(--muted);
     background: transparent;
   }
 
   .icon-btn:hover {
-    border-color: #e5e7eb;
-    color: #222;
-    background: #f5f5f5;
+    border-color: var(--border);
+    color: var(--text);
+    background: var(--hover);
   }
 
   .icon-btn.danger:hover {
     border-color: rgba(168, 67, 50, 0.26);
-    color: #dc2626;
+    color: var(--danger);
     background: rgba(168, 67, 50, 0.08);
   }
 
   button:hover { transform: scale(1.01); }
   button:active { transform: scale(0.97); }
-  button:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 
   @media (max-height: 360px) {

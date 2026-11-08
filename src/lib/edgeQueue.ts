@@ -11,38 +11,74 @@ export function edgeTarget(bounds: Bounds, displays: Display[]): NoteWindowState
   const left=bounds.x-p.x;
   const right=p.x+s.width-(bounds.x+bounds.width*display.scaleFactor);
   const side = left<=threshold && left<=right ? 'left' : right<=threshold ? 'right' : null;
-  return side ? { side, display: `${p.x}:${p.y}`, order: bounds.y } : null;
+  return side ? { side, display: display.name || `${p.x}:${p.y}`, order: bounds.y } : null;
 }
 
 /** Docked notes keep their slot while expanded, so peers never jump when one opens. */
 const docked = (n: PinNote) => n.lifecycle === 'active' && n.placement === 'desktop' && Boolean(n.window.edge);
+type Edge = NonNullable<NoteWindowState['edge']>;
+const positionKey = (d: Display) => `${d.workArea.position.x}:${d.workArea.position.y}`;
+/** An edge belongs to a display by its stable name or, for older data, its work-area origin. */
+const onDisplay = (edge: Edge, d: Display) => edge.display === positionKey(d) || (Boolean(d.name) && edge.display === d.name);
+const byOrder = (a: PinNote, b: PinNote) => a.window.edge!.order - b.window.edge!.order || a.id.localeCompare(b.id);
 
-export function edgeOrder(id:string, edge:NonNullable<NoteWindowState['edge']>, bounds:Bounds, notes:PinNote[], displays:Display[]) {
-  const display=displayFor(bounds,displays); if(!display)return edge.order;
-  const peers=notes.filter(n=>n.id!==id&&docked(n)&&n.window.edge?.display===edge.display&&n.window.edge.side===edge.side)
-    .sort((a,b)=>a.window.edge!.order-b.window.edge!.order||a.id.localeCompare(b.id));
-  const index=Math.max(0,Math.min(peers.length,Math.round((bounds.y-display.workArea.position.y-EDGE_INSET*display.scaleFactor)/(EDGE_PITCH*display.scaleFactor))));
-  const before=peers[index-1]?.window.edge?.order;const after=peers[index]?.window.edge?.order;
-  return before==null?(after??1)-1:after==null?before+1:(before+after)/2;
+/** Notes queued on one edge of one display, in order. Unknown displays fall back to the first. */
+function queueFor(notes: PinNote[], display: Display, side: 'left' | 'right', displays: Display[], except?: string) {
+  const primary = display === displays[0];
+  return notes.filter(n => n.id !== except && docked(n) && n.window.edge!.side === side &&
+    (onDisplay(n.window.edge!, display) || (primary && !displays.some(d => onDisplay(n.window.edge!, d))))).sort(byOrder);
+}
+
+/** Top of the first slot: the most recently placed queue start, kept inside the work area. */
+function queueStart(queue: PinNote[], display: Display, slots: number) {
+  const { position: p, size: s } = display.workArea;
+  const scale = display.scaleFactor;
+  const min = p.y + EDGE_INSET * scale;
+  const set = queue.filter(n => Number.isFinite(n.window.edge!.top)).sort((a, b) => (b.window.edge!.topAt ?? 0) - (a.window.edge!.topAt ?? 0))[0];
+  if (!set) return min;
+  const span = ((slots - 1) * EDGE_PITCH + EDGE_TAB.height) * scale;
+  const max = p.y + s.height - EDGE_INSET * scale - span;
+  return Math.round(Math.max(min, Math.min(max, p.y + set.window.edge!.top! * s.height)));
+}
+const capacityOf = (display: Display) => Math.max(1, Math.floor((display.workArea.size.height - EDGE_INSET * display.scaleFactor) / (EDGE_PITCH * display.scaleFactor)));
+
+/**
+ * Where a tab dropped at `bounds` goes: its order among peers, and when it lands first
+ * (or alone) the queue start moves to where it was dropped instead of snapping to the top.
+ */
+export function edgePlacement(id: string, edge: Edge, bounds: Bounds, notes: PinNote[], displays: Display[]): Edge {
+  const display = displayFor(bounds, displays); if (!display) return edge;
+  const peers = queueFor(notes, display, edge.side, displays, id);
+  const scale = display.scaleFactor, pitch = EDGE_PITCH * scale;
+  const start = queueStart(peers, display, Math.min(peers.length + 1, capacityOf(display)));
+  const index = Math.max(0, Math.min(peers.length, Math.round((bounds.y - start) / pitch)));
+  const before = peers[index - 1]?.window.edge?.order; const after = peers[index]?.window.edge?.order;
+  const order = before == null ? (after ?? 1) - 1 : after == null ? before + 1 : (before + after) / 2;
+  if (index > 0) return { ...edge, order, top: undefined, topAt: undefined };
+  const { position: p, size: s } = display.workArea;
+  return { ...edge, order, top: Math.max(0, Math.min(1, (bounds.y - p.y) / s.height)), topAt: Date.now() };
+}
+
+/** Kept for callers that only need the order. */
+export function edgeOrder(id: string, edge: Edge, bounds: Bounds, notes: PinNote[], displays: Display[]) {
+  return edgePlacement(id, edge, bounds, notes, displays).order;
 }
 
 export type EdgeSlot = { bounds: Bounds; overflow: boolean; extra: number; side: 'left' | 'right'; display: Display };
 
 export function edgeLayout(notes: PinNote[], displays: Display[]) {
   const result = new Map<string, EdgeSlot>();
-  const known = new Set(displays.map(d => `${d.workArea.position.x}:${d.workArea.position.y}`));
   for (const display of displays) for (const side of ['left', 'right'] as const) {
     const { position: p, size: s } = display.workArea;
-    const key = `${p.x}:${p.y}`;
-    const queue = notes.filter(n => docked(n) && n.window.edge?.side === side &&
-      (n.window.edge.display === key || (!known.has(n.window.edge.display) && display === displays[0])))
-      .sort((a,b) => a.window.edge!.order - b.window.edge!.order || a.id.localeCompare(b.id));
+    const queue = queueFor(notes, display, side, displays);
+    if (!queue.length) continue;
     const scaleFactor = display.scaleFactor;
-    const capacity = Math.max(1, Math.floor((s.height - EDGE_INSET * scaleFactor) / (EDGE_PITCH * scaleFactor)));
+    const capacity = capacityOf(display);
+    const start = queueStart(queue, display, Math.min(queue.length, capacity));
     queue.forEach((note, i) => result.set(note.id, { side, display,
       overflow: i >= capacity, extra: i === capacity - 1 ? Math.max(0, queue.length - capacity) : 0,
       bounds: { x: side === 'left' ? p.x : p.x + s.width - EDGE_TAB.width * scaleFactor,
-        y: p.y + (EDGE_INSET + Math.min(i, capacity - 1) * EDGE_PITCH) * scaleFactor, ...EDGE_TAB, scaleFactor } }));
+        y: start + Math.min(i, capacity - 1) * EDGE_PITCH * scaleFactor, ...EDGE_TAB, scaleFactor } }));
   }
   return result;
 }

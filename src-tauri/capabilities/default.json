@@ -40,6 +40,8 @@
     "core:window:allow-set-min-size",
     "core:window:allow-set-resizable",
     "core:window:allow-internal-toggle-maximize",
-    "core:window:allow-set-title-bar-style"
+    "core:window:allow-set-title-bar-style",
+    "core:window:allow-set-theme",
+    "core:window:allow-set-shadow"
   ]
 }

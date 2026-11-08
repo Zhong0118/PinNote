@@ -1,4 +1,4 @@
-use crate::{atomic_write, data_file, notes, NotesFileLock};
+use crate::{data_file, notes, NotesFileLock};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
@@ -34,9 +34,14 @@ fn dispatch(app: &AppHandle) -> Result<(), String> {
     if due.is_empty() {
         return Ok(());
     }
-    atomic_write(data_file(app, "notes.json")?, file.to_string())?;
+    notes::store(app, &file)?;
     drop(guard);
     for note in due {
+        // Keep every window's copy of the note current without a full reload.
+        let _ = app.emit(
+            "notes-changed",
+            json!({"id":note["id"],"note":note,"op":"reminder","layout":false}),
+        );
         let error = app
             .notification()
             .builder()

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createQuitGuard } from "$lib/quitGuard";
   import { noteOperation, hasPendingSave, discardPendingSave } from '$lib/notesStore';
-  import { edgeTarget, edgeLayout, edgeOrder, dockedEditorBounds } from '$lib/edgeQueue';
+  import { edgeTarget, edgeLayout, edgePlacement, dockedEditorBounds } from '$lib/edgeQueue';
   import { releaseCenterEditor } from '$lib/editorHandoff';
-  import { animateWindow, type Curve } from '$lib/nativeMotion';
+  import { animateWindow, prefersReducedMotion, type Curve } from '$lib/nativeMotion';
   import { showPreview } from '$lib/previewWindow';
   import { openCenter } from '$lib/centerWindow';
   import ReminderDialog from '../components/ReminderDialog.svelte';
@@ -13,7 +13,7 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow, PhysicalPosition, LogicalPosition, LogicalSize, availableMonitors, type Window } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { emit, listen } from "@tauri-apps/api/event";
+  import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { onMount, tick } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
@@ -29,7 +29,8 @@
     type AppSettings,
   } from "$lib/settings";
   import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "$lib/shortcuts";
-  import { openSettingsWindow } from "$lib/settingsWindow";
+  import { openColorMenu } from "$lib/colorMenu";
+  import { onAppearance } from "$lib/theme";
   import type { NoteTemplate } from "$lib/templates";
   import {
     createNote,
@@ -38,6 +39,9 @@
     getRecentNote,
     loadNotes,
     loadNoteById,
+    notesSnapshot,
+    applyNoteChange,
+    type NoteChange,
     markNoteActive,
     markNoteClosed,
     saveNoteNow,
@@ -52,7 +56,7 @@
   import { CAPSULE, EDITOR_MIN, NOTE_MIN, displayFor, fitBounds, normalizeBounds, normalizeDisplays, switchBounds, rememberBounds, restoreBounds, type Bounds, type Display } from "$lib/windowGeometry";
 
   type Edge = NonNullable<NoteWindowState["edge"]>;
-  const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = prefersReducedMotion;
 
   let transitioning = $state(false);
   let modeChange: Promise<void> | undefined;
@@ -90,6 +94,16 @@
   let windowStateTimer: ReturnType<typeof setTimeout>;
   let initialization: Promise<void>;
   let editor = $state<MilkdownEditor>();
+  // A capsule or edge tab keeps no editor. One is created on expand and kept for a
+  // short while after collapsing (fast re-expand keeps selection and undo), then released.
+  const EDITOR_IDLE_MS = 45_000;
+  let editorAlive = $state(false);
+  let releaseTimer: ReturnType<typeof setTimeout>;
+  function keepEditor() { clearTimeout(releaseTimer); editorAlive = true; }
+  function releaseEditorLater(ms = EDITOR_IDLE_MS) {
+    clearTimeout(releaseTimer);
+    releaseTimer = setTimeout(() => { if (note.window.collapsed && !transitioning) { editor = undefined; editorAlive = false; } }, ms);
+  }
   const quitGuard = createQuitGuard();
   const pinned = $derived(note.alwaysOnTop);
 
@@ -107,6 +121,7 @@
 
     initialization = loadNoteById(requestedNoteId).then(async ({ note: loaded }) => {
       note = loaded;
+      editorAlive = !loaded.window.collapsed;
       status = "已就绪";
       await applyNativeWindowState(true).catch(() => { status = "窗口位置恢复失败，可继续编辑"; });
       if (isMainWindow) await invoke("set_main_note_id", { id: note.id });
@@ -141,7 +156,7 @@
       if (isMainWindow && shortcutsChanged) {
         void registerShortcuts();
       }
-      status = "设置已同步";
+
     });
 
     const noteSettingsPromise = listen<PinNote>("note-settings-changed", (event) => {
@@ -154,12 +169,6 @@
     const newNotePromise = isMainWindow
       ? listen("new-note-requested", () => {
           void createNewNoteWindow();
-        })
-      : Promise.resolve(() => {});
-
-    const openSettingsPromise = isMainWindow
-      ? listen("open-settings-requested", () => {
-          void openRecentSettings();
         })
       : Promise.resolve(() => {});
 
@@ -190,23 +199,35 @@
       event.preventDefault();
       await closeCurrentNote();
     });
-    const changes = listen<{id:string;note:PinNote|null;op:string;layout?:boolean}>('notes-changed', async ({payload}) => {
+    const changes = listen<NoteChange>('notes-changed', async ({payload}) => {
+      await applyNoteChange(payload);
       if (payload.id === note.id && ready && payload.op !== 'focus') {
         if(payload.op==='appearance'&&payload.note){const {theme,customColor,opacity,alwaysOnTop}=payload.note;note={...note,theme,customColor,opacity,alwaysOnTop};return;}
-        editor?.flush();
         if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
+          editor?.flush();
           if(hasPendingSave(note.id)) { status='便签状态已变化，本地草稿已保留，请先导出';return; }
           discardPendingSave(note.id); ready = false; isDeleting = true; await win.destroy();
         } else if (payload.note.revision > note.revision && (!hasPendingSave(note.id) || note.window.collapsed)) {
           // Body edits made in the center while this note is a capsule/tab. Geometry
-          // stays owned by this window.
+          // stays owned by this window, and a hidden editor is dropped rather than rebuilt.
           const contentChanged = note.content !== payload.note.content;
-          note = { ...payload.note, window: note.window }; if (contentChanged) editorRevision++;
+          note = { ...payload.note, window: note.window };
+          if (contentChanged) {
+            if (note.window.collapsed && !transitioning) { clearTimeout(releaseTimer); editor = undefined; editorAlive = false; }
+            editorRevision++;
+          }
         }
       }
       if(notesOpen) await refreshNoteList();
       if(payload.layout) await layoutEdges();
     });
+    // One poller in the center reports display changes to every note window.
+    const displaysChanged = listen('displays-changed', () => void (async()=>{
+      if(!ready||dragging||transitioning||layingOut)return;
+      if(note.window.edge)await layoutEdges();
+      else if(await win.isVisible())await showCurrentNote();
+    })().catch(()=>{status='显示器位置恢复失败，请重新显示便签';}));
+    const perfHover = listen<{inside:boolean}>('perf-hover', ({payload}) => hoverPreview(payload.inside), { target: win.label });
     const expand = listen<{id:string}>('expand-note-requested', ({payload}) => {
       if(payload.id === note.id && note.window.collapsed) { toggleCollapsed(); void win.setFocus(); }
     });
@@ -223,15 +244,6 @@
         locating=true;clearTimeout(locateTimer);locateTimer=setTimeout(()=>locating=false,2200);
       }catch(error){status=`定位失败：${error}`;}
     });
-    let displaySignature = '';
-    const monitorTimer=setInterval(()=>void (async()=>{
-      if(!ready||dragging||transitioning||layingOut)return;
-      const monitors=await availableMonitors();const signature=JSON.stringify(monitors);
-      if(signature===displaySignature)return;displaySignature=signature;
-      if(note.window.edge)await layoutEdges();
-      else if(await win.isVisible())await showCurrentNote();
-    })().catch(()=>{status='显示器位置恢复失败，请重新显示便签';}),5000);
-
     async function prepareToQuit(attempt: number) {
       if (!quitGuard.begin(attempt)) return;
       document.body.inert = true;
@@ -266,9 +278,9 @@
 
     return () => {
       clearTimeout(windowStateTimer);
-      clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f()); collapseRequest.then(f=>f());
+      clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f()); collapseRequest.then(f=>f()); perfHover.then(f=>f());
       clearTimeout(locateTimer);locate.then(f=>f());
-      clearInterval(monitorTimer);
+      clearTimeout(releaseTimer); displaysChanged.then(f=>f());
       if (isMainWindow) void unregisterGlobalShortcuts();
       quitPromise.then((fn) => fn());
       quitFailedPromise.then((fn) => fn());
@@ -276,7 +288,6 @@
       settingsPromise.then((fn) => fn());
       noteSettingsPromise.then((fn) => fn());
       newNotePromise.then((fn) => fn());
-      openSettingsPromise.then((fn) => fn());
       toggleNotesPromise.then((fn) => fn());
       deleteNotePromise.then((fn) => fn());
       movedPromise.then((fn) => fn());
@@ -291,6 +302,13 @@
   $effect(() => {
     if (!settingsReady || !ready || isDeleting) return;
     void setPin(pinned);
+  });
+  // Native shadow for "standard"; edge tabs sit flush on the screen edge and keep none.
+  let noteShadow = $state<"off" | "light" | "standard">("standard");
+  $effect(() => onAppearance(a => { noteShadow = a.noteShadow; }));
+  $effect(() => {
+    const native = noteShadow === "standard" && !(note.window.collapsed && note.window.edge);
+    if (ready) void getCurrentWindow().setShadow(native).catch(() => undefined);
   });
 
   async function registerShortcuts() {
@@ -319,13 +337,15 @@
     if (document.body.inert) return;
     await saveBeforeWindowAction();
     const { note: seed } = await getRecentNote();
+    // Colour, opacity and pin come from the new-note defaults, not from another note.
+    const defaults = globalSettings.defaultNote;
     const next = createNote({
       placement: 'desktop',
       content: "",
-      theme: seed.theme,
-      customColor: seed.customColor,
-      opacity: seed.opacity,
-      alwaysOnTop: seed.alwaysOnTop,
+      theme: defaults.theme,
+      customColor: defaults.customColor,
+      opacity: defaults.opacity,
+      alwaysOnTop: defaults.alwaysOnTop,
       window: {
         ...seed.window,
         collapsed: false,
@@ -380,7 +400,7 @@
     }
     assertCurrent();
     if(note.window.collapsed && note.window.edge) {
-      const target=edgeLayout(Object.values((await loadNotes()).notes),normalizeDisplays(await availableMonitors(),isMacPlatform())).get(note.id);
+      const target=edgeLayout(Object.values((await notesSnapshot()).notes),normalizeDisplays(await availableMonitors(),isMacPlatform())).get(note.id);
       if(target?.overflow){overflowHidden=true;return;}
       if(target)await setWindowBounds(target.bounds,true);
     }
@@ -545,9 +565,9 @@
   }
 
   async function togglePin() {
-    note = { ...note, alwaysOnTop: !note.alwaysOnTop, updatedAt: Date.now() };
-    try{await noteOperation({...note},'appearance',{patch:{alwaysOnTop:note.alwaysOnTop}});}catch(error){status=String(error);return;}
-    status = note.alwaysOnTop ? "已置顶" : "已取消置顶";
+    const next = !note.alwaysOnTop;
+    await changeAppearance({ alwaysOnTop: next });
+    if (note.alwaysOnTop === next) status = next ? "已置顶" : "已取消置顶";
   }
 
   async function exportMarkdown() {
@@ -618,7 +638,7 @@
       // Native startDragging can resolve before mouse-up (notably on macOS).
       // Track the native button, not DOM pointerup which leaves this webview.
       while(await invoke<boolean>('pointer_pressed')) {
-        const b=await readWindowBounds();const edge=edgeTarget(b,normalizeDisplays(await availableMonitors(),isMacPlatform()));
+        const b=await readWindowBounds();const edge=globalSettings.behavior.edgeSnap?edgeTarget(b,normalizeDisplays(await availableMonitors(),isMacPlatform())):null;
         edgeHint=edge?`松手收纳到${edge.side==='left'?'左':'右'}侧`:'';
         await new Promise(resolve=>setTimeout(resolve,60));
       }
@@ -628,7 +648,8 @@
       // must not re-dock or undock it.
       if (Math.abs(bounds.x - start.x) < 4 * bounds.scaleFactor && Math.abs(bounds.y - start.y) < 4 * bounds.scaleFactor) return;
       const displays=normalizeDisplays(await availableMonitors(), isMacPlatform());
-      const edge = edgeTarget(bounds, displays);
+      // A docked tab can always slide along its edge; snapping a free note needs the setting.
+      const edge = globalSettings.behavior.edgeSnap || note.window.edge ? edgeTarget(bounds, displays) : null;
       if(edge) await dockToEdge(edge.side,bounds);
       else await undock(bounds, displays);
     } catch(error) {
@@ -659,8 +680,8 @@
       const current=bounds??await readWindowBounds();const displays=normalizeDisplays(await availableMonitors(),isMacPlatform());
       const display=displayFor(current,displays);if(!display)throw new Error('无法读取显示器工作区');
       const p=display.workArea.position;
-      const edge:Edge={side,display:`${p.x}:${p.y}`,order:current.y};
-      edge.order=edgeOrder(note.id,edge,current,Object.values((await loadNotes()).notes),displays);
+      // Dropped first (or alone) on an edge, a tab keeps the height it was dropped at.
+      const edge:Edge=edgePlacement(note.id,{side,display:display.name||`${p.x}:${p.y}`,order:current.y},current,Object.values((await notesSnapshot()).notes),displays);
       if(!note.window.collapsed) {
         // Shrink straight into the slot: one continuous motion, no intermediate capsule.
         await modeChange;
@@ -759,7 +780,7 @@
   /** Where the window goes next: its edge slot, a frame opening inward from it, or a free capsule. */
   async function modeTarget(current: Bounds, state: NoteWindowState, displays: Display[]): Promise<Bounds> {
     if (state.edge) {
-      const peers = Object.values((await loadNotes()).notes).map(n => n.id === note.id ? { ...note, window: state } : n);
+      const peers = Object.values((await notesSnapshot()).notes).map(n => n.id === note.id ? { ...note, window: state } : n);
       const slot = edgeLayout(peers, displays).get(note.id);
       if (slot) return state.collapsed ? slot.bounds : dockedEditorBounds(slot, state, displays);
     }
@@ -814,6 +835,7 @@
         // frame reveals them while the editor fades in.
         freeze = { width: target.width, height: target.height };
         note = { ...note, window: next };
+        keepEditor();
         opening = true;
         await tick();
         moved = true;
@@ -822,6 +844,7 @@
       freeze = undefined; opening = false;
       note = { ...note, window: rememberBounds(next, target) };
       transitioning = false;
+      if (collapsed) releaseEditorLater();
       await saveNoteNow(note, "window");
     } catch (error) {
       freeze = undefined; opening = false;
@@ -836,22 +859,32 @@
     if (note.window.collapsed && note.window.edge) await layoutEdges();
   }
 
+  /** Global settings live in the note center. */
   async function openCurrentSettings() {
     editor?.flush();
-    await saveNoteNow(note, note.window.collapsed ? "window" : "all");
-    await markNoteActive(note);
-    await openSettingsWindow(note.id);
+    await saveBeforeWindowAction().catch(() => undefined);
+    await emitTo("main", "open-settings-requested");
   }
 
-  async function openRecentSettings() {
-    if (document.body.inert) return;
-    const { note: target } = await getRecentNote();
-    await openSettingsWindow(target.id);
+  let colorInput = $state<HTMLInputElement>();
+  /** Appearance is a note property: optimistic locally, rolled back if the save fails. */
+  async function changeAppearance(patch: Partial<Pick<PinNote, "theme" | "customColor" | "alwaysOnTop">>) {
+    const previous = { theme: note.theme, customColor: note.customColor, alwaysOnTop: note.alwaysOnTop };
+    const base = { ...note };
+    note = { ...note, ...patch };
+    try { await noteOperation(base, "appearance", { patch }); }
+    catch (error) { note = { ...note, ...previous }; status = `保存失败：${error}`; }
+  }
+  function pickColor() {
+    void openColorMenu(note.theme, note.customColor, (theme) => {
+      if (theme === "custom-picker") colorInput?.click();
+      else void changeAppearance({ theme });
+    }).catch((error) => { status = `颜色菜单打开失败：${error}`; });
   }
 
   function scheduleWindowCapture() {
     if (!ready || isDeleting || transitioning || layingOut) return;
-    if(dragging) { void readWindowBounds().then(async b => { edgeHint = edgeTarget(b, normalizeDisplays(await availableMonitors(), isMacPlatform())) ? '松手贴边' : ''; }); return; }
+    if(dragging) { void readWindowBounds().then(async b => { edgeHint = globalSettings.behavior.edgeSnap && edgeTarget(b, normalizeDisplays(await availableMonitors(), isMacPlatform())) ? '松手贴边' : ''; }); return; }
     clearTimeout(windowStateTimer);
     windowStateTimer = setTimeout(() => void captureWindowState().catch(() => { status = "窗口位置保存失败，请重试"; }), 150);
   }
@@ -888,7 +921,7 @@
       do {
         relayout = false;
         const win = getCurrentWindow();
-        const entries = edgeLayout(Object.values((await loadNotes()).notes), normalizeDisplays(await availableMonitors(), isMacPlatform()));
+        const entries = edgeLayout(Object.values((await notesSnapshot()).notes), normalizeDisplays(await availableMonitors(), isMacPlatform()));
         const target = entries.get(note.id);
         if(target?.overflow) { if(!overflowHidden){ overflowHidden=true; await win.hide(); } }
         else if(target) {
@@ -907,7 +940,7 @@
     hovering = inside;
     clearTimeout(previewTimer);
     void emit('preview-hover',{id:note.id,inside});
-    if(inside && !dragging && note.window.collapsed) previewTimer = setTimeout(() => void showPreview(note).then(()=>{if(!hovering)void emit('preview-hover',{id:note.id,inside:false});}), 350);
+    if(inside && !dragging && note.window.collapsed && globalSettings.behavior.hoverPreview) previewTimer = setTimeout(() => void showPreview(note).then(()=>{if(!hovering)void emit('preview-hover',{id:note.id,inside:false});}).catch(()=>undefined), 350);
   }
   async function lifecycle(id:string, op:string) {
     try {
@@ -964,13 +997,13 @@
     templatesOpen = true;
   }}
   onExport={exportMarkdown}
-  onOpenSettings={openCurrentSettings}
+  onPickColor={pickColor}
   onDelete={deleteCurrentNote}
   onQuit={() => { void closeCurrentNote(); }}
   onStartDrag={startDrag}
   onStartResize={startResize}
 >
-  {#if ready}
+  {#if ready && editorAlive}
     {#if note.reminder}<button class="reminder-tag" onclick={()=>reminderOpen=true}>{note.reminder.state==='delivered'?'已提醒 · ':''}{new Date(note.reminder.at).toLocaleString()}</button>{/if}
     {#key `${note.id}-${editorRevision}`}
       {#if sourceMode}
@@ -982,7 +1015,8 @@
   {/if}
 </WindowChrome>
 {#if reminderOpen}<ReminderDialog currentAt={note.reminder?.at} onClose={()=>reminderOpen=false} onSet={async at=>{await saveBeforeWindowAction();const current=(await loadNotes()).notes[note.id];await noteOperation(current,'reminder',{at});note=current;}}/>{/if}
-<style>.reminder-tag{border:0;border-radius:5px;background:#eff6ff;color:#2563eb;font-size:11px;padding:3px 8px;margin:6px 16px;cursor:pointer}</style>
+<input class="color-input" type="color" tabindex="-1" aria-hidden="true" bind:this={colorInput} value={note.customColor} onchange={e=>void changeAppearance({theme:'custom',customColor:e.currentTarget.value})}/>
+<style>.color-input{position:fixed;left:8px;top:8px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}.reminder-tag{border:0;border-radius:5px;background:#eff6ff;color:#2563eb;font-size:11px;padding:3px 8px;margin:6px 16px;cursor:pointer}</style>
 
 <NoteListPopover
   open={notesOpen}

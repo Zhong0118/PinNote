@@ -48,3 +48,29 @@ test('an expanded docked note keeps its slot and opens flush with its edge',()=>
   assert.equal(editor.x+editor.width*2,4400);
   assert.ok(editor.y>=40);
 });
+test('a single tab dragged down keeps that height instead of jumping to the top',()=>{
+  const {edgePlacement}=load('edgeQueue');
+  const edge={display:'2000:40',side:'right',order:0};
+  const placed=edgePlacement('a',edge,{x:4344,y:240,width:28,height:64,scaleFactor:2},[],[display]);
+  assert.ok(placed.top>0,'queue start remembered');
+  const a=note('a',placed.order); a.window.edge={...placed};
+  assert.equal(edgeLayout([a],[display]).get('a').bounds.y,240);
+});
+test('several tabs: the head sets the queue start, others reorder within it',()=>{
+  const {edgePlacement}=load('edgeQueue');
+  const a=note('a',1),b=note('b',2);
+  a.window.edge={...a.window.edge,top:(100-40)/400,topAt:1};
+  let layout=edgeLayout([a,b],[display]);
+  assert.equal(layout.get('a').bounds.y,100); assert.equal(layout.get('b').bounds.y,240);
+  const moved=edgePlacement('c',{display:'2000:40',side:'right',order:0},{x:4344,y:245,width:28,height:64,scaleFactor:2},[a,b],[display]);
+  assert.equal(moved.top,undefined,'dropping inside the queue only reorders');
+  assert.ok(moved.order>1&&moved.order<2||moved.order>2);
+  const head=edgePlacement('c',{display:'2000:40',side:'right',order:0},{x:4344,y:60,width:28,height:64,scaleFactor:2},[a,b],[display]);
+  assert.ok(head.order<1&&head.top>0,'dropping before the head moves the queue start');
+});
+test('stable display names match edges and the queue stays inside the work area',()=>{
+  const named={...display,name:'Studio'};
+  const a=note('a',1); a.window.edge={display:'Studio',side:'right',order:1,top:0.99,topAt:1};
+  const y=edgeLayout([a],[named]).get('a').bounds.y;
+  assert.ok(y+64*2<=40+400,'clamped inside the work area');
+});

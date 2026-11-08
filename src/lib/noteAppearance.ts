@@ -11,3 +11,8 @@ export const noteColors: Array<{theme:NoteTheme;label:string;background:string;s
 export function noteBackground(theme:NoteTheme,customColor:string) {
   return theme==='custom' ? `color-mix(in srgb, ${customColor}, white 94%)` : noteColors.find(c=>c.theme===theme)?.background??'#fff';
 }
+/** The note's hue, used to tint its background in dark mode without changing the note. */
+export function noteTint(theme:NoteTheme,customColor:string) {
+  if(theme==='custom') return customColor;
+  return ({paper:'#a1a1aa',mint:'#72bca0',rose:'#df9d9a',sky:'#7dafe1',grape:'#b69bd6',ink:'#555555'} as Record<string,string>)[theme]??'#a1a1aa';
+}

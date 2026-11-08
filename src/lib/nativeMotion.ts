@@ -6,7 +6,7 @@ import type { Bounds } from './windowGeometry';
 export type Curve = 'out' | 'inOut' | 'in';
 
 export const prefersReducedMotion = () =>
-  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  typeof window !== 'undefined' && (document.documentElement.dataset.motion === 'reduce' || window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 /** Native frame/opacity interpolation is macOS-only; elsewhere changes apply directly. */
 export const canAnimateWindow = () => isMacPlatform() && !prefersReducedMotion();

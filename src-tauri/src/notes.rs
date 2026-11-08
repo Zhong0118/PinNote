@@ -13,6 +13,7 @@ pub fn note_draft(
     id: String,
     dirty: bool,
 ) -> Result<(), String> {
+    crate::perf::count("ipc.note_draft", None);
     let state = app.state::<Drafts>();
     let mut drafts = state.0.lock().map_err(|_| "Cannot lock drafts")?;
     if dirty {
@@ -74,8 +75,53 @@ pub fn normalize(file: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
-pub fn load(app: &AppHandle) -> Result<Value, String> {
+/// The parsed notes file, valid while the file on disk keeps the same mtime and size.
+/// Every write in this process goes through `store`, so the app reads and parses the
+/// library once instead of on every operation; an outside change is still picked up.
+struct Cached {
+    path: std::path::PathBuf,
+    stamp: (std::time::SystemTime, u64),
+    file: Value,
+}
+static CACHE: std::sync::Mutex<Option<Cached>> = std::sync::Mutex::new(None);
+
+fn stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+fn remember(path: &std::path::Path, file: &Value) {
+    if let (Some(stamp), Ok(mut cache)) = (stamp(path), CACHE.lock()) {
+        *cache = Some(Cached {
+            path: path.to_path_buf(),
+            stamp,
+            file: file.clone(),
+        });
+    }
+}
+
+/// Atomically writes the notes file and keeps the in-memory copy authoritative.
+pub fn store(app: &AppHandle, file: &Value) -> Result<(), String> {
     let path = data_file(app, "notes.json")?;
+    if let Err(error) = atomic_write(path.clone(), file.to_string()) {
+        if let Ok(mut cache) = CACHE.lock() {
+            *cache = None;
+        }
+        return Err(error);
+    }
+    remember(&path, file);
+    Ok(())
+}
+
+pub fn load(app: &AppHandle) -> Result<Value, String> {
+    let started = std::time::Instant::now();
+    let path = data_file(app, "notes.json")?;
+    if let (Some(current), Ok(cache)) = (stamp(&path), CACHE.lock()) {
+        if let Some(cached) = cache.as_ref().filter(|c| c.path == path && c.stamp == current) {
+            crate::perf::count("disk.cache_hit", Some(started));
+            return Ok(cached.file.clone());
+        }
+    }
     let raw = read_optional(path.clone())?;
     let mut file: Value = match &raw {
         Some(raw) => {
@@ -85,6 +131,7 @@ pub fn load(app: &AppHandle) -> Result<Value, String> {
     };
     let migrate = file["version"] != 2;
     normalize(&mut file)?;
+    crate::perf::count("disk.read_parse", Some(started));
     if migrate {
         let mut backup = path.with_file_name("notes.before-v2.json");
         if backup.exists()
@@ -107,8 +154,9 @@ pub fn load(app: &AppHandle) -> Result<Value, String> {
                 return Err(error);
             }
         }
-        atomic_write(path, file.to_string())?;
+        atomic_write(path.clone(), file.to_string())?;
     }
+    remember(&path, &file);
     Ok(file)
 }
 
@@ -377,8 +425,23 @@ pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
         return Err("EDITOR_BUSY: 用户有未保存草稿，请稍后重新读取版本再试".into());
     }
     let before = file["notes"].get(request["id"].as_str().unwrap_or("")).cloned();
+    // Re-focusing the note that is already the most recent one changes nothing a
+    // reader relies on within a few seconds: skip the disk write and the broadcast.
+    if request["op"] == "focus" {
+        if let Some(b) = &before {
+            let id = request["id"].as_str().unwrap_or("");
+            if file["lastActiveNoteId"] == id
+                && b["lifecycle"] == "active"
+                && b["lastFocusedAt"]
+                    .as_u64()
+                    .is_some_and(|at| now().saturating_sub(at) < 10_000)
+            {
+                return Ok(b.clone());
+            }
+        }
+    }
     let note = mutate(&mut file, &request)?;
-    atomic_write(data_file(app, "notes.json")?, file.to_string())?;
+    store(app, &file)?;
     // Edge queues only need to re-layout when docking-relevant state changed,
     // not on every body save.
     let layout = before.as_ref().is_none_or(|b| {
@@ -400,6 +463,10 @@ pub fn note_operation(
     window: tauri::WebviewWindow,
     request: Value,
 ) -> Result<Value, String> {
+    crate::perf::count(
+        &format!("ipc.op.{}", request["op"].as_str().unwrap_or("?")),
+        None,
+    );
     let mut request = request;
     request["source"] = json!("ui");
     request["owner"] = json!(window.label());
