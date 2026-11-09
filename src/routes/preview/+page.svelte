@@ -22,7 +22,7 @@
   /** A short grace period to reach the card, then a brief fade before the window hides. */
   function leave() {
     clearTimeout(timer);
-    timer = setTimeout(() => { leaving = true; timer = setTimeout(() => { void getCurrentWindow().hide(); leaving = false; }, 120); }, 300);
+    timer = setTimeout(() => { leaving = true; timer = setTimeout(() => { void getCurrentWindow().hide(); leaving = false; }, 140); }, 300); // 140 = --motion-fast, the fade-out above
   }
   async function open() { clearTimeout(timer); if(note) await emit('expand-note-requested',{id:note.id}); await getCurrentWindow().hide(); }
 </script>
@@ -41,14 +41,14 @@
 <style>
  :global(html),:global(body){margin:0;height:100%;background:transparent;overflow:hidden}
  :global(body){font:13px/1.6 var(--font);color:var(--text,#171717);-webkit-font-smoothing:antialiased}
- main{box-sizing:border-box;position:absolute;inset:6px;padding:14px 16px 12px;display:flex;flex-direction:column;border:1px solid var(--border,#0000001a);border-radius:12px;background:var(--surface-raised,#fffffff7);animation:card-in 200ms cubic-bezier(.2,.85,.25,1)}
+ main{box-sizing:border-box;position:absolute;inset:6px;padding:14px 16px 12px;display:flex;flex-direction:column;border:1px solid var(--border,#0000001a);border-radius:var(--radius-lg);background:var(--surface-raised,#fffffff7);animation:card-in var(--motion) cubic-bezier(.2,.85,.25,1)}
  main.from-right{--dx:8px}main.from-left{--dx:-8px}
- main{transition:opacity 120ms ease-in,transform 120ms ease-in}main.leaving{opacity:0;transform:translateX(var(--dx,0)) scale(.985)}
+ main{transition:opacity var(--motion-fast) ease-in,transform var(--motion-fast) ease-in}main.leaving{opacity:0;transform:translateX(var(--dx,0)) scale(.985)}
  @keyframes card-in{from{opacity:0;transform:translateX(var(--dx,0)) scale(.98)}}
  strong{font-size:14px}
  p{white-space:pre-wrap;overflow:hidden;flex:1;color:var(--muted,#737373);margin:6px 0;mask-image:linear-gradient(#000 75%,transparent)}
  footer{display:flex;align-items:center;gap:10px}
  small{color:var(--muted,#737373);font-size:11px}
- button{margin-left:auto;border:0;border-radius:6px;background:var(--accent-soft,#eff6ff);color:var(--accent,#2563eb);padding:4px 10px;font:inherit;font-size:12px;cursor:pointer;transition:background 140ms,transform 140ms}button:hover{filter:brightness(.97)}button:active{transform:scale(.97)}
+ button{margin-left:auto;border:0;border-radius:var(--radius-sm);background:var(--accent-soft,#eff6ff);color:var(--accent,#2563eb);padding:4px 10px;font:inherit;font-size:12px;cursor:pointer;transition:background var(--motion-fast),transform var(--motion-fast)}button:hover{filter:brightness(.97)}button:active{transform:scale(.97)}
  @media(prefers-reduced-motion:reduce){main{animation:none}button{transition:none}}
 </style>

@@ -58,7 +58,7 @@
   function summary(n:PinNote){
     let s=summaries.get(n.id);
     if(!s||s.note.content!==n.content||s.note.title!==n.title){
-      s={note:n,excerpt:plainExcerpt(n.content,100).replace(/\s*\n+\s*/g,' '),tasks:checklistProgress(n.content),search:`${n.title}\n${n.content}`.toLowerCase()};
+      s={note:n,excerpt:plainExcerpt(n.content,100,{title:n.title}).replace(/\s*\n+\s*/g,' '),tasks:checklistProgress(n.content),search:`${n.title}\n${n.content}`.toLowerCase()};
       summaries.set(n.id,s);
     }
     return s;
@@ -125,9 +125,11 @@
   }
   /** Conflict: load the other version; a differing draft is kept as a new note. */
   async function takeTheirs(reason='已载入新版本') {
-    if(!draft) return; editor?.flush();
-    const {remote,copy}=await takeRemoteVersion(draft.id,{title:draft.title,content:draft.content});
-    if(!remote) return;
+    if(!draft) return;
+    const id=draft.id; let last={title:draft.title,content:draft.content};
+    // Re-read on every pass: typing continues while the copy is written.
+    const {remote,copy}=await takeRemoteVersion(id,()=>{ if(draft?.id===id){ editor?.flush(); last={title:draft.title,content:draft.content}; } return last; });
+    if(!remote||draft?.id!==id) return;
     conflict=false; saveError=''; draft=structuredClone(remote); revision++;
     await refresh();
     if(copy&&!tabs.includes(copy.id)) tabs=[...tabs,copy.id];
@@ -406,40 +408,40 @@
   <aside inert={!sidebar||settingsOpen} aria-hidden={!sidebar||settingsOpen}>
     <div class="side-inner">
       {#if mac}<div class="titlebar-space" data-tauri-drag-region></div>{/if}
-      <div class="search"><Search size={15}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={17}/></button></div>
+      <div class="search"><Search size={15}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={16}/></button></div>
       <nav><button class:active={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button class:active={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button></nav>
       <div class="list">
-        {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={12}/></button></div>{/each}
+        {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={13}/></button></div>{/each}
         {#each visible as note(note.id)}
           {@const info=summary(note)}{@const tasks=info.tasks}
           <button animate:shift class="note-row" class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})} draggable="true" ondragstart={e=>e.dataTransfer?.setData('text/pinnote',note.id)}>
-             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={12}/>{/if}</span><small>{info.excerpt||'空白便签'}</small>
+             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={13}/>{/if}</span><small>{info.excerpt||'空白便签'}</small>
              {#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}
           </button>
         {:else}<p class="empty">{query?'没有匹配的便签':'这里还没有便签'}</p>{/each}
       </div>
-      <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={14}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={14}/>回收站</button><button aria-label="设置" title="设置（{mac?'⌘':'Ctrl+'},）" onclick={()=>void openSettings()}><Settings size={15}/></button></footer>
+      <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={13}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={13}/>回收站</button><button aria-label="设置" title="设置（{mac?'⌘':'Ctrl+'},）" onclick={()=>void openSettings()}><Settings size={15}/></button></footer>
     </div>
   </aside>
   <section class="work" class:ink={draft?.theme==='ink'} style:--pin-bg={draft?noteBackground(draft.theme,draft.customColor):'var(--surface)'} style:--note-tint={draft?noteTint(draft.theme,draft.customColor):undefined} inert={busy||settingsOpen}>
-    <header class="tabs" data-tauri-drag-region><button class="list-toggle" aria-label={sidebar?'隐藏列表':'显示列表'} title={sidebar?'隐藏列表':'显示列表'} onclick={()=>sidebar=!sidebar}><PanelLeft size={17}/></button>
+    <header class="tabs" data-tauri-drag-region><button class="list-toggle" aria-label={sidebar?'隐藏列表':'显示列表'} title={sidebar?'隐藏列表':'显示列表'} onclick={()=>sidebar=!sidebar}><PanelLeft size={16}/></button>
       <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region>
         {#each tabs as id(id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="tab" class:current={selected===id} animate:shift draggable="true" ondragstart={()=>dragTab=id} ondragover={e=>e.preventDefault()} ondrop={()=>reorder(id)}>
-            <button class="tab-title" title={notes.find(n=>n.id===id)?.title||'未命名便签'} onclick={()=>run(()=>select(id))}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</button><button class="tab-close" aria-label="关闭 Tab" onclick={()=>run(()=>closeTab(id))}><X size={12}/></button>
+            <button class="tab-title" title={notes.find(n=>n.id===id)?.title||'未命名便签'} onclick={()=>run(()=>select(id))}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</button><button class="tab-close" aria-label="关闭 Tab" onclick={()=>run(()=>closeTab(id))}><X size={13}/></button>
           </div>
         {/each}
       </div>
       {#if tabsOverflow}<select aria-label="更多工作便签" value={selected} onchange={e=>run(()=>select(e.currentTarget.value))}>{#each tabs as id}<option value={id}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</option>{/each}</select>{/if}
       <div class="window-tools">
-        <button class="pin" class:on={form.pinned} aria-pressed={form.pinned} aria-label={form.pinned?'取消置顶便签中心':'置顶便签中心'} title={form.pinned?'取消置顶便签中心':'置顶便签中心'} onclick={()=>form.setPinned(!form.pinned)}><Pin size={15} strokeWidth={1.8}/></button>
+        <button class="pin" class:on={form.pinned} aria-pressed={form.pinned} aria-label={form.pinned?'取消置顶便签中心':'置顶便签中心'} title={form.pinned?'取消置顶便签中心':'置顶便签中心'} onclick={()=>form.setPinned(!form.pinned)}><Pin size={16}/></button>
         <button aria-label="收起到边缘" title="收起到边缘 · 也可以把窗口拖到屏幕左右边缘" onclick={()=>form.collapse()}>{#if form.dock.side==='left'}<ChevronsLeft size={16}/>{:else}<ChevronsRight size={16}/>{/if}</button>
-        <button class="window-more" class:on={windowMenu} aria-label="窗口选项" title="窗口选项" aria-expanded={windowMenu} onclick={()=>windowMenu=!windowMenu}><ChevronDown size={14}/></button>
+        <button class="window-more" class:on={windowMenu} aria-label="窗口选项" title="窗口选项" aria-expanded={windowMenu} onclick={()=>windowMenu=!windowMenu}><ChevronDown size={16}/></button>
         {#if windowMenu}<div class="menu window-menu" use:popup={()=>windowMenu=false} transition:reveal role="menu" tabindex="-1">
-          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapse('left');}}><ChevronsLeft size={14}/>收起到左侧边缘</button>
-          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapse('right');}}><ChevronsRight size={14}/>收起到右侧边缘</button>
-          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapseToBar();}}><Minimize2 size={14}/>收起为小条</button>
+          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapse('left');}}><ChevronsLeft size={15}/>收起到左侧边缘</button>
+          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapse('right');}}><ChevronsRight size={15}/>收起到右侧边缘</button>
+          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapseToBar();}}><Minimize2 size={15}/>收起为小条</button>
         </div>{/if}
       </div>
     </header>
@@ -451,7 +453,7 @@
         {#if draft.lifecycle==='active'}
           <button class="desktop" disabled={busy} onclick={()=>run(desktop)} ondragover={e=>e.preventDefault()} ondrop={e=>{e.preventDefault();const id=e.dataTransfer?.getData('text/pinnote');void run(async()=>{if(id)await select(id);await desktop();});}}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
         {/if}
-        <button class="more" aria-label="更多操作" title="更多操作" aria-expanded={menu} onclick={()=>menu=!menu}><MoreHorizontal size={17}/></button>
+        <button class="more" aria-label="更多操作" title="更多操作" aria-expanded={menu} onclick={()=>menu=!menu}><MoreHorizontal size={16}/></button>
         {#if menu}<div class="menu" use:popup={()=>menu=false} transition:reveal role="dialog" tabindex="-1">
           {#if draft.lifecycle==='active'}
             <button onclick={()=>{menu=false;reminderOpen=true;}}>设置提醒</button>
@@ -486,7 +488,7 @@
  :global(body){margin:0;font:13px/1.55 var(--font);color:var(--text);background:var(--surface);-webkit-font-smoothing:antialiased}
  /* Layout: list | work area. The list folds with a short, continuous slide. */
  main{position:relative;--pin-text:var(--text);--pin-heading:var(--text-strong);--pin-muted:var(--muted);--pin-accent:var(--accent);--pin-accent-strong:var(--accent-strong);--pin-border:var(--border);--pin-active:var(--accent-soft);--pin-bg:var(--surface);
-   display:grid;grid-template-columns:230px minmax(0,1fr);height:100vh;overflow:hidden;transition:grid-template-columns 260ms var(--ease-out)}
+   display:grid;grid-template-columns:230px minmax(0,1fr);height:100vh;overflow:hidden;transition:grid-template-columns var(--motion) var(--ease-out)}
  main.folded{grid-template-columns:0px minmax(0,1fr)}
  :global([data-center-shadow="light"]) main{box-shadow:inset 0 0 0 1px var(--border)}
  aside{grid-column:1;grid-row:1;min-width:0;min-height:0;overflow:hidden;display:block;background:var(--surface-muted);border-right:1px solid var(--hairline)}
@@ -510,11 +512,11 @@
  footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:var(--muted)}footer button:last-child{margin-left:auto}
  .empty,.empty-work{color:var(--muted);padding:16px}
  /* Work area: tabs, title, editor, status. */
- .work{grid-column:2;grid-row:1;display:grid;grid-template-rows:44px auto minmax(0,1fr) 30px;min-width:0;min-height:0;background:var(--pin-bg);color:var(--pin-text);transition:background 180ms,color 180ms}
+ .work{grid-column:2;grid-row:1;display:grid;grid-template-rows:44px auto minmax(0,1fr) 30px;min-width:0;min-height:0;background:var(--pin-bg);color:var(--pin-text);transition:background var(--motion-fast),color var(--motion-fast)}
  .work.ink{--pin-text:#f5f5f5;--pin-heading:#fff;--pin-muted:#aaa;--pin-border:#ffffff20;--pin-accent:#93b4ff;--pin-accent-strong:#b6cdff;--pin-active:#343434}
  /* Dark theme: the note's own colour tints the surface; the note itself is unchanged. */
  :global([data-theme="dark"]) .work[style*="--note-tint"]{--pin-bg:color-mix(in srgb,var(--note-tint) 10%,var(--surface))!important}
- .tabs{display:flex;align-items:center;gap:6px;height:44px;padding:0 8px;min-width:0;background:var(--surface-sunken);color:var(--text);border-bottom:1px solid var(--hairline);transition:padding-left 260ms var(--ease-out)}
+ .tabs{display:flex;align-items:center;gap:6px;height:44px;padding:0 8px;min-width:0;background:var(--surface-sunken);color:var(--text);border-bottom:1px solid var(--hairline);transition:padding-left var(--motion) var(--ease-out)}
  main.mac.folded .tabs{padding-left:84px}
  /* Icon buttons share one size, shape and set of states. */
  .list-toggle,.window-tools button,.more,.search button{width:28px;height:28px;padding:0;border-radius:50%;color:var(--muted)}
@@ -522,17 +524,17 @@
  .window-tools .on,.more[aria-expanded="true"]{color:var(--accent);background:var(--accent-soft)}
  .window-tools .pin.on :global(svg){fill:currentColor;fill-opacity:.22}
  .tab-strip{display:flex;align-items:center;min-width:0;overflow:hidden;flex:1;gap:2px}
- .tab{position:relative;display:flex;align-items:center;flex:0 1 auto;min-width:72px;max-width:200px;height:28px;padding:0 3px 0 10px;border-radius:7px;color:var(--muted);transition:background 160ms,color 160ms,box-shadow 160ms}
+ .tab{position:relative;display:flex;align-items:center;flex:0 1 auto;min-width:72px;max-width:200px;height:28px;padding:0 3px 0 10px;border-radius:var(--radius);color:var(--muted);transition:background var(--motion-fast),color var(--motion-fast),box-shadow var(--motion-fast)}
  .tab:hover{background:var(--hover)}
  .tab.current{background:var(--tab-current);color:var(--text);box-shadow:var(--tab-current-shadow)}
- .tab button{padding:0;background:none;border-radius:5px}.tab button:hover{background:none}.tab button:active{transform:none}
+ .tab button{padding:0;background:none;border-radius:var(--radius-sm)}.tab button:hover{background:none}.tab button:active{transform:none}
  .tab .tab-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;justify-content:flex-start;height:100%;font-size:12.5px;line-height:28px}
- .tab .tab-close{flex:0 0 auto;width:18px;height:18px;margin-left:4px;color:var(--muted);opacity:0;transition:opacity 140ms,background 140ms}
+ .tab .tab-close{flex:0 0 auto;width:18px;height:18px;margin-left:4px;color:var(--muted);opacity:0;transition:opacity var(--motion-fast),background var(--motion-fast)}
  .tab:hover .tab-close,.tab.current .tab-close,.tab-close:focus-visible{opacity:1}
  .tab .tab-close:hover{background:var(--hover-strong);color:var(--text)}
- .tabs select{max-width:110px;border:0;background:var(--hover);color:var(--text);border-radius:5px}
+ .tabs select{max-width:110px;border:0;background:var(--hover);color:var(--text);border-radius:var(--radius-sm)}
  .window-tools{position:relative;display:flex;align-items:center;gap:2px;margin-left:auto;padding-left:6px;border-left:1px solid var(--hairline)}
- .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--surface-raised);color:var(--text);border:1px solid var(--border);border-radius:10px;box-shadow:var(--menu-shadow)}
+ .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--surface-raised);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--menu-shadow)}
  .menu button{display:block;text-align:left;width:100%;font-size:12px}
  .window-menu{top:38px;right:0;width:180px}.window-menu button{display:flex;gap:8px;justify-content:flex-start}
  .danger{color:var(--danger)}
@@ -553,15 +555,15 @@
  .status{grid-row:4;padding:4px 16px;color:var(--pin-muted);font-size:11px;overflow:auto;border-top:1px solid var(--hairline)}
  .status button{font-size:11px;color:var(--accent);padding:0 8px}
  /* Edge snap hint while dragging the window to a screen edge. */
- .snap-hint{position:fixed;z-index:200;top:0;bottom:0;width:60px;pointer-events:none;display:flex;align-items:center;justify-content:center;animation:snap-in 160ms ease-out}
+ .snap-hint{position:fixed;z-index:200;top:0;bottom:0;width:60px;pointer-events:none;display:flex;align-items:center;justify-content:center;animation:snap-in var(--motion-fast) ease-out}
  .snap-hint.side-left{left:0;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 18%,transparent),transparent)}
  .snap-hint.side-right{right:0;background:linear-gradient(270deg,color-mix(in srgb,var(--accent) 18%,transparent),transparent)}
- .snap-hint span{writing-mode:vertical-rl;font-size:12px;color:var(--accent-strong);letter-spacing:2px;background:var(--surface-raised);border-radius:8px;padding:10px 4px;box-shadow:var(--menu-shadow)}
+ .snap-hint span{writing-mode:vertical-rl;font-size:12px;color:var(--accent-strong);letter-spacing:2px;background:var(--surface-raised);border-radius:var(--radius);padding:10px 4px;box-shadow:var(--menu-shadow)}
  @keyframes snap-in{from{opacity:0}}
  /* Narrow window: single column, list as a drawer. */
- .scrim{position:absolute;z-index:29;inset:0;border-radius:0;background:var(--overlay);padding:0;opacity:0;pointer-events:none;transition:opacity 220ms}
+ .scrim{position:absolute;z-index:29;inset:0;border-radius:0;background:var(--overlay);padding:0;opacity:0;pointer-events:none;transition:opacity var(--motion)}
  .scrim:hover{background:var(--overlay)}.scrim:active{transform:none}main.drawer .scrim{opacity:1;pointer-events:auto}
- main.narrow aside{position:absolute;z-index:30;top:0;bottom:0;left:0;width:min(280px,85%);transform:translateX(-100%);transition:transform 280ms var(--ease-out),box-shadow 280ms;box-shadow:none}
+ main.narrow aside{position:absolute;z-index:30;top:0;bottom:0;left:0;width:min(280px,85%);transform:translateX(-100%);transition:transform var(--motion) var(--ease-out),box-shadow var(--motion);box-shadow:none}
  main.narrow.drawer aside{transform:none;box-shadow:8px 0 28px #0000002a}
  main.narrow .side-inner{width:100%}
  main.narrow .title-row{padding:12px 14px}main.narrow .tab{min-width:84px}main.narrow .desktop{padding:6px}

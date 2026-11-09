@@ -151,20 +151,39 @@ export async function keepLocalVersion(id: string) {
   const pending = pendingNotes.get(id); if (pending) pending.revision = Math.max(pending.revision, remote.revision);
   if (pending) await flushNoteSave(id); else releaseIfClean(id);
 }
+type DraftText = { title: string; content: string };
+const taking = new Map<string, Promise<{ remote: PinNote | undefined; copy: PinNote | undefined }>>();
 /**
  * Take the remote version. A local draft that differs is first saved as a new
  * center note, so choosing the other version never throws input away.
+ * `local` is read again after each save of the copy: input typed while the copy was
+ * being written goes into the same copy, and the draft is only released once a save
+ * has covered the newest edit. A second call for the same note joins the one in flight.
  */
-export async function takeRemoteVersion(id: string, local: { title: string; content: string }) {
-  const remote = conflicts.get(id); if (!remote) return { remote: undefined, copy: undefined };
-  let copy: PinNote | undefined;
-  if (local.content !== remote.content || local.title !== remote.title) {
-    copy = createNote({ title: `${local.title || '未命名便签'}（我的草稿）`, content: local.content, placement: 'center', theme: remote.theme, customColor: remote.customColor });
-    await saveNoteNow(copy);
-  }
-  revisions.set(id, Math.max(revisions.get(id) ?? 0, remote.revision));
-  discardPendingSave(id);
-  return { remote, copy };
+export function takeRemoteVersion(id: string, local: DraftText | (() => DraftText)) {
+  const pending = taking.get(id); if (pending) return pending;
+  const first = conflicts.get(id); if (!first) return Promise.resolve({ remote: undefined, copy: undefined });
+  const read = typeof local === 'function' ? local : () => local;
+  const run = (async () => {
+    let copy: PinNote | undefined;
+    for (;;) {
+      const text = read();                 // the caller flushes its editor here
+      const gen = editState(id).gen;       // edits up to now are in `text`
+      const base = copy ?? first;
+      if (text.content !== base.content || (!copy && text.title !== first.title)) {
+        if (copy) copy.content = text.content;
+        else copy = createNote({ title: `${text.title || '未命名便签'}（我的草稿）`, content: text.content, placement: 'center', theme: first.theme, customColor: first.customColor });
+        await saveNoteNow(copy);
+      }
+      if (editState(id).gen === gen) break; // nothing typed while the copy was saved
+    }
+    const remote = conflicts.get(id) ?? first;
+    revisions.set(id, Math.max(revisions.get(id) ?? 0, remote.revision));
+    discardPendingSave(id);
+    return { remote, copy };
+  })();
+  taking.set(id, run);
+  return run.finally(() => taking.delete(id));
 }
 let snapshot: Promise<NotesFile> | undefined;
 let following = false;

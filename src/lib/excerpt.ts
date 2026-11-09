@@ -1,15 +1,27 @@
-/** Readable plain text from Markdown for list rows and hover previews (no full parse). */
-export function plainExcerpt(markdown: string, max = 160) {
-  const text = markdown
+/**
+ * Readable plain text from Markdown for list rows and hover previews (no full parse).
+ * `title`: a first line that only repeats the note title is left out.
+ * `code: false`: fenced code is left out instead of reading as prose.
+ */
+export function plainExcerpt(markdown: string, max = 160, options: { title?: string; code?: boolean } = {}) {
+  let source = markdown;
+  if (options.code === false) source = source.replace(/^[ \t]*```[^\n]*\n[\s\S]*?(?:^[ \t]*```[^\n]*$|(?![\s\S]))/gm, '');
+  let text = source
     .replace(/```[^\n]*\n?/g, '')                    // code fences, keep their content
     .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')              // headings
-    .replace(/^[ \t]*[-*+][ \t]+\[[ xX]\][ \t]+/gm, '· ')     // task items
+    .replace(/^[ \t]*[-*+][ \t]+\[[xX]\][ \t]+/gm, '✓ ')   // finished tasks
+    .replace(/^[ \t]*[-*+][ \t]+\[ \][ \t]+/gm, '○ ')      // open tasks
     .replace(/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+/gm, '· ')     // list items
     .replace(/^[ \t]{0,3}>[ \t]?/gm, '')                   // quotes
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')       // links and images keep their text
     .replace(/(\*\*|__|\*|_|~~|`)/g, '')             // inline marks
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  const title = options.title?.trim();
+  if (title) {
+    const [first, ...rest] = text.split('\n');
+    if (first.trim() === title) text = rest.join('\n').trim();
+  }
   return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
 }
 

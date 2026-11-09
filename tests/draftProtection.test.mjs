@@ -221,3 +221,31 @@ test('a late archive or trash with the same text still protects typing that was 
   const n = backend.notes.a; n.lifecycle = 'archived'; n.revision++;
   assert.equal(store.classifyChange({ id: 'a', op: 'archive', by: 'note-a', note: structuredClone(n) }, { ...local(open), lifecycle: 'active', placement: 'center' }), 'apply');
 });
+
+test('input typed while the draft copy is being written goes into that copy before the draft is released', async () => {
+  for (const queued of [false, true]) {
+    const { store, backend } = setup();
+    const open = (await store.loadNotes()).notes.a;
+    let text = 'base typed';
+    store.markEdited('a');
+    const n = backend.notes.a; n.lifecycle = 'archived'; n.revision++;
+    const change = { id: 'a', op: 'archive', by: 'note-a', note: structuredClone(n) };
+    assert.equal(store.classifyChange(change, { ...local(open), lifecycle: 'active', placement: 'center' }), 'conflict');
+    const hold = backend.holdNextWrite();
+    const taking = store.takeRemoteVersion('a', () => ({ title: 'a', content: text }));
+    const again = store.takeRemoteVersion('a', () => ({ title: 'a', content: text })); // a second late event
+    await hold.begun;                       // the copy is being written
+    text = 'base typed and more';           // the user keeps typing meanwhile
+    store.markEdited('a');
+    if (queued) store.scheduleNoteSave({ ...open, content: text }); // already serialized and queued
+    assert.equal(store.hasLocalEdits('a'), true);
+    hold.release();
+    const { copy } = await taking;
+    assert.equal((await again).copy?.id, copy.id, `${queued ? 'queued' : 'unserialized'}: one copy for both events`);
+    assert.equal(backend.notes[copy.id].content, 'base typed and more', `${queued ? 'queued' : 'unserialized'}: the later input is in the copy`);
+    assert.equal(Object.values(backend.notes).filter(x => x.title.endsWith('（我的草稿）')).length, 1);
+    assert.equal(store.hasLocalEdits('a'), false, 'released only after the newest input was saved');
+    assert.equal(backend.notes.a.lifecycle, 'archived');
+    assert.equal(backend.notes.a.content, 'base', 'the archived note itself is untouched');
+  }
+});

@@ -139,7 +139,7 @@
     <button class="back" onclick={onClose}><ArrowLeft size={15} />返回便签</button>
     {#each categories as item}
       <button class="category" class:current={category === item.id} aria-current={category === item.id ? 'page' : undefined} onclick={() => category = item.id}>
-        <item.icon size={15} strokeWidth={1.8} />{item.label}
+        <item.icon size={15} />{item.label}
       </button>
     {/each}
   </nav>
@@ -230,10 +230,10 @@
   .muted { margin: 0 0 4px; }
   .warn { color: var(--danger); }
   .path { overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
-  .segmented { display: inline-flex; flex: 0 0 auto; padding: 2px; border-radius: 8px; background: var(--surface-sunken); box-shadow: inset 0 0 0 .5px var(--hairline); }
-  .segmented button { border: 0; border-radius: 6px; padding: 4px 12px; font: inherit; font-size: 12px; color: var(--muted); background: transparent; cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); }
+  .segmented { display: inline-flex; flex: 0 0 auto; padding: 2px; border-radius: var(--radius); background: var(--surface-sunken); box-shadow: inset 0 0 0 .5px var(--hairline); }
+  .segmented button { border: 0; border-radius: var(--radius-sm); padding: 4px 12px; font: inherit; font-size: 12px; color: var(--muted); background: transparent; cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); }
   .segmented button.on { background: var(--tab-current); color: var(--text); box-shadow: var(--tab-current-shadow); }
-  input[type="checkbox"][role="switch"] { appearance: none; flex: 0 0 auto; width: 32px; height: 19px; border-radius: 10px; background: var(--hover-strong); position: relative; cursor: pointer; transition: background var(--motion-fast); margin: 0; }
+  input[type="checkbox"][role="switch"] { appearance: none; flex: 0 0 auto; width: 32px; height: 19px; border-radius: 999px; background: var(--hover-strong); position: relative; cursor: pointer; transition: background var(--motion-fast); margin: 0; }
   input[type="checkbox"][role="switch"]::after { content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px #0000003d; transition: transform var(--motion-fast) var(--ease-out); }
   input[type="checkbox"][role="switch"]:checked { background: var(--accent); }
   input[type="checkbox"][role="switch"]:checked::after { transform: translateX(13px); }
@@ -252,13 +252,13 @@
   .row .text { margin-top: 0; }
   dl { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; margin: 10px 0 0; font-size: 12px; }
   dt { color: var(--text); } dd { margin: 0; }
-  kbd { font: 11px ui-monospace, Menlo, monospace; padding: 2px 6px; border-radius: 5px; background: var(--surface-sunken); border: 1px solid var(--border); }
+  kbd { font: 11px ui-monospace, Menlo, monospace; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--surface-sunken); border: 1px solid var(--border); }
   .save-error, .save-note { z-index: 1; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--radius); font-size: 12px; }
   /* The error stays in view while scrolling; the confirmation floats so the page doesn't jump. */
   .save-error { position: sticky; top: -44px; margin: -30px 0 14px; }
   .save-note { position: absolute; top: 8px; left: 26px; }
   .save-error { color: var(--danger); background: var(--danger-soft); }
-  .save-error button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border: 0; border-radius: 5px; padding: 3px 8px; font: inherit; font-size: 12px; color: var(--danger); background: transparent; cursor: pointer; }
+  .save-error button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border: 0; border-radius: var(--radius-sm); padding: 3px 8px; font: inherit; font-size: 12px; color: var(--danger); background: transparent; cursor: pointer; }
   .save-note { color: var(--muted); }
   @media (max-width: 640px) { .settings { grid-template-columns: 150px minmax(0, 1fr); } .content { padding: 44px 18px 24px; } .row { flex-wrap: wrap; } }
 </style>

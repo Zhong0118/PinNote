@@ -154,11 +154,11 @@
         <span class="capsule-title">{edgeHint || title || "未命名便签"}</span>
         {#if edgeOverflow}<button class="overflow" title="查看溢出的桌面便签" onclick={e=>{e.stopPropagation();onOpenNotes();}}>+{edgeOverflow}</button>{/if}
         {#if statusIsError}
-          <CircleAlert class="capsule-error-icon" size={14} strokeWidth={1.8} aria-hidden="true" />
+          <CircleAlert class="capsule-error-icon" size={13} aria-hidden="true" />
         {:else}
           <button class="mini-button" class:on={settings.alwaysOnTop} type="button" aria-pressed={settings.alwaysOnTop}
-            title={settings.alwaysOnTop ? '取消置顶' : '置顶'} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={e=>{e.stopPropagation();onTogglePin();}}><Pin size={12} strokeWidth={1.8}/></button>
-          <button class="mini-button" type="button" title="展开" aria-label="展开便签" onclick={e=>{e.stopPropagation();if(!transitioning)onToggleCollapsed();}}><Maximize2 size={12} strokeWidth={1.8} /></button>
+            title={settings.alwaysOnTop ? '取消置顶' : '置顶'} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={e=>{e.stopPropagation();onTogglePin();}}><Pin size={13}/></button>
+          <button class="mini-button" type="button" title="展开" aria-label="展开便签" onclick={e=>{e.stopPropagation();if(!transitioning)onToggleCollapsed();}}><Maximize2 size={13} /></button>
         {/if}
       </div>
       {#if statusIsError}
@@ -166,17 +166,17 @@
       {/if}
     {/if}
     <header class="dragbar" inert={collapsed || transitioning} aria-hidden={collapsed} role="presentation" onpointerdown={onStartDrag}>
-      <span class="drag-grip" title="拖动便签 · 靠近左右边缘可收纳"><GripVertical size={14}/></span>
+      <span class="drag-grip" title="拖动便签 · 靠近左右边缘可收纳"><GripVertical size={13}/></span>
       <button class="dot-button" type="button" title="便签颜色" aria-label="便签颜色" onclick={onPickColor}><i class="color-dot" aria-hidden="true"></i></button>
       <input class="title-input" aria-label="便签标题" placeholder="未命名便签" value={title}
         oninput={(event) => onTitleChange(event.currentTarget.value)} />
       <div class="header-actions">
         <button class="pin-button" class:on={settings.alwaysOnTop} type="button" aria-pressed={settings.alwaysOnTop}
           title={`${settings.alwaysOnTop ? '取消置顶' : '置顶'}（${pinShortcut}）`} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={onTogglePin}>
-          <Pin size={15} strokeWidth={1.8} />
+          <Pin size={16} />
         </button>
         <button bind:this={collapseButton} class="collapse-button" type="button" title="收起便签" aria-label="收起便签" onclick={onToggleCollapsed}>
-          <Minimize2 size={15} strokeWidth={1.8} />
+          <Minimize2 size={16} />
         </button>
         {#if !collapsed}
           <Toolbar {sourceMode} {onToggleSource} {onOpenNotes}
@@ -270,9 +270,9 @@
 
   /* ---- Capsule: colour · title · pin · expand ---- */
   @keyframes pin-appear { from { opacity: 0; } }
-  .collapsed .note-window { border-radius: 20px; grid-template-rows: 1fr; }
+  .collapsed .note-window { border-radius: 999px; grid-template-rows: 1fr; }
   .collapsed .dragbar, .collapsed .editor-frame { display: none; }
-  .capsule { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; padding: 0 5px 0 7px; border-radius: inherit; user-select: none; touch-action: none; cursor: grab; animation: pin-appear 160ms ease-out; transition: background var(--motion-fast); }
+  .capsule { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; padding: 0 5px 0 7px; border-radius: inherit; user-select: none; touch-action: none; cursor: grab; animation: pin-appear var(--motion-fast) ease-out; transition: background var(--motion-fast); }
   .capsule:hover { background: var(--pin-hover); }
   .capsule:active { cursor: grabbing; }
   .capsule:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
@@ -288,7 +288,7 @@
   .tab .note-window { grid-template-rows: 1fr; border-radius: 0 var(--radius-lg) var(--radius-lg) 0; border-left-width: 0; background: color-mix(in srgb, var(--pin-bg) 96%, transparent); box-shadow: inset -3px 0 4px -3px #0000001a; }
   .tab.dock-right .note-window { border-radius: var(--radius-lg) 0 0 var(--radius-lg); border-left-width: 1px; border-right-width: 0; box-shadow: inset 3px 0 4px -3px #0000001a; }
   .tab .dragbar, .tab .editor-frame { display: none; }
-  .edge-tab { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 0; user-select: none; touch-action: none; cursor: pointer; animation: pin-appear 160ms ease-out; transition: background var(--motion-fast); }
+  .edge-tab { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 0; user-select: none; touch-action: none; cursor: pointer; animation: pin-appear var(--motion-fast) ease-out; transition: background var(--motion-fast); }
   .edge-tab:hover { background: var(--pin-hover); }
   .edge-tab:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
   .tab-accent { position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--pin-dot); transition: width var(--motion-fast); }

@@ -216,7 +216,7 @@
           // this input, so it is kept as a new center note before the window goes away.
           if(hasLocalEdits(note.id) && !payload.note) { status='便签已被删除，本地草稿仍在这里，请先复制内容';return; }
           if(hasLocalEdits(note.id) && payload.note && classifyChange(payload, { label: win.label, revision: note.revision, title: note.title, content: note.content, lifecycle: note.lifecycle, placement: note.placement }) === 'conflict') {
-            try { await takeRemoteVersion(note.id, { title: note.title, content: note.content }); }
+            try { await takeRemoteVersion(note.id, () => { editor?.flush(); return { title: note.title, content: note.content }; }); }
             catch (error) { conflict = true; status = `草稿另存失败：${errorText(error)}`; return; }
           }
           discardPendingSave(note.id); ready = false; isDeleting = true; await win.destroy();
@@ -569,8 +569,7 @@
   async function takeTheirs() {
     resolving = true;
     try {
-      editor?.flush();
-      const { remote, copy } = await takeRemoteVersion(note.id, { title: note.title, content: note.content });
+      const { remote, copy } = await takeRemoteVersion(note.id, () => { editor?.flush(); return { title: note.title, content: note.content }; });
       if (!remote) return;
       conflict = false; saveError = "";
       note = { ...remote, window: note.window }; editorRevision++;

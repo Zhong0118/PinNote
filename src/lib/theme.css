@@ -78,3 +78,6 @@
 
 /* Focus rings follow keyboard use only (see +layout.svelte); text fields keep their caret. */
 html:not([data-input="keyboard"]) :focus-visible:not(input, textarea, [contenteditable="true"]) { outline: none !important; }
+
+/* Icons: one line weight everywhere; sizes are 13 (beside small text), 15 (regular), 16 (window controls). */
+svg.lucide { stroke-width: 1.8; }

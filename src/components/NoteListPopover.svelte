@@ -44,7 +44,7 @@
         <h2>便签</h2>
       </div>
       <button class="icon-btn" type="button" title="关闭" aria-label="关闭" onclick={onClose}>
-        <X size={16} />
+        <X size={15} />
       </button>
     </header>
 
@@ -112,7 +112,7 @@
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
     color: var(--text);
     background: var(--surface-raised);
@@ -161,7 +161,7 @@
   button {
     font: inherit;
     cursor: pointer;
-    transition: background 140ms, color 140ms, transform 140ms;
+    transition: background var(--motion-fast), color var(--motion-fast), transform var(--motion-fast);
   }
 
   .note-list {
@@ -179,7 +179,7 @@
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 2px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
   }
 
   .note-item:hover,
@@ -195,7 +195,7 @@
     min-width: 0;
     min-height: 30px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     padding: 5px 7px;
     text-align: left;
     color: var(--text);
@@ -226,7 +226,7 @@
     width: 27px;
     height: 27px;
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     padding: 0;
     color: var(--muted);
     background: transparent;

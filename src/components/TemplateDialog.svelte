@@ -108,7 +108,7 @@
           <h2>模板</h2>
         </div>
         <button class="icon-btn" type="button" title="关闭" aria-label="关闭" onclick={onClose}>
-          <X size={16} />
+          <X size={15} />
         </button>
       </header>
 
@@ -148,7 +148,7 @@
                   aria-label="删除模板"
                   onclick={() => removeTemplate(template)}
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={15} />
                 </button>
               {/if}
             </article>
@@ -211,7 +211,7 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
     color: var(--text);
     background: var(--surface-raised);
@@ -262,7 +262,7 @@
 
   button {
     cursor: pointer;
-    transition: background 140ms, color 140ms, transform 140ms;
+    transition: background var(--motion-fast), color var(--motion-fast), transform var(--motion-fast);
   }
 
   button:disabled {
@@ -277,7 +277,7 @@
     width: 26px;
     height: 26px;
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     padding: 0;
     color: var(--muted);
     background: transparent;
@@ -318,7 +318,7 @@
 
   .confirm-row button {
     border: 1px solid var(--accent-soft-strong);
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     padding: 2px 6px;
     color: var(--accent);
     background: var(--surface-raised);
@@ -334,7 +334,7 @@
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
     gap: 1px;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
   }
 
   .template-item:hover {
@@ -345,7 +345,7 @@
     display: grid;
     min-width: 0;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     padding: 5px 7px;
     min-height: 28px;
     text-align: left;
@@ -374,7 +374,7 @@
     align-items: center;
     gap: 6px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     padding: 4px 7px;
     color: var(--text);
     background: var(--accent-soft);
@@ -412,7 +412,7 @@
   textarea {
     width: 100%;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     padding: 6px 8px;
     color: var(--text);
     background: var(--surface-raised);

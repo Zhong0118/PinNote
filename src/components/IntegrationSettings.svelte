@@ -68,11 +68,11 @@
  .row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--hairline);font-size:13px}
  p,small{font-size:12px;color:var(--muted)}code{font-size:11px;overflow-wrap:anywhere;color:var(--text)}
  .state{display:flex;align-items:center;gap:6px}.state i{width:7px;height:7px;border-radius:50%;background:var(--subtle)}.state.on i{background:#22c55e}
- select{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:6px;padding:4px 6px;background:var(--surface-raised);color:var(--text)}
- button{font:inherit;font-size:12px;border:0;border-radius:6px;padding:5px 9px;background:transparent;color:var(--accent);cursor:pointer;transition:background 140ms,transform 140ms;flex:0 0 auto}
+ select{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 6px;background:var(--surface-raised);color:var(--text)}
+ button{font:inherit;font-size:12px;border:0;border-radius:var(--radius-sm);padding:5px 9px;background:transparent;color:var(--accent);cursor:pointer;transition:background var(--motion-fast),transform var(--motion-fast);flex:0 0 auto}
  button:hover{background:var(--accent-soft)}button:active{transform:scale(.97)}button:disabled{opacity:.5;cursor:wait}
  .change{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--hairline);font-size:13px}small{display:block}
- input[type="checkbox"][role="switch"]{appearance:none;flex:0 0 auto;width:32px;height:19px;border-radius:10px;background:var(--hover-strong);position:relative;cursor:pointer;transition:background 140ms;margin:0}
- input[type="checkbox"][role="switch"]::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0000003d;transition:transform 140ms}
+ input[type="checkbox"][role="switch"]{appearance:none;flex:0 0 auto;width:32px;height:19px;border-radius:999px;background:var(--hover-strong);position:relative;cursor:pointer;transition:background var(--motion-fast);margin:0}
+ input[type="checkbox"][role="switch"]::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0000003d;transition:transform var(--motion-fast)}
  input[type="checkbox"][role="switch"]:checked{background:var(--accent)}input[type="checkbox"][role="switch"]:checked::after{transform:translateX(13px)}
 </style>

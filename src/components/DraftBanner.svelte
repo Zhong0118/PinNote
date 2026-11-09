@@ -17,7 +17,7 @@
 
 {#if conflict || error}
   <div class="banner" class:compact role="alert" transition:reveal>
-    <TriangleAlert size={14} strokeWidth={1.9} />
+    <TriangleAlert size={13} />
     {#if conflict}
       <p><b>这张便签刚在别处被修改。</b>你的输入仍在这里，没有被覆盖。</p>
       <span class="actions">

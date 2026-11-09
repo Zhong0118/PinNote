@@ -98,16 +98,16 @@
 {#if dock?.kind === 'bar'}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <main class="bar" onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => (downAt = null)}>
-    <span class="mark"><NotebookPen size={14} strokeWidth={1.8} /></span>
+    <span class="mark"><NotebookPen size={15} /></span>
     <span class="label"><b>便签中心</b>{#if dock.title}<small>{dock.title}</small>{/if}</span>
     <button title="新建便签" aria-label="新建便签" onclick={() => act('new')}><Plus size={15} /></button>
-    <button title="展开便签中心" aria-label="展开便签中心" onclick={() => act('expand')}><Maximize2 size={14} /></button>
+    <button title="展开便签中心" aria-label="展开便签中心" onclick={() => act('expand')}><Maximize2 size={15} /></button>
   </main>
 {:else if dock?.kind === 'handle'}
   <div class="handle side-{dock.side}" class:detached role="button" tabindex="0" title="点击恢复便签中心 · 上下拖动调整位置 · 向内拖出" aria-label="恢复便签中心"
     onpointerdown={handleDown} onpointermove={handleMove} onpointerup={handleUp} onpointercancel={cancelPress} onkeydown={handleKey}>
     <i aria-hidden="true"></i>
-    <NotebookPen size={13} strokeWidth={1.8} />
+    <NotebookPen size={13} />
     <span>便签</span>
   </div>
 {/if}
@@ -118,7 +118,7 @@
   @keyframes appear { from { opacity: 0; } }
 
   /* Strip: the optional free-floating form. */
-  .bar { box-sizing: border-box; height: 100%; display: flex; align-items: center; gap: 4px; padding: 0 5px 0 12px; border: 1px solid var(--border); border-radius: 20px;
+  .bar { box-sizing: border-box; height: 100%; display: flex; align-items: center; gap: 4px; padding: 0 5px 0 12px; border: 1px solid var(--border); border-radius: 999px;
     background: var(--surface-raised); cursor: pointer; user-select: none; animation: appear var(--motion) var(--ease-out); transition: background var(--motion-fast), border-color var(--motion-fast); }
   .bar:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
   .mark { display: grid; place-items: center; color: var(--accent); }
@@ -135,7 +135,7 @@
   .handle { position: relative; box-sizing: border-box; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
     border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--radius-lg) var(--radius-lg) 0; color: var(--accent); background: var(--surface-raised);
     box-shadow: inset -3px 0 4px -3px #0000001a; cursor: grab; user-select: none; touch-action: none;
-    animation: appear var(--motion) var(--ease-out); transition: background var(--motion-fast), opacity 120ms; }
+    animation: appear var(--motion) var(--ease-out); transition: background var(--motion-fast), opacity var(--motion-fast); }
   .handle.side-right { border-left: 1px solid var(--border); border-right: 0; border-radius: var(--radius-lg) 0 0 var(--radius-lg); box-shadow: inset 3px 0 4px -3px #0000001a; }
   .handle:hover { background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised)); }
   .handle:active { cursor: grabbing; }

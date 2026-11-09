@@ -208,10 +208,10 @@
   <div class="editor-layout" class:readonly>
     {#if progress.total || showTaskInput}
       <div class="task-tools">
-        {#if progress.total}<span class="task-progress"><ListTodo size={14}/>{progress.done===progress.total?'待办已全部完成':'已完成'}<span class="count">{progress.done}/{progress.total}</span></span>{/if}
-        {#if !readonly}<button class="add-task" onclick={()=>showTaskInput=!showTaskInput} aria-expanded={showTaskInput}><Plus size={14}/>添加待办</button>{/if}
-        {#if progress.total && onReminder}<button aria-label="提醒这张待办便签" title="为这张便签设置提醒" onclick={onReminder}><Bell size={14}/></button>{/if}
-        {#if progress.done && !readonly}<button title="移除已完成项 · 可撤销" aria-label="移除已完成待办" onclick={clearCompleted}><CheckCheck size={14}/></button>{/if}
+        {#if progress.total}<span class="task-progress"><ListTodo size={13}/>{progress.done===progress.total?'待办已全部完成':'已完成'}<span class="count">{progress.done}/{progress.total}</span></span>{/if}
+        {#if !readonly}<button class="add-task" onclick={()=>showTaskInput=!showTaskInput} aria-expanded={showTaskInput}><Plus size={13}/>添加待办</button>{/if}
+        {#if progress.total && onReminder}<button aria-label="提醒这张待办便签" title="为这张便签设置提醒" onclick={onReminder}><Bell size={13}/></button>{/if}
+        {#if progress.done && !readonly}<button title="移除已完成项 · 可撤销" aria-label="移除已完成待办" onclick={clearCompleted}><CheckCheck size={13}/></button>{/if}
       </div>
     {/if}
     {#if showTaskInput && !readonly}<form class="task-entry" onsubmit={e=>{e.preventDefault();void addTask();}}><input bind:this={taskField} bind:value={taskInput} aria-label="待办内容" placeholder="写下下一件要做的事" oncompositionstart={()=>composingTask=true} oncompositionend={()=>composingTask=false} onkeydown={e=>{if(e.isComposing&&e.key==='Enter')e.preventDefault();}}/><button type="submit" disabled={!taskInput.trim()}>添加</button><small>Enter 添加 · 正文中也可以输入 - [ ] 创建待办</small></form>{/if}
@@ -226,9 +226,9 @@
 
 <style>
   .editor-layout{position:relative;height:100%;min-height:0;display:flex;flex-direction:column}
-  .quiet-task{position:absolute;z-index:2;top:4px;right:14px;display:inline-flex;align-items:center;gap:3px;border:0;border-radius:6px;padding:2px 7px;font:inherit;font-size:11px;color:var(--pin-muted,#737373);background:color-mix(in srgb,var(--pin-bg,#fff) 88%,transparent);cursor:pointer;opacity:0;transition:opacity 140ms}
+  .quiet-task{position:absolute;z-index:2;top:4px;right:14px;display:inline-flex;align-items:center;gap:3px;border:0;border-radius:var(--radius-sm);padding:2px 7px;font:inherit;font-size:11px;color:var(--pin-muted,#737373);background:color-mix(in srgb,var(--pin-bg,#fff) 88%,transparent);cursor:pointer;opacity:0;transition:opacity var(--motion-fast)}
   .editor-layout:hover .quiet-task,.quiet-task:focus-visible{opacity:.85}.quiet-task:hover{color:var(--pin-accent,#2563eb);opacity:1}
-  @media(prefers-reduced-motion:reduce){.quiet-task{transition:none}}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:6px;padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background 140ms,transform 140ms}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:7px;background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:var(--pin-muted,var(--muted));font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
+  @media(prefers-reduced-motion:reduce){.quiet-task{transition:none}}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:var(--radius-sm);padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background var(--motion-fast),transform var(--motion-fast)}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:var(--radius-sm);background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:var(--pin-muted,var(--muted));font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
   .milkdown-host {
     flex:1;
     min-height: 0;
@@ -336,7 +336,7 @@
   }
 
   .milkdown-host :global(code) {
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     padding: 0.08rem 0.28rem;
     color: var(--pin-accent-strong);
     background: color-mix(in srgb, var(--pin-text) 8%, transparent);
@@ -346,7 +346,7 @@
 
   .milkdown-host :global(pre) {
     overflow: auto;
-    border-radius: 8px;
+    border-radius: var(--radius);
     padding: 0.85rem;
     background: color-mix(in srgb, var(--pin-text) 8%, transparent);
   }

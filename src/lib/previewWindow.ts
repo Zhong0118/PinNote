@@ -43,7 +43,7 @@ export async function showPreview(note: PinNote) {
   const win = await previewWindow();
   if (id !== seq) return; // a newer hover took over while the window was being created
   const tasks = checklistProgress(note.content);
-  const summary: PreviewSummary = { id: note.id, title: note.title, excerpt: plainExcerpt(note.content, 600).replace(/\n{2,}/g, '\n'), done: tasks.done, total: tasks.total,
+  const summary: PreviewSummary = { id: note.id, title: note.title, excerpt: plainExcerpt(note.content, 600, { title: note.title, code: false }).replace(/\n{2,}/g, '\n'), done: tasks.done, total: tasks.total,
     reminderAt: note.reminder?.at, side: note.window.edge?.side ?? 'none', seq: id };
   await emitTo(PREVIEW_LABEL, 'preview-show', summary);
   await win.setPosition(isMacPlatform() ? new LogicalPosition(target.x,target.y) : new PhysicalPosition(target.x,target.y));
