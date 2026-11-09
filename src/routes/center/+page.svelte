@@ -3,15 +3,14 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, emit, emitTo } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, PinOff, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ChevronDown } from 'lucide-svelte';
+  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ChevronDown } from 'lucide-svelte';
   import { answerRelease } from '$lib/editorHandoff';
-  import { flip } from 'svelte/animate';
-  import { cubicOut } from 'svelte/easing';
   import { fitBounds } from '$lib/windowGeometry';
   import { validWindow } from '$lib/centerLayout';
   import { CenterForm } from '$lib/centerForm.svelte';
   import MilkdownEditor from '../../components/MilkdownEditor.svelte';
-  import { createNote, loadNotes, notesSnapshot, applyNoteChange, saveNoteNow, scheduleNoteSave, flushNoteSave, noteOperation, hasPendingSave, type PinNote, type NoteChange } from '$lib/notesStore';
+  import { createNote, loadNotes, notesSnapshot, applyNoteChange, saveNoteNow, scheduleNoteSave, flushNoteSave, noteOperation, hasLocalEdits, discardPendingSave, markEdited, markSettled, classifyChange, noteConflict, onNoteConflict, keepLocalVersion, takeRemoteVersion, NoteConflictError, type PinNote, type NoteChange } from '$lib/notesStore';
+  import DraftBanner from '../../components/DraftBanner.svelte';
   import { openNoteWindow, findNoteWindow } from '$lib/noteWindows';
   import { requestWindowVisibility } from '$lib/windowVisibility';
   import { loadSettings, isMacPlatform } from '$lib/settings';
@@ -21,12 +20,13 @@
   import { defaultSettings, type AppSettings } from '$lib/settings';
   import { save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { defaultMarkdownFilename } from '$lib/filename';
-  import { reveal, popup } from '$lib/motion';
+  import { reveal, popup, shift } from '$lib/motion';
   import { createQuitGuard } from '$lib/quitGuard';
   import ReminderDialog from '../../components/ReminderDialog.svelte';
   import { checklistProgress } from '$lib/checklist';
   import NoteColorPicker from '../../components/NoteColorPicker.svelte';
-  import {noteBackground,noteTint} from '$lib/noteAppearance';
+  import {noteBackground,noteTint,noteDot} from '$lib/noteAppearance';
+  import { plainExcerpt, shortTime } from '$lib/excerpt';
   import type {NoteTheme} from '$lib/settings';
   let reminderOpen=$state(false);
   let due=$state<PinNote[]>([]);
@@ -46,6 +46,10 @@
   let busy = $state(false);
   let revision = $state(0);
   let editor = $state<MilkdownEditor>();
+  // Draft safety for the open note: a version conflict, or the last failed save.
+  let conflict = $state(false);
+  let saveError = $state('');
+  const errorText = (e:unknown) => String(e instanceof Error ? e.message : e).replace(/^Error:\s*/,'');
   let undo = $state<{id:string;at:number}|null>(null);
   let dragTab = '';
   const positions = new Map<string,{from:number;to:number;scroll:number}>();
@@ -54,7 +58,7 @@
   function summary(n:PinNote){
     let s=summaries.get(n.id);
     if(!s||s.note.content!==n.content||s.note.title!==n.title){
-      s={note:n,excerpt:n.content.replace(/[#*`\[\]]/g,'').slice(0,100),tasks:checklistProgress(n.content),search:`${n.title}\n${n.content}`.toLowerCase()};
+      s={note:n,excerpt:plainExcerpt(n.content,100).replace(/\s*\n+\s*/g,' '),tasks:checklistProgress(n.content),search:`${n.title}\n${n.content}`.toLowerCase()};
       summaries.set(n.id,s);
     }
     return s;
@@ -77,17 +81,27 @@
     if(busy) return; busy=true;
     try { await action(); } catch(e) { status=String(e); } finally { busy=false; }
   }
-  /** Save the open draft now (switch, handoff, window change, quit). */
+  /** Save the open draft now (switch, handoff, window change, quit). A failure keeps the draft and throws. */
   async function persist() {
     editor?.flush();
-    if(draft && editable) { const pos=editor?.capture(); if(pos) positions.set(draft.id,pos); await flushNoteSave(draft.id); }
+    if(draft && editable) {
+      const pos=editor?.capture(); if(pos) positions.set(draft.id,pos);
+      try { await flushNoteSave(draft.id); saveError=''; }
+      catch(e) { if(!(e instanceof NoteConflictError)) saveError=errorText(e); throw e; }
+    }
+  }
+  /** Leaving the open note needs its draft saved; otherwise stay on it and say why. */
+  async function leaveDraft() {
+    try { await persist(); return true; }
+    catch(e) { status=e instanceof NoteConflictError?'先处理这张便签的版本冲突，再切换':'草稿未保存，仍停留在这张便签'; return false; }
   }
   async function select(id:string, force=false) {
     // Re-selecting the open note keeps its editor, selection and undo history.
     if(id===selected && draft && !force) { menu=false; return; }
-    await persist();
+    if(!await leaveDraft()) return;
     const note=(await notesSnapshot()).notes[id]; if(!note) return;
     selected=id; draft=structuredClone($state.snapshot(note));
+    conflict=Boolean(noteConflict(id)); saveError='';
     if(!tabs.includes(id)) tabs=[...tabs,id];
     revision++; menu=false;
   }
@@ -95,7 +109,34 @@
     if(!draft || !editable) return;
     // No per-keystroke status churn or extra list reloads: notes-changed refreshes the list.
     draft={...draft,...patch};
-    scheduleNoteSave(draft,e=>{status=e?`保存失败：${e}`:'已保存';},'body');
+    const id=draft.id;
+    scheduleNoteSave(draft,e=>{
+      if(draft?.id!==id) return;
+      if(!e){saveError='';status='已保存';}
+      else if(!(e instanceof NoteConflictError)) saveError=errorText(e);
+    },'body');
+  }
+  /** Conflict: overwrite the other version with this draft. */
+  async function keepMine() {
+    if(!draft) return; editor?.flush();
+    await keepLocalVersion(draft.id);
+    conflict=false; saveError=''; status='已保留你的修改并保存';
+    await refresh();
+  }
+  /** Conflict: load the other version; a differing draft is kept as a new note. */
+  async function takeTheirs() {
+    if(!draft) return; editor?.flush();
+    const {remote,copy}=await takeRemoteVersion(draft.id,{title:draft.title,content:draft.content});
+    if(!remote) return;
+    conflict=false; saveError=''; draft=structuredClone(remote); revision++;
+    await refresh();
+    if(copy&&!tabs.includes(copy.id)) tabs=[...tabs,copy.id];
+    status=copy?`已载入新版本 · 你的草稿另存为「${copy.title}」`:'已载入新版本';
+  }
+  async function retrySave() {
+    if(!draft) return; editor?.flush();
+    await flushNoteSave(draft.id); saveError=''; status='已保存';
+    await refresh();
   }
   async function create() {
     await persist();
@@ -106,7 +147,7 @@
     await getCurrentWindow().show(); await getCurrentWindow().setFocus();
   }
   async function closeTab(id:string) {
-    if(id===selected) await persist();
+    if(id===selected && !await leaveDraft()) return;
     tabs=tabs.filter(t=>t!==id);
     if(id===selected) {
       if(tabs.length) await select(tabs.at(-1)!);
@@ -167,6 +208,9 @@
   /** Settings open inside the center; a collapsed center is restored first. */
   async function openSettings() {
     menu=false; windowMenu=false;
+    // Settings can restore history versions: save what is typed first. A failed
+    // save is shown in the editor and stays protected; settings still open.
+    await persist().catch(()=>undefined);
     if(form.mode!=='window') await form.expand();
     else { await getCurrentWindow().show(); await getCurrentWindow().setFocus(); }
     settingsOpen=true;
@@ -277,12 +321,18 @@
         draft={...draft,window:n.window}; if(handoff===payload.id) handoff=''; void form.syncDock(); return;
       }
       if(payload.op==='appearance'){draft={...draft,theme:n.theme,customColor:n.customColor,opacity:n.opacity,alwaysOnTop:n.alwaysOnTop};return;}
-      if(!hasPendingSave(payload.id) && n.revision>draft.revision) {
-        // Our own save echoes back with the same text: keep the editor as is.
+      // Delivery only marks the reminder; it keeps the revision.
+      if(payload.op==='reminder') draft={...draft,reminder:n.reminder};
+      // Unsaved input (even not yet serialized) is never replaced by a change from elsewhere.
+      const verdict=classifyChange(payload,{label:'main',revision:draft.revision,title:draft.title,content:draft.content});
+      if(verdict==='conflict'){conflict=true;status='这张便签刚在别处被修改，你的草稿已保留';return;}
+      if(verdict==='apply'){
+        // Same text (an echo, or only placement/lifecycle changed) keeps the editor as is.
         const changed=draft.content!==n.content || draft.placement!==n.placement || draft.lifecycle!==n.lifecycle;
         draft=structuredClone(n); if(changed) revision++;
       }
     });
+    const stopConflict=onNoteConflict(id=>{if(draft?.id===id)conflict=true;});
     const reminder=listen<{note:PinNote;error?:string}>('reminder-due',async({payload})=>{await refresh();status=payload.error?`通知发送失败：${payload.error}`:`提醒：${payload.note.title}`;});
     const reminderError=listen<string>('reminder-error',e=>{status=`提醒调度失败：${e.payload}`;});
     const newNote=listen('new-note-requested',()=>void run(create));
@@ -315,8 +365,8 @@
       if(displaySignature&&signature!==displaySignature){ void emit('displays-changed'); void form.relayoutHandle(); }
       displaySignature=signature;
     }).catch(()=>undefined),5000);
-    const moved=getCurrentWindow().onMoved(()=>form.windowChanged());
-    const resized=getCurrentWindow().onResized(()=>form.windowChanged());
+    const moved=getCurrentWindow().onMoved(()=>form.windowChanged('moved'));
+    const resized=getCurrentWindow().onResized(()=>form.windowChanged('resized'));
     const agentOpen=listen<{id:string}>('agent-open-note',e=>void run(async()=>{await persist();const n=(await loadNotes()).notes[e.payload.id];await openNoteWindow(n);if(draft?.id===n.id)await select(n.id,true);}));
     const toggle=listen('toggle-notes-visibility-requested',toggleDesktop);
     const settings=listen('open-settings-requested',()=>void openSettings());
@@ -339,7 +389,7 @@
     void quit.then(async()=>{const attempt=await invoke<number|null>('pending_quit');if(attempt!=null)void saveForQuit(attempt);});
     const cancelled=listen<number>('quit-save-cancelled',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
     const failed=listen<number>('quit-save-failed',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
-    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed,reminder,reminderError,agentOpen,release,dockHello,dockAction,focus,moved,resized].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();clearTimeout(handoffTimer);clearInterval(displayTimer);stopAppearance();};
+    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed,reminder,reminderError,agentOpen,release,dockHello,dockAction,focus,moved,resized].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();clearTimeout(handoffTimer);clearInterval(displayTimer);stopAppearance();stopConflict();};
   });
 </script>
 
@@ -357,8 +407,8 @@
         {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={12}/></button></div>{/each}
         {#each visible as note(note.id)}
           {@const info=summary(note)}{@const tasks=info.tasks}
-          <button animate:flip={{duration:240,easing:cubicOut}} class="note-row" class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})} draggable="true" ondragstart={e=>e.dataTransfer?.setData('text/pinnote',note.id)}>
-             <span class="row-heading"><i class="note-dot" style:background={note.theme==='paper'?'#d4d4d8':note.theme==='custom'?note.customColor:({mint:'#72bca0',rose:'#df9d9a',sky:'#7dafe1',grape:'#b69bd6',ink:'#555'}[note.theme])}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={12}/>{/if}</span><small>{info.excerpt||'空白便签'}</small>
+          <button animate:shift class="note-row" class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})} draggable="true" ondragstart={e=>e.dataTransfer?.setData('text/pinnote',note.id)}>
+             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={12}/>{/if}</span><small>{info.excerpt||'空白便签'}</small>
              {#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}
           </button>
         {:else}<p class="empty">{query?'没有匹配的便签':'这里还没有便签'}</p>{/each}
@@ -371,14 +421,14 @@
       <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region>
         {#each tabs as id(id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="tab" class:current={selected===id} animate:flip={{duration:200,easing:cubicOut}} draggable="true" ondragstart={()=>dragTab=id} ondragover={e=>e.preventDefault()} ondrop={()=>reorder(id)}>
+          <div class="tab" class:current={selected===id} animate:shift draggable="true" ondragstart={()=>dragTab=id} ondragover={e=>e.preventDefault()} ondrop={()=>reorder(id)}>
             <button class="tab-title" title={notes.find(n=>n.id===id)?.title||'未命名便签'} onclick={()=>run(()=>select(id))}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</button><button class="tab-close" aria-label="关闭 Tab" onclick={()=>run(()=>closeTab(id))}><X size={12}/></button>
           </div>
         {/each}
       </div>
       {#if tabsOverflow}<select aria-label="更多工作便签" value={selected} onchange={e=>run(()=>select(e.currentTarget.value))}>{#each tabs as id}<option value={id}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</option>{/each}</select>{/if}
       <div class="window-tools">
-        <button class:on={form.pinned} aria-pressed={form.pinned} aria-label={form.pinned?'取消置顶便签中心':'置顶便签中心'} title={form.pinned?'取消置顶便签中心':'置顶便签中心'} onclick={()=>form.setPinned(!form.pinned)}>{#if form.pinned}<PinOff size={15}/>{:else}<Pin size={15}/>{/if}</button>
+        <button class="pin" class:on={form.pinned} aria-pressed={form.pinned} aria-label={form.pinned?'取消置顶便签中心':'置顶便签中心'} title={form.pinned?'取消置顶便签中心':'置顶便签中心'} onclick={()=>form.setPinned(!form.pinned)}><Pin size={15} strokeWidth={1.8}/></button>
         <button aria-label="收起到边缘" title="收起到边缘 · 也可以把窗口拖到屏幕左右边缘" onclick={()=>form.collapse()}>{#if form.dock.side==='left'}<ChevronsLeft size={16}/>{:else}<ChevronsRight size={16}/>{/if}</button>
         <button class="window-more" class:on={windowMenu} aria-label="窗口选项" title="窗口选项" aria-expanded={windowMenu} onclick={()=>windowMenu=!windowMenu}><ChevronDown size={14}/></button>
         {#if windowMenu}<div class="menu window-menu" use:popup={()=>windowMenu=false} transition:reveal role="menu" tabindex="-1">
@@ -392,11 +442,11 @@
       <div class="title-row">
         <input aria-label="便签标题" value={draft.title} readonly={!editable} oninput={e=>update({title:e.currentTarget.value})}/>
         {#if draft.lifecycle==='active'}<NoteColorPicker theme={draft.theme} customColor={draft.customColor} onChange={changeColor}/>{/if}
-        {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{new Date(draft.reminder.at).toLocaleString()}</button>{/if}
+        {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{shortTime(draft.reminder.at)}</button>{/if}
         {#if draft.lifecycle==='active'}
           <button class="desktop" disabled={busy} onclick={()=>run(desktop)} ondragover={e=>e.preventDefault()} ondrop={e=>{e.preventDefault();const id=e.dataTransfer?.getData('text/pinnote');void run(async()=>{if(id)await select(id);await desktop();});}}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
         {/if}
-        <button class="more" aria-label="更多操作" onclick={()=>menu=!menu}><MoreHorizontal size={18}/></button>
+        <button class="more" aria-label="更多操作" title="更多操作" aria-expanded={menu} onclick={()=>menu=!menu}><MoreHorizontal size={17}/></button>
         {#if menu}<div class="menu" use:popup={()=>menu=false} transition:reveal role="dialog" tabindex="-1">
           {#if draft.lifecycle==='active'}
             <button onclick={()=>{menu=false;reminderOpen=true;}}>设置提醒</button>
@@ -405,11 +455,14 @@
             <button onclick={()=>run(()=>operation('archive'))}>归档</button><button onclick={()=>run(()=>operation('trash'))}>移到回收站</button>
           {:else}<button onclick={()=>run(()=>operation('restore'))}>恢复到中心</button>{#if draft.lifecycle==='trash'}<button class="danger" onclick={()=>run(()=>operation('purge'))}>永久删除</button>{/if}{/if}
           <button onclick={()=>run(async()=>{if(!draft)return;const copy=createNote({title:`${draft.title}（草稿副本）`,content:draft.content});await saveNoteNow(copy);await select(copy.id);})}>保留草稿为新便签</button>
-          <button onclick={()=>run(async()=>{if(!draft)return;const fresh=(await loadNotes()).notes[draft.id];if(hasPendingSave(draft.id)&&!window.confirm('放弃本地草稿并载入已保存版本？'))return;const {discardPendingSave}=await import('$lib/notesStore');discardPendingSave(draft.id);draft=fresh;revision++;})}>重新载入已保存版本</button>
+          <button onclick={()=>run(async()=>{if(!draft)return;editor?.flush();const fresh=(await loadNotes()).notes[draft.id];if(hasLocalEdits(draft.id)&&!window.confirm('放弃本地草稿并载入已保存版本？'))return;discardPendingSave(draft.id);conflict=false;saveError='';draft=fresh;revision++;})}>重新载入已保存版本</button>
         </div>{/if}
       </div>
       {#if editable}
-        {#key `${selected}:${revision}`}<MilkdownEditor bind:this={editor} value={draft.content} onChange={content=>update({content})} initialPosition={positions.get(selected)} onReminder={()=>reminderOpen=true}/>{/key}
+        <div class="editor-area">
+          <DraftBanner {conflict} error={saveError} busy={busy} onKeepMine={()=>run(keepMine)} onTakeTheirs={()=>run(takeTheirs)} onRetry={()=>run(retrySave)}/>
+          {#key `${selected}:${revision}`}<MilkdownEditor bind:this={editor} value={draft.content} onChange={content=>update({content})} onEdit={()=>markEdited(selected)} onSettled={()=>markSettled(selected)} initialPosition={positions.get(selected)} onReminder={()=>reminderOpen=true}/>{/key}
+        </div>
       {:else}
         <div class="preview" transition:reveal>
           {#if desktopEditing}<div class="notice">正在桌面窗口编辑 <button onclick={()=>run(editHere)}><PenLine size={13}/>在这里编辑</button><button onclick={()=>run(recall)}>收回中心</button></div>{/if}
@@ -430,7 +483,7 @@
  main{position:relative;--pin-text:var(--text);--pin-heading:var(--text-strong);--pin-muted:var(--muted);--pin-accent:var(--accent);--pin-accent-strong:var(--accent-strong);--pin-border:var(--border);--pin-active:var(--accent-soft);--pin-bg:var(--surface);
    display:grid;grid-template-columns:230px minmax(0,1fr);height:100vh;overflow:hidden;transition:grid-template-columns 260ms var(--ease-out)}
  main.folded{grid-template-columns:0px minmax(0,1fr)}
- :global([data-center-shadow="light"]) main{box-shadow:inset 0 0 0 .5px var(--hairline)}
+ :global([data-center-shadow="light"]) main{box-shadow:inset 0 0 0 1px var(--border)}
  aside{grid-column:1;grid-row:1;min-width:0;min-height:0;overflow:hidden;display:block;background:var(--surface-muted);border-right:1px solid var(--hairline)}
  .side-inner{width:230px;height:100%;display:flex;flex-direction:column}
  .titlebar-space{height:36px;flex:0 0 auto}
@@ -458,7 +511,11 @@
  :global([data-theme="dark"]) .work[style*="--note-tint"]{--pin-bg:color-mix(in srgb,var(--note-tint) 10%,var(--surface))!important}
  .tabs{display:flex;align-items:center;gap:6px;height:44px;padding:0 8px;min-width:0;background:var(--surface-sunken);color:var(--text);border-bottom:1px solid var(--hairline);transition:padding-left 260ms var(--ease-out)}
  main.mac.folded .tabs{padding-left:84px}
- .list-toggle{padding:5px;color:var(--muted)}
+ /* Icon buttons share one size, shape and set of states. */
+ .list-toggle,.window-tools button,.more,.search button{width:28px;height:28px;padding:0;border-radius:50%;color:var(--muted)}
+ .list-toggle:hover,.window-tools button:hover,.more:hover,.search button:hover{color:var(--text);background:var(--hover)}
+ .window-tools .on,.more[aria-expanded="true"]{color:var(--accent);background:var(--accent-soft)}
+ .window-tools .pin.on :global(svg){fill:currentColor;fill-opacity:.22}
  .tab-strip{display:flex;align-items:center;min-width:0;overflow:hidden;flex:1;gap:2px}
  .tab{position:relative;display:flex;align-items:center;flex:0 1 auto;min-width:72px;max-width:200px;height:28px;padding:0 3px 0 10px;border-radius:7px;color:var(--muted);transition:background 160ms,color 160ms,box-shadow 160ms}
  .tab:hover{background:var(--hover)}
@@ -470,7 +527,6 @@
  .tab .tab-close:hover{background:var(--hover-strong);color:var(--text)}
  .tabs select{max-width:110px;border:0;background:var(--hover);color:var(--text);border-radius:5px}
  .window-tools{position:relative;display:flex;align-items:center;gap:2px;margin-left:auto;padding-left:6px;border-left:1px solid var(--hairline)}
- .window-tools button{padding:5px;color:var(--muted)}.window-tools button:hover{color:var(--text)}.window-tools .on{color:var(--accent);background:var(--accent-soft)}
  .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--surface-raised);color:var(--text);border:1px solid var(--border);border-radius:10px;box-shadow:var(--menu-shadow)}
  .menu button{display:block;text-align:left;width:100%;font-size:12px}
  .window-menu{top:38px;right:0;width:180px}.window-menu button{display:flex;gap:8px;justify-content:flex-start}
@@ -480,7 +536,9 @@
  .title-row input{flex:1;min-width:0;font-size:17px;font-weight:600;background:transparent;color:var(--pin-heading)}
  .time{font-size:11px;color:var(--accent);background:var(--accent-soft)}
  .desktop{font-size:12px;color:var(--pin-accent)}
- .more{border-radius:50%;background:var(--hover)}
+ .editor-area{display:flex;flex-direction:column;min-height:0;--banner-inset:max(14px,calc((100% - 852px) / 2))}
+ .editor-area > :global(.banner){margin-top:2px;margin-bottom:6px}
+ .editor-area > :global(.editor-layout){flex:1 1 0;min-height:0;height:auto}
  .preview{display:flex;flex-direction:column;min-height:0;overflow:auto;width:100%;padding:0 22px 22px}
  .preview :global(.editor-layout){flex:1;min-height:0}.preview :global(pre){white-space:pre-wrap;overflow-wrap:anywhere}
  .notice{display:flex;align-items:center;gap:6px;color:var(--pin-muted);font-size:12px;background:color-mix(in srgb,var(--pin-text),transparent 95%);padding:8px;border-radius:var(--radius-sm)}

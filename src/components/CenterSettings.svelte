@@ -37,6 +37,7 @@
   let autoStartStatus = $state('');
   let dataPath = $state('');
   let dataStatus = $state('');
+  let updateStatus = $state('');
   let version = $state('');
   let opacityPreview = $state<number>();
   const mod = isMacPlatform() ? '⌘' : 'Ctrl+';
@@ -128,7 +129,7 @@
     if (event.key === 'Escape' && !event.isComposing) { event.preventDefault(); onClose(); }
   }
   const themes: Array<[ThemeMode, string]> = [['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']];
-  const shadows: Array<[ShadowLevel, string]> = [['off', '关'], ['light', '轻'], ['standard', '标准']];
+  const shadows: Array<[ShadowLevel, string]> = [['off', '关'], ['light', '细边'], ['standard', '标准']];
 </script>
 
 <svelte:window onkeydown={keydown} />
@@ -152,11 +153,11 @@
       <p class="muted">正在读取设置…</p>
     {:else if category === 'appearance'}
       <h2>外观</h2>
-      <div class="row"><div><b>主题</b><small>跟随系统时随 macOS 外观实时切换。便签自身颜色不会被改写。</small></div>
+      <div class="row"><div><b>主题</b><small>跟随系统时随系统外观实时切换。便签自己的颜色不会被改写。</small></div>
         <div class="segmented" role="radiogroup" aria-label="主题">{#each themes as [value, text]}<button role="radio" aria-checked={settings.appearance.theme === value} class:on={settings.appearance.theme === value} onclick={() => patchAppearance({ theme: value })}>{text}</button>{/each}</div></div>
-      <div class="row"><div><b>中心窗口阴影</b><small>“标准”使用系统窗口阴影，“轻”只保留细边。</small></div>
+      <div class="row"><div><b>中心窗口阴影</b><small>标准：系统窗口阴影；细边：一圈细线，无阴影；关：都不显示。</small></div>
         <div class="segmented" role="radiogroup" aria-label="中心窗口阴影">{#each shadows as [value, text]}<button role="radio" aria-checked={settings.appearance.centerShadow === value} class:on={settings.appearance.centerShadow === value} onclick={() => patchAppearance({ centerShadow: value })}>{text}</button>{/each}</div></div>
-      <div class="row"><div><b>便签与胶囊阴影</b><small>边缘标签始终只有细边和内侧微阴影。</small></div>
+      <div class="row"><div><b>便签与胶囊阴影</b><small>标准：系统阴影加细线；细边：更清楚的描边，无阴影；关：极淡的边。贴边标签始终保持扁平。</small></div>
         <div class="segmented" role="radiogroup" aria-label="便签与胶囊阴影">{#each shadows as [value, text]}<button role="radio" aria-checked={settings.appearance.noteShadow === value} class:on={settings.appearance.noteShadow === value} onclick={() => patchAppearance({ noteShadow: value })}>{text}</button>{/each}</div></div>
       <label class="row"><div><b>减少动态</b><small>关闭窗口滑动与淡入；系统开启“减弱动态效果”时也会生效。</small></div>
         <input type="checkbox" role="switch" checked={settings.appearance.reduceMotion} onchange={e => patchAppearance({ reduceMotion: e.currentTarget.checked })} /></label>
@@ -205,7 +206,8 @@
       <div class="row"><div><b>数据目录</b><small class="path">{dataPath || '不可用'}</small>{#if dataStatus}<small>{dataStatus}</small>{/if}</div>
         <div class="actions"><button class="text" onclick={openData}><FolderOpen size={13} />打开</button><button class="text" onclick={copyData}><Copy size={13} />复制路径</button></div></div>
       {#if onExportCurrent}<div class="row"><div><b>导出</b><small>把当前便签导出为 Markdown 文件。</small></div><button class="text" onclick={onExportCurrent}><Download size={13} />导出当前便签</button></div>{/if}
-      <div class="row"><div><b>版本</b><small>PinNote {version}</small></div><button class="text" onclick={() => void invoke('check_updates').catch(() => undefined)}><RefreshCw size={13} />检查更新</button></div>
+      <div class="row"><div><b>版本</b><small>PinNote {version}</small></div><button class="text" onclick={() => { updateStatus = '正在检查，结果会在系统对话框中显示'; void invoke('check_updates').catch(e => updateStatus = `检查失败：${e}`); }}><RefreshCw size={13} />检查更新</button></div>
+      {#if updateStatus}<p class="muted" role="status">{updateStatus}</p>{/if}
     {/if}
   </div>
 </section>

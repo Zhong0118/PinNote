@@ -3,7 +3,7 @@
   import type { Window } from "@tauri-apps/api/window";
   type ResizeDirection = Parameters<Window["startResizeDragging"]>[0];
   import Toolbar from "./Toolbar.svelte";
-  import type { NoteTheme } from "$lib/settings";
+  import { isMacPlatform, type NoteTheme } from "$lib/settings";
   import { reveal } from "$lib/motion";
 
   type NoteViewSettings = { alwaysOnTop: boolean; opacity: number; theme: NoteTheme; customColor: string };
@@ -35,7 +35,8 @@
     onNewNote?: () => void;
     onArchive?: () => void;
     onReturn?: () => void;
-    onHover?: (inside: boolean) => void;
+    /** `pressed`: a mouse button is down (something is being dragged across); no preview then. */
+    onHover?: (inside: boolean, pressed?: boolean) => void;
     edgeHint?: string;
     edgeOverflow?: number;
     onReminder?: () => void;
@@ -62,14 +63,25 @@
     }
   });
 
+  // Tooltips name the next action; the shortcut follows the platform.
+  const pinShortcut = isMacPlatform() ? '⌘T' : 'Ctrl+T';
   let capsule = $state<HTMLDivElement>();
   let collapseButton = $state<HTMLButtonElement>();
   let focusAfterTransition = false;
+  // Focus follows a keyboard-driven collapse/expand only. A scripted focus after start-up or a
+  // mouse click would otherwise show a focus ring on every capsule.
+  let keyboardIntent = false;
+  $effect(() => {
+    const key = () => { keyboardIntent = true; }, pointer = () => { keyboardIntent = false; };
+    window.addEventListener('keydown', key, true); window.addEventListener('pointerdown', pointer, true);
+    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('pointerdown', pointer, true); };
+  });
   $effect(() => {
     if (disabled) { focusAfterTransition = false; return; }
     if (transitioning) { focusAfterTransition = true; return; }
     if (!focusAfterTransition) return;
     focusAfterTransition = false;
+    if (!keyboardIntent) return;
     const target = collapsed ? capsule : collapseButton;
     const frame = requestAnimationFrame(() => target?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(frame);
@@ -82,6 +94,7 @@
     if (event.button !== 0 || transitioning || (event.target instanceof Element && event.target.closest('button'))) return;
     origin = { x: event.clientX, y: event.clientY, event };
     dragged = false;
+    onHover?.(false); // a press is a click or a drag, never a hover
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   }
   function capsuleMove(event: PointerEvent) {
@@ -118,7 +131,7 @@
         aria-describedby={statusIsError ? "capsule-error" : undefined}
         onpointerdown={capsuleDown} onpointermove={capsuleMove} onpointerup={capsuleEnd}
         onpointercancel={capsuleEnd} onlostpointercapture={() => (origin = null)} onclick={expandCapsule}
-        onpointerenter={() => onHover?.(true)} onpointerleave={() => onHover?.(false)}
+        onpointerenter={e => onHover?.(true, e.buttons !== 0)} onpointerleave={() => onHover?.(false)}
         onkeydown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!transitioning) onToggleCollapsed(); } }}
         >
         <i class="tab-accent" aria-hidden="true"></i>
@@ -134,7 +147,7 @@
         title={statusIsError ? status : title || "未命名便签"} aria-describedby={statusIsError ? "capsule-error" : undefined}
         onpointerdown={capsuleDown} onpointermove={capsuleMove} onpointerup={capsuleEnd}
         onpointercancel={capsuleEnd} onlostpointercapture={() => (origin = null)} onclick={expandCapsule}
-        onpointerenter={() => onHover?.(true)} onpointerleave={() => onHover?.(false)}
+        onpointerenter={e => onHover?.(true, e.buttons !== 0)} onpointerleave={() => onHover?.(false)}
         onkeydown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!transitioning) onToggleCollapsed(); } }}
         >
         <button class="dot-button" type="button" title="便签颜色" aria-label="便签颜色" onclick={e=>{e.stopPropagation();onPickColor();}}><i class="color-dot" aria-hidden="true"></i></button>
@@ -144,7 +157,7 @@
           <CircleAlert class="capsule-error-icon" size={14} strokeWidth={1.8} aria-hidden="true" />
         {:else}
           <button class="mini-button" class:on={settings.alwaysOnTop} type="button" aria-pressed={settings.alwaysOnTop}
-            title={settings.alwaysOnTop?'已置顶 · 点击取消':'置顶'} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={e=>{e.stopPropagation();onTogglePin();}}><Pin size={12} strokeWidth={1.8}/></button>
+            title={settings.alwaysOnTop ? '取消置顶' : '置顶'} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={e=>{e.stopPropagation();onTogglePin();}}><Pin size={12} strokeWidth={1.8}/></button>
           <button class="mini-button" type="button" title="展开" aria-label="展开便签" onclick={e=>{e.stopPropagation();if(!transitioning)onToggleCollapsed();}}><Maximize2 size={12} strokeWidth={1.8} /></button>
         {/if}
       </div>
@@ -159,7 +172,7 @@
         oninput={(event) => onTitleChange(event.currentTarget.value)} />
       <div class="header-actions">
         <button class="pin-button" class:on={settings.alwaysOnTop} type="button" aria-pressed={settings.alwaysOnTop}
-          title={settings.alwaysOnTop?'已置顶 · 点击取消（⌘T）':'置顶（⌘T）'} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={onTogglePin}>
+          title={`${settings.alwaysOnTop ? '取消置顶' : '置顶'}（${pinShortcut}）`} aria-label={settings.alwaysOnTop?'取消置顶':'置顶'} onclick={onTogglePin}>
           <Pin size={15} strokeWidth={1.8} />
         </button>
         <button bind:this={collapseButton} class="collapse-button" type="button" title="收起便签" aria-label="收起便签" onclick={onToggleCollapsed}>
@@ -187,86 +200,107 @@
 </main>
 
 <style>
-  .drag-grip{display:grid;place-items:center;flex:0 0 14px;margin-left:-8px;margin-right:-8px;color:var(--pin-muted);opacity:.5;cursor:grab}.drag-grip:hover{opacity:1}
-  .note-window.locating,.note-window.edge-ready{box-shadow:inset 0 0 0 2px #3b82f6}.note-window.locating{animation:locate-glow 600ms ease-in-out 3}.edge-indicator,.locate-indicator{position:absolute;z-index:130;top:43px;left:50%;transform:translateX(-50%);background:#2563eb;color:white;padding:4px 10px;border-radius:8px;font-size:11px;white-space:nowrap;pointer-events:none}.collapsed .locate-indicator{display:none}@keyframes locate-glow{50%{box-shadow:inset 0 0 0 4px #93c5fd}}@media(prefers-reduced-motion:reduce){.note-window.locating{animation:none}}
+  /* ---- Base ---- */
   :global(*) { box-sizing: border-box; }
   :global(html), :global(body) { width: 100%; height: 100%; margin: 0; }
-  :global(body) { overflow: hidden; color: #171717; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 14px; line-height: 1.55; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
-  .window-shell { --pin-page: #f5f5f5; --pin-bg: #fff; --pin-header: #fff; --pin-text: #171717; --pin-heading: #111; --pin-muted: #737373; --pin-border: #00000012; --pin-accent: #2563eb; --pin-accent-strong: #1d4ed8; --pin-hover: #f4f4f5; --pin-active: #eff6ff; width: 100vw; height: 100vh; background: transparent; }
-  .theme-mint { --pin-page: #e8f1ec; --pin-bg: #f5fbf8; --pin-header: #f5fbf8; }
-  .theme-rose { --pin-page: #f3e8e8; --pin-bg: #fff8f7; --pin-header: #fff8f7; }
-  .theme-sky { --pin-page: #e4edf7; --pin-bg: #f6fbff; --pin-header: #f6fbff; }
-  .theme-grape { --pin-page: #eee7f5; --pin-bg: #fbf8ff; --pin-header: #fbf8ff; }
-  .theme-ink { --pin-page: #202020; --pin-bg: #272727; --pin-header: #272727; --pin-text: #f5f5f5; --pin-heading: #fff; --pin-muted: #a3a3a3; --pin-border: #ffffff20; --pin-accent: #93b4ff; --pin-accent-strong: #b6cdff; --pin-hover: #343434; --pin-active: #263653; }
-  .theme-custom { --pin-page: color-mix(in srgb, var(--pin-custom), white 74%); --pin-bg: color-mix(in srgb, var(--pin-custom), white 94%); --pin-header: var(--pin-bg); }
-  /* Dark app theme: the note keeps its colour as a tint on a dark surface, with light text.
-     The stored note colour is never changed. */
-  :global([data-theme="dark"]) .window-shell { --pin-bg: color-mix(in srgb, var(--pin-dot) 13%, #1f1f21); --pin-header: var(--pin-bg); --pin-page: #18181a;
-    --pin-text: #ececec; --pin-heading: #ffffff; --pin-muted: #a1a1aa; --pin-border: #ffffff1f; --pin-accent: #8fb1ff; --pin-accent-strong: #b6cdff; --pin-hover: #ffffff12; --pin-active: #3b82f62e; }
+  :global(body) { overflow: hidden; color: var(--text); background: transparent; font-family: var(--font); font-size: 14px; line-height: 1.55; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+
+  /* ---- Note palette: the note's own colour (a note property) plus shared UI tokens ---- */
+  .window-shell { --pin-dot: #a1a1aa; --pin-bg: #fff; --pin-header: var(--pin-bg); --pin-text: #171717; --pin-heading: #111; --pin-muted: #737373;
+    --pin-border: #00000014; --pin-accent: var(--accent); --pin-accent-strong: var(--accent-strong); --pin-hover: #0000000a; --pin-active: var(--accent-soft);
+    width: 100vw; height: 100vh; background: transparent; }
+  .theme-mint { --pin-dot: #72bca0; --pin-bg: #f5fbf8; }
+  .theme-rose { --pin-dot: #df9d9a; --pin-bg: #fff8f7; }
+  .theme-sky { --pin-dot: #7dafe1; --pin-bg: #f6fbff; }
+  .theme-grape { --pin-dot: #b69bd6; --pin-bg: #fbf8ff; }
+  .theme-custom { --pin-dot: var(--pin-custom); --pin-bg: color-mix(in srgb, var(--pin-custom), white 94%); }
+  .theme-ink { --pin-dot: #8a8a8a; --pin-bg: #272727; --pin-text: #f5f5f5; --pin-heading: #fff; --pin-muted: #a3a3a3; --pin-border: #ffffff20;
+    --pin-accent: #93b4ff; --pin-accent-strong: #b6cdff; --pin-hover: #ffffff12; --pin-active: #3b82f62e; }
+  /* Dark app theme: the note colour becomes a tint on a dark surface; the stored colour is untouched. */
+  :global([data-theme="dark"]) .window-shell { --pin-bg: color-mix(in srgb, var(--pin-dot) 13%, #1f1f21); --pin-text: var(--text); --pin-heading: var(--text-strong);
+    --pin-muted: var(--muted); --pin-border: #ffffff1f; --pin-accent: var(--accent); --pin-accent-strong: var(--accent-strong); --pin-hover: var(--hover-strong); --pin-active: var(--accent-soft-strong); }
   :global([data-theme="dark"]) .window-shell.theme-paper { --pin-bg: #1f1f21; }
-  /* Shadows: "standard" is the native window shadow; "light" a hairline drawn inside the frame. */
-  :global([data-note-shadow="light"]) .note-window { box-shadow: inset 0 0 0 .5px #0000001f, inset 0 -1px 0 #0000000a; }
-  :global([data-note-shadow="off"]) .note-window { border-color: color-mix(in srgb, var(--pin-border), transparent 30%); }
-  /* Edge tabs: light border plus a faint shadow on the side facing the desktop. */
-  .tab.dock-left .note-window { box-shadow: inset -3px 0 4px -3px #0000001f; }
-  .tab.dock-right .note-window { box-shadow: inset 3px 0 4px -3px #0000001f; }
-  .note-window { position: relative; display: grid; grid-template-rows: 40px minmax(0, 1fr); width: 100%; height: 100%; border: 1px solid var(--pin-border); border-radius: 16px; overflow: hidden; color: var(--pin-text); background: color-mix(in srgb, var(--pin-bg) calc(var(--pin-opacity) * 100%), transparent); transition: border-radius 180ms, background 180ms; }
-  .dragbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; padding: 4px 8px 4px 14px; box-shadow: inset 0 -1px 0 var(--pin-border); cursor: grab; user-select: none; transition: opacity 100ms ease; }
+
+  /* ---- Frame and shadow levels ----
+     标准: native window shadow (set from the page) + hairline; 细边: a crisp hairline only;
+     关: no shadow and a barely-there edge. Edge tabs stay flat on every level. */
+  .note-window { position: relative; display: grid; grid-template-rows: 40px minmax(0, 1fr); width: 100%; height: 100%; border: 1px solid var(--pin-border); border-radius: var(--radius-lg); overflow: hidden;
+    color: var(--pin-text); background: color-mix(in srgb, var(--pin-bg) calc(var(--pin-opacity) * 100%), transparent); transition: border-radius var(--motion) var(--ease-out), background var(--motion); }
+  :global([data-note-shadow="light"]) .note-window { border-color: color-mix(in srgb, var(--pin-text) 22%, transparent); }
+  :global([data-note-shadow="off"]) .note-window { border-color: color-mix(in srgb, var(--pin-border), transparent 45%); }
+  .note-window.locating, .note-window.edge-ready { box-shadow: inset 0 0 0 2px var(--pin-accent); }
+  .note-window.locating { animation: locate-glow 600ms ease-in-out 3; }
+  @keyframes locate-glow { 50% { box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--pin-accent) 45%, transparent); } }
+  .edge-indicator, .locate-indicator { position: absolute; z-index: 130; top: 46px; left: 50%; transform: translateX(-50%); padding: 4px 10px; border-radius: var(--radius); font-size: 11px; white-space: nowrap; pointer-events: none;
+    color: #fff; background: var(--accent); box-shadow: 0 4px 12px #0000001f; }
+  .collapsed .locate-indicator { display: none; }
+
+  /* ---- Title bar: colour · title · pin · collapse · more ---- */
+  .dragbar { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 6px 4px 12px; box-shadow: inset 0 -1px 0 var(--pin-border); cursor: grab; user-select: none; transition: opacity var(--motion-fast); }
   .dragbar:active { cursor: grabbing; }
-  .title-input { min-width: 0; flex: 1; width: 0; border: 0; border-radius: 6px; padding: 2px 4px; margin-left: -4px; outline: 0; font: inherit; font-size: 14px; line-height: 20px; font-weight: 600; text-overflow: ellipsis; color: var(--pin-heading); background: transparent; cursor: text; }
+  .drag-grip { display: grid; place-items: center; flex: 0 0 12px; margin: 0 -4px 0 -8px; color: var(--pin-muted); opacity: 0; transition: opacity var(--motion-fast); cursor: grab; }
+  .dragbar:hover .drag-grip { opacity: .6; }
+  .title-input { min-width: 0; flex: 1; width: 0; border: 0; border-radius: var(--radius-sm); padding: 2px 4px; margin-left: 2px; outline: 0; font: inherit; font-size: 14px; line-height: 20px; font-weight: 600;
+    text-overflow: ellipsis; color: var(--pin-heading); background: transparent; cursor: text; }
+  .title-input::placeholder { color: var(--pin-muted); font-weight: 500; }
   .title-input:focus-visible { box-shadow: 0 1px 0 var(--pin-accent); }
-  .header-actions { display: flex; align-items: center; gap: 2px; }
-  .pin-button, .collapse-button { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer; transition: color 140ms, background 140ms, transform 140ms; }
-  .pin-button, .collapse-button { padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer; transition: color 140ms, background 140ms, transform 140ms; }
-  .pin-button:hover, .collapse-button:hover { color: var(--pin-text); background: var(--pin-hover); }
-  .pin-button:active, .collapse-button:active { transform: scale(0.93); }
-  .pin-button.on { color: var(--pin-accent); background: var(--pin-active); }
-  .pin-button.on :global(svg) { fill: currentColor; fill-opacity: .18; }
-  .pin-button:focus-visible, .dot-button:focus-visible, .mini-button:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -2px; }
-  .dot-button { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
-  .dot-button:hover { background: var(--pin-hover); }
-  .color-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--pin-dot); box-shadow: inset 0 0 0 1px #0000001f; transition: transform 140ms; }
+  .header-actions { display: flex; align-items: center; gap: 2px; transition: opacity var(--motion-fast); }
+
+  /* One button language for every icon button in the note: 28px in the title bar, 22px on the capsule. */
+  .pin-button, .collapse-button, .mini-button, .dot-button { display: grid; place-items: center; flex: 0 0 auto; padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer;
+    transition: color var(--motion-fast), background var(--motion-fast), transform var(--motion-fast); }
+  .pin-button, .collapse-button { width: 28px; height: 28px; }
+  .mini-button, .dot-button { width: 22px; height: 22px; }
+  .pin-button:hover, .collapse-button:hover, .mini-button:hover, .dot-button:hover { color: var(--pin-text); background: var(--pin-hover); }
+  .pin-button:active, .collapse-button:active, .mini-button:active { transform: scale(.92); }
+  .pin-button:focus-visible, .collapse-button:focus-visible, .mini-button:focus-visible, .dot-button:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -2px; }
+  /* Pinned: the same Pin glyph everywhere, filled in the accent colour. */
+  .pin-button.on, .mini-button.on { color: var(--pin-accent); background: var(--pin-active); }
+  .pin-button.on :global(svg), .mini-button.on :global(svg) { fill: currentColor; fill-opacity: .22; }
+  .color-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--pin-dot); box-shadow: inset 0 0 0 1px #0000001f; transition: transform var(--motion-fast); }
   .dot-button:hover .color-dot { transform: scale(1.15); }
-  .mini-button { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; color: var(--pin-muted); background: transparent; cursor: pointer; transition: color 140ms, background 140ms; }
-  .mini-button:hover { color: var(--pin-text); background: color-mix(in srgb, var(--pin-text) 8%, transparent); }
-  .mini-button.on { color: var(--pin-accent); }
-  .mini-button.on :global(svg) { fill: currentColor; fill-opacity: .25; }
-  .collapse-button:focus-visible, .capsule:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
-  .editor-frame { min-height: 0; overflow: hidden; transition: opacity 120ms ease; }
-  .status-toast { position: absolute; z-index: 80; right: 12px; bottom: 10px; max-width: calc(100% - 24px); padding: 5px 9px; border: 1px solid var(--pin-border); border-radius: 8px; color: var(--pin-muted); background: var(--pin-bg); font-size: 11px; box-shadow: 0 2px 8px #00000006; }
-  .status-toast.error { color: #dc2626; overflow-wrap: anywhere; max-height: 50%; overflow: auto; }
+
+  /* Draft notices and the reminder tag sit above the editor, which takes the rest. */
+  .editor-frame { display: flex; flex-direction: column; min-height: 0; overflow: hidden; transition: opacity 120ms ease; --banner-inset: 10px; }
+  .editor-frame > :global(*) { flex: 0 0 auto; }
+  .editor-frame > :global(:last-child) { flex: 1 1 0; min-height: 0; height: auto; }
+  .editor-frame > :global(.banner) { margin-top: 8px; margin-bottom: 2px; }
+  .status-toast { position: absolute; z-index: 80; right: 12px; bottom: 10px; max-width: calc(100% - 24px); padding: 5px 9px; border: 1px solid var(--pin-border); border-radius: var(--radius); color: var(--pin-muted); background: var(--pin-bg); font-size: 11px; box-shadow: 0 2px 8px #0000000a; }
+  .status-toast.error { color: var(--danger); overflow-wrap: anywhere; max-height: 50%; overflow: auto; }
+
+  /* ---- Capsule: colour · title · pin · expand ---- */
+  @keyframes pin-appear { from { opacity: 0; } }
   .collapsed .note-window { border-radius: 20px; grid-template-rows: 1fr; }
   .collapsed .dragbar, .collapsed .editor-frame { display: none; }
-  .transitioning .editor-frame, .transitioning .header-actions { opacity: 0; }
-  .header-actions { transition: opacity 100ms ease; }
-  /* Theme accent shown on capsules and edge tabs. */
-  .window-shell { --pin-dot: #a1a1aa; }
-  .theme-mint { --pin-dot: #72bca0; } .theme-rose { --pin-dot: #df9d9a; } .theme-sky { --pin-dot: #7dafe1; }
-  .theme-grape { --pin-dot: #b69bd6; } .theme-ink { --pin-dot: #8a8a8a; } .theme-custom { --pin-dot: var(--pin-custom); }
-  @keyframes pin-appear { from { opacity: 0; } }
-  /* Edge tab: flat against the screen edge, rounded toward the desktop. */
-  .tab .note-window { grid-template-rows: 1fr; border-radius: 0 12px 12px 0; border-left-width: 0; background: color-mix(in srgb, var(--pin-bg) 96%, transparent); }
-  .tab.dock-right .note-window { border-radius: 12px 0 0 12px; border-left-width: 1px; border-right-width: 0; }
+  .capsule { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; padding: 0 5px 0 7px; border-radius: inherit; user-select: none; touch-action: none; cursor: grab; animation: pin-appear 160ms ease-out; transition: background var(--motion-fast); }
+  .capsule:hover { background: var(--pin-hover); }
+  .capsule:active { cursor: grabbing; }
+  .capsule:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
+  .capsule .capsule-title { flex: 1; min-width: 0; margin-left: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--pin-heading); }
+  .capsule :global(svg) { flex: 0 0 auto; }
+  /* The pin shows only when pinned or on hover, so a short title keeps its room. */
+  .capsule .mini-button:not(.on) { opacity: 0; }
+  .capsule:hover .mini-button, .capsule:focus-within .mini-button { opacity: 1; }
+  .overflow, .tab-overflow { border: 0; border-radius: 999px; padding: 1px 6px; font: inherit; font-size: 10px; font-weight: 600; line-height: 16px; color: var(--pin-accent); background: var(--pin-active); cursor: pointer; }
+  .capsule :global(.capsule-error-icon) { color: var(--danger); }
+
+  /* ---- Edge tab: flat against the screen edge, rounded toward the desktop, no buttons ---- */
+  .tab .note-window { grid-template-rows: 1fr; border-radius: 0 var(--radius-lg) var(--radius-lg) 0; border-left-width: 0; background: color-mix(in srgb, var(--pin-bg) 96%, transparent); box-shadow: inset -3px 0 4px -3px #0000001a; }
+  .tab.dock-right .note-window { border-radius: var(--radius-lg) 0 0 var(--radius-lg); border-left-width: 1px; border-right-width: 0; box-shadow: inset 3px 0 4px -3px #0000001a; }
   .tab .dragbar, .tab .editor-frame { display: none; }
-  .edge-tab { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 0; user-select: none; touch-action: none; cursor: pointer; animation: pin-appear 160ms ease-out; transition: background 140ms; }
+  .edge-tab { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 0; user-select: none; touch-action: none; cursor: pointer; animation: pin-appear 160ms ease-out; transition: background var(--motion-fast); }
   .edge-tab:hover { background: var(--pin-hover); }
   .edge-tab:focus-visible { outline: 2px solid var(--pin-accent); outline-offset: -3px; }
-  .tab-accent { position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--pin-dot); transition: width 140ms; }
+  .tab-accent { position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--pin-dot); transition: width var(--motion-fast); }
   .dock-right .tab-accent { left: auto; right: 0; border-radius: 3px 0 0 3px; }
   .edge-tab:hover .tab-accent { width: 4px; }
   .tab-label { writing-mode: vertical-rl; max-height: 100%; overflow: hidden; font-size: 12px; font-weight: 600; letter-spacing: 1px; line-height: 1; color: var(--pin-heading); }
-  .tab-error { width: 6px; height: 6px; border-radius: 50%; background: #dc2626; flex: 0 0 auto; }
-  .tab-overflow { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); border: 0; padding: 0 3px; border-radius: 6px; font-size: 9px; line-height: 14px; color: #2563eb; background: #eff6ff; cursor: pointer; }
-  .capsule { animation: pin-appear 160ms ease-out; }
-  .capsule { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 6px 0 8px; border-radius: inherit; user-select: none; touch-action: none; cursor: grab; transition: background 140ms; }
-  .capsule:hover { background: var(--pin-hover); }
-  .capsule:active { cursor: grabbing; }
-  .capsule .capsule-title { flex: 1; margin-left: 2px; }
-  .capsule span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-  .capsule :global(svg) { flex: 0 0 auto; }
-  .overflow{border:0;border-radius:8px;background:#eff6ff;color:#2563eb;padding:2px 6px;cursor:pointer}
-  .capsule :global(.capsule-error-icon) { color: #dc2626; }
+  .tab-error { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
+  .tab-overflow { position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); padding: 0 4px; font-size: 9px; line-height: 14px; }
+
   .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  /* ---- Resize zones ---- */
   .resize-zone { position: absolute; z-index: 90; background: transparent; touch-action: none; }
   .resize-North, .resize-South { height: 4px; left: 12px; right: 12px; cursor: ns-resize; }
   .resize-North { top: 0; } .resize-South { bottom: 0; }
@@ -279,13 +313,15 @@
   :global(::-webkit-scrollbar-track) { background: transparent; }
   :global(::-webkit-scrollbar-thumb) { border: 2px solid transparent; border-radius: 999px; background-clip: content-box; background-color: #8885; }
   :global(::-webkit-scrollbar-thumb:hover) { background-color: #8888; }
-  /* Morph: content keeps its expanded layout, anchored where the window folds to
-     (the collapse button side, or the docked edge), and is clipped by the frame. */
+
+  /* ---- Morph: content keeps its expanded layout, anchored where the window folds to,
+     and is clipped by the frame; it fades rather than reflowing every frame. ---- */
+  .transitioning .editor-frame, .transitioning .header-actions { opacity: 0; }
   .frozen .dragbar, .frozen .editor-frame { width: var(--freeze-w); justify-self: end; }
   .frozen.dock-left .dragbar, .frozen.dock-left .editor-frame { justify-self: start; }
   .frozen .editor-frame { height: calc(var(--freeze-h) - 40px); align-self: start; }
-  .transitioning .editor-frame { transition: opacity 140ms ease-in; }
-  .transitioning.opening .editor-frame, .transitioning.opening .header-actions { opacity: 1; transition: opacity 220ms cubic-bezier(.2,.85,.25,1) 40ms; }
+  .transitioning .editor-frame { transition: opacity var(--motion-fast) ease-in; }
+  .transitioning.opening .editor-frame, .transitioning.opening .header-actions { opacity: 1; transition: opacity var(--motion) var(--ease-out) 40ms; }
   @starting-style { .transitioning.opening .editor-frame, .transitioning.opening .header-actions { opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .note-window, .dragbar, .editor-frame, .header-actions, .collapse-button, .capsule, .edge-tab, .tab-accent { transition: none; animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .note-window, .dragbar, .editor-frame, .header-actions, .pin-button, .collapse-button, .mini-button, .capsule, .edge-tab, .tab-accent { transition: none; animation: none; } }
 </style>

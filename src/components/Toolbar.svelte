@@ -71,14 +71,15 @@
   button:hover { background: var(--pin-hover, var(--hover)); }
   button:active { transform: scale(0.96); }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .menu-trigger { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; color: var(--pin-text, var(--text)); background: var(--pin-hover, var(--hover)); }
-  .menu-trigger:hover, .menu-trigger[aria-expanded="true"] { color: var(--pin-accent, var(--accent)); background: var(--pin-active, var(--accent-soft)); transform: scale(1.04); }
+  .menu-trigger { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; color: var(--pin-muted, var(--muted)); background: transparent; }
+  .menu-trigger:hover { color: var(--pin-text, var(--text)); background: var(--pin-hover, var(--hover)); }
+  .menu-trigger[aria-expanded="true"] { color: var(--pin-accent, var(--accent)); background: var(--pin-active, var(--accent-soft)); }
   .menu { position: fixed; z-index: 120; right: 8px; top: 43px; width: min(206px, calc(100vw - 16px)); max-height: calc(100vh - 51px); overflow: auto; padding: 5px; border: 1px solid var(--pin-border, var(--border)); border-radius: 12px; color: var(--pin-text, var(--text)); background: var(--pin-bg, var(--surface-raised)); box-shadow: var(--menu-shadow); transform-origin: top right; }
   .menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 31px; padding: 6px 9px; border-radius: 7px; text-align: left; font-size: 12px; color: inherit; background: transparent; }
   .menu button:hover { background: var(--pin-hover, var(--hover)); }
   .menu button.active { color: var(--pin-accent, var(--accent)); }
   .menu button.danger { color: var(--danger); }
   .menu hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--pin-border, var(--border)); }
-  .menu button.danger:hover { background: #dc262610; }
+  .menu button.danger:hover { background: var(--danger-soft); }
   @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>

@@ -1,8 +1,23 @@
 import type { TransitionConfig } from "svelte/transition";
+import type { AnimationConfig, FlipParams } from "svelte/animate";
+import { flip } from "svelte/animate";
+import { cubicOut } from "svelte/easing";
+
+/** The app's "reduce motion" setting or the system preference. */
+export function motionReduced() {
+  if (typeof window === "undefined") return false;
+  return document.documentElement.dataset.motion === "reduce" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+/** Shared durations (ms), mirrored by --motion-fast / --motion in theme.css. */
+export const MOTION_FAST = 140, MOTION = 220;
 
 export function reveal(_node: Element): TransitionConfig {
-  const reduced = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  return { duration: reduced ? 0 : 140, css: (t) => `opacity: ${t}; transform: scale(${0.97 + t * 0.03})` };
+  return { duration: motionReduced() ? 0 : MOTION_FAST, easing: cubicOut, css: (t) => `opacity: ${t}; transform: scale(${0.97 + t * 0.03})` };
+}
+
+/** List and tab reordering: one duration and curve everywhere, none when motion is reduced. */
+export function shift(node: Element, rects: { from: DOMRect; to: DOMRect }, params: FlipParams = {}): AnimationConfig {
+  return flip(node, rects, { duration: motionReduced() ? 0 : MOTION, easing: cubicOut, ...params });
 }
 
 /** Keep compact popovers keyboard accessible without adding a UI dependency. */

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { createQuitGuard } from "$lib/quitGuard";
-  import { noteOperation, hasPendingSave, discardPendingSave } from '$lib/notesStore';
+  import { shortTime } from "$lib/excerpt";
+  import { noteOperation, hasLocalEdits, discardPendingSave, markEdited, markSettled, classifyChange, onNoteConflict, keepLocalVersion, takeRemoteVersion, NoteConflictError } from '$lib/notesStore';
+  import DraftBanner from '../components/DraftBanner.svelte';
   import { edgeTarget, edgeLayout, edgePlacement, dockedEditorBounds } from '$lib/edgeQueue';
   import { releaseCenterEditor } from '$lib/editorHandoff';
   import { animateWindow, prefersReducedMotion, type Curve } from '$lib/nativeMotion';
@@ -94,6 +96,11 @@
   let windowStateTimer: ReturnType<typeof setTimeout>;
   let initialization: Promise<void>;
   let editor = $state<MilkdownEditor>();
+  // Draft safety: a version conflict with a change made elsewhere, or the last failed save.
+  let conflict = $state(false);
+  let saveError = $state("");
+  let resolving = $state(false);
+  const errorText = (e: unknown) => String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, "");
   // A capsule or edge tab keeps no editor. One is created on expand and kept for a
   // short while after collapsing (fast re-expand keeps selection and undo), then released.
   const EDITOR_IDLE_MS = 45_000;
@@ -205,16 +212,23 @@
         if(payload.op==='appearance'&&payload.note){const {theme,customColor,opacity,alwaysOnTop}=payload.note;note={...note,theme,customColor,opacity,alwaysOnTop};return;}
         if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
           editor?.flush();
-          if(hasPendingSave(note.id)) { status='便签状态已变化，本地草稿已保留，请先导出';return; }
+          if(hasLocalEdits(note.id)) { status='便签状态已变化，本地草稿已保留，请先导出';return; }
           discardPendingSave(note.id); ready = false; isDeleting = true; await win.destroy();
-        } else if (payload.note.revision > note.revision && (!hasPendingSave(note.id) || note.window.collapsed)) {
-          // Body edits made in the center while this note is a capsule/tab. Geometry
-          // stays owned by this window, and a hidden editor is dropped rather than rebuilt.
-          const contentChanged = note.content !== payload.note.content;
-          note = { ...payload.note, window: note.window };
-          if (contentChanged) {
-            if (note.window.collapsed && !transitioning) { clearTimeout(releaseTimer); editor = undefined; editorAlive = false; }
-            editorRevision++;
+        } else if (payload.op !== 'window') {
+          // Delivery only marks the reminder; it keeps the revision.
+          if (payload.op === 'reminder') note = { ...note, reminder: payload.note.reminder };
+          // Unsaved input (even not yet serialized) is never replaced by a change from elsewhere.
+          const verdict = classifyChange(payload, { label: win.label, revision: note.revision, title: note.title, content: note.content });
+          if (verdict === 'conflict') { conflict = true; status = '这张便签刚在别处被修改，你的草稿已保留'; }
+          else if (verdict === 'apply' && payload.note.revision > note.revision) {
+            // Body edits made in the center while this note is a capsule/tab. Geometry
+            // stays owned by this window, and a hidden editor is dropped rather than rebuilt.
+            const contentChanged = note.content !== payload.note.content;
+            note = { ...payload.note, window: note.window };
+            if (contentChanged) {
+              if (note.window.collapsed && !transitioning) { clearTimeout(releaseTimer); editor = undefined; editorAlive = false; }
+              editorRevision++;
+            }
           }
         }
       }
@@ -276,7 +290,10 @@
       status = "保存失败，已取消退出，请重试或导出便签";
     });
 
+    const stopConflict = onNoteConflict(id => { if (id === note.id) conflict = true; });
+
     return () => {
+      stopConflict();
       clearTimeout(windowStateTimer);
       clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f()); collapseRequest.then(f=>f()); perfHover.then(f=>f());
       clearTimeout(locateTimer);locate.then(f=>f());
@@ -529,9 +546,37 @@
     if (!ready || isDeleting) return;
     if (scope !== "window") status = "正在保存…";
     scheduleNoteSave(note, (error) => {
-      if (error) status = "保存失败，请重试或导出便签";
-      else if (scope !== "window") status = "已自动保存";
+      if (error instanceof NoteConflictError) status = "版本冲突，草稿已保留";
+      else if (error) { saveError = errorText(error); status = "保存失败，草稿已保留"; }
+      else { saveError = ""; if (scope !== "window") status = "已自动保存"; }
     }, scope);
+  }
+
+  /** Conflict: overwrite the other version with this draft. */
+  async function keepMine() {
+    resolving = true;
+    try { editor?.flush(); await keepLocalVersion(note.id); conflict = false; saveError = ""; status = "已保留你的修改并保存"; }
+    catch (error) { if (!(error instanceof NoteConflictError)) saveError = errorText(error); }
+    finally { resolving = false; }
+  }
+  /** Conflict: load the other version; a differing draft is kept as a new center note. */
+  async function takeTheirs() {
+    resolving = true;
+    try {
+      editor?.flush();
+      const { remote, copy } = await takeRemoteVersion(note.id, { title: note.title, content: note.content });
+      if (!remote) return;
+      conflict = false; saveError = "";
+      note = { ...remote, window: note.window }; editorRevision++;
+      status = copy ? `已载入新版本 · 草稿另存为「${copy.title}」（在便签中心）` : "已载入新版本";
+    } catch (error) { saveError = errorText(error); }
+    finally { resolving = false; }
+  }
+  async function retrySave() {
+    resolving = true;
+    try { editor?.flush(); await flushNoteSave(note.id); saveError = ""; status = "已保存"; }
+    catch (error) { if (!(error instanceof NoteConflictError)) saveError = errorText(error); }
+    finally { resolving = false; }
   }
 
   function updateTitle(value: string) {
@@ -614,8 +659,9 @@
       }
       await getCurrentWindow().hide();
       return true;
-    } catch {
-      status = "保存失败，便签未关闭，请重试或导出";
+    } catch (error) {
+      status = error instanceof NoteConflictError ? "先处理版本冲突，便签未关闭" : "保存失败，便签未关闭，草稿已保留";
+      if (!(error instanceof NoteConflictError)) saveError = errorText(error);
       return false;
     } finally {
       if(frozen) document.body.inert = false;
@@ -936,11 +982,12 @@
       } while (relayout && note.window.collapsed && note.window.edge);
     } finally { layingOut = false; relayout = false; }
   }
-  function hoverPreview(inside: boolean) {
-    hovering = inside;
+  function hoverPreview(inside: boolean, pressed = false) {
+    hovering = inside && !pressed;
     clearTimeout(previewTimer);
-    void emit('preview-hover',{id:note.id,inside});
-    if(inside && !dragging && note.window.collapsed && globalSettings.behavior.hoverPreview) previewTimer = setTimeout(() => void showPreview(note).then(()=>{if(!hovering)void emit('preview-hover',{id:note.id,inside:false});}).catch(()=>undefined), 350);
+    void emit('preview-hover',{id:note.id,inside:hovering});
+    // Only a resting pointer previews: not while dragging, not mid-transition, not with a button held.
+    if(hovering && !dragging && !transitioning && note.window.collapsed && globalSettings.behavior.hoverPreview) previewTimer = setTimeout(() => void showPreview(note).then(()=>{if(!hovering)void emit('preview-hover',{id:note.id,inside:false});}).catch(()=>undefined), 350);
   }
   async function lifecycle(id:string, op:string) {
     try {
@@ -1004,19 +1051,20 @@
   onStartResize={startResize}
 >
   {#if ready && editorAlive}
-    {#if note.reminder}<button class="reminder-tag" onclick={()=>reminderOpen=true}>{note.reminder.state==='delivered'?'已提醒 · ':''}{new Date(note.reminder.at).toLocaleString()}</button>{/if}
+    {#if !note.window.collapsed}<DraftBanner compact {conflict} error={saveError} busy={resolving} onKeepMine={() => void keepMine()} onTakeTheirs={() => void takeTheirs()} onRetry={() => void retrySave()} />{/if}
+    {#if note.reminder}<button class="reminder-tag" onclick={()=>reminderOpen=true}>{note.reminder.state==='delivered'?'已提醒 · ':''}{shortTime(note.reminder.at)}</button>{/if}
     {#key `${note.id}-${editorRevision}`}
       {#if sourceMode}
         <SourceEditor value={note.content} onChange={updateContent} />
       {:else}
-        <MilkdownEditor bind:this={editor} value={note.content} onChange={updateContent} onReminder={()=>reminderOpen=true}/>
+        <MilkdownEditor bind:this={editor} value={note.content} onChange={updateContent} onEdit={()=>markEdited(note.id)} onSettled={()=>markSettled(note.id)} onReminder={()=>reminderOpen=true}/>
       {/if}
     {/key}
   {/if}
 </WindowChrome>
 {#if reminderOpen}<ReminderDialog currentAt={note.reminder?.at} onClose={()=>reminderOpen=false} onSet={async at=>{await saveBeforeWindowAction();const current=(await loadNotes()).notes[note.id];await noteOperation(current,'reminder',{at});note=current;}}/>{/if}
 <input class="color-input" type="color" tabindex="-1" aria-hidden="true" bind:this={colorInput} value={note.customColor} onchange={e=>void changeAppearance({theme:'custom',customColor:e.currentTarget.value})}/>
-<style>.color-input{position:fixed;left:8px;top:8px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}.reminder-tag{border:0;border-radius:5px;background:#eff6ff;color:#2563eb;font-size:11px;padding:3px 8px;margin:6px 16px;cursor:pointer}</style>
+<style>.color-input{position:fixed;left:8px;top:8px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}.reminder-tag{align-self:flex-start;border:0;border-radius:999px;background:var(--pin-active);color:var(--pin-accent);font:inherit;font-size:11px;padding:2px 9px;margin:8px 14px 0;cursor:pointer;transition:background var(--motion-fast)}.reminder-tag:hover{background:color-mix(in srgb,var(--pin-accent) 18%,transparent)}.reminder-tag:focus-visible{outline:2px solid var(--pin-accent);outline-offset:1px}</style>
 
 <NoteListPopover
   open={notesOpen}

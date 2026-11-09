@@ -54,11 +54,111 @@ const pendingNotes = new Map<string, PinNote>();
 let pendingSave: Promise<void> = Promise.resolve();
 const revisions = new Map<string, number>();
 export function hasPendingSave(id: string) { return pendingNotes.has(id); }
-export function discardPendingSave(id: string) {
-  clearTimeout(timers.get(id)); timers.delete(id); pendingNotes.delete(id); scopes.delete(id);
-  void invoke('note_draft',{id,dirty:false}).catch(()=>{});
+
+// ---- Local edit state of this window ---------------------------------------
+// Every change to an editor's document bumps `gen` at once, long before the
+// (debounced) Markdown serialization runs, and the backend learns there is an
+// unsaved draft on the first one. A save remembers which `gen` its text covers;
+// only a confirmed save of the newest `gen` makes the note clean again.
+type EditState = { gen: number; saved: number; flagged: boolean };
+const edits = new Map<string, EditState>();
+const pendingGen = new Map<string, number>();
+const conflicts = new Map<string, PinNote>();
+const conflictListeners = new Set<(id: string) => void>();
+function editState(id: string) {
+  let e = edits.get(id);
+  if (!e) edits.set(id, e = { gen: 0, saved: 0, flagged: false });
+  return e;
 }
-export type NoteChange = { id: string; note: PinNote | null; op: string; layout?: boolean };
+function setDraftFlag(id: string, dirty: boolean) {
+  void invoke('note_draft', { id, dirty }).catch(() => {});
+}
+/** The note has edits not yet confirmed on disk; nothing from outside may replace them. */
+function releaseIfClean(id: string) {
+  const e = edits.get(id);
+  if (e?.flagged && e.gen <= e.saved && !pendingNotes.has(id) && !conflicts.has(id)) {
+    e.flagged = false; setDraftFlag(id, false);
+  }
+}
+/** The editor's document changed: protect the input right away, before it is serialized. */
+export function markEdited(id: string) {
+  const e = editState(id); e.gen++;
+  if (!e.flagged) { e.flagged = true; setDraftFlag(id, true); }
+}
+/** Serialization found the text unchanged: every edit so far is covered by the last known text. */
+export function markSettled(id: string) {
+  const e = edits.get(id); if (!e) return;
+  if (pendingNotes.has(id)) pendingGen.set(id, e.gen);
+  else { e.saved = e.gen; releaseIfClean(id); }
+}
+/** True while this window holds input for the note that is not yet confirmed saved. */
+export function hasLocalEdits(id: string) {
+  const e = edits.get(id);
+  return pendingNotes.has(id) || conflicts.has(id) || Boolean(e && e.gen > e.saved);
+}
+export function noteConflict(id: string) { return conflicts.get(id); }
+export function onNoteConflict(listener: (id: string) => void) {
+  conflictListeners.add(listener); return () => conflictListeners.delete(listener);
+}
+function setConflict(id: string, remote: PinNote) {
+  conflicts.set(id, remote); conflictListeners.forEach(l => l(id));
+}
+export class NoteConflictError extends Error {
+  constructor(public id: string) { super('VERSION_CONFLICT: 便签已在别处修改，你的草稿已保留，请选择保留哪个版本'); }
+}
+export function discardPendingSave(id: string) {
+  clearTimeout(timers.get(id)); timers.delete(id); pendingNotes.delete(id); scopes.delete(id); pendingGen.delete(id);
+  conflicts.delete(id);
+  const e = editState(id); e.saved = e.gen; e.flagged = true; releaseIfClean(id);
+}
+export type NoteChange = { id: string; note: PinNote | null; op: string; layout?: boolean; source?: string; by?: string };
+const metadataOps = new Set(['focus', 'window', 'appearance']);
+/**
+ * How an open editor should treat a change to its note.
+ * - `ignore`: stale, or the echo of this window's own save.
+ * - `apply`: nothing local to lose (or only metadata changed); take it.
+ * - `conflict`: someone else changed the text while this window holds unsaved input.
+ *   The local draft is kept and the remote version is remembered for the user to choose.
+ */
+export function classifyChange(change: NoteChange, local: { label: string; revision: number; title: string; content: string }): 'ignore' | 'apply' | 'conflict' {
+  const remote = change.note;
+  if (!remote || metadataOps.has(change.op)) return 'apply';
+  // The editor's copy can lag behind this window's own confirmed saves.
+  if (remote.revision <= Math.max(local.revision, revisions.get(change.id) ?? 0)) return 'ignore';
+  if (change.by === local.label && change.op === 'save') return 'ignore';
+  if (remote.content === local.content && remote.title === local.title) { adoptRevision(change.id, remote.revision); return 'apply'; }
+  if (!hasLocalEdits(change.id)) { adoptRevision(change.id, remote.revision); return 'apply'; }
+  setConflict(change.id, remote);
+  return 'conflict';
+}
+/** A change that kept this window's text (e.g. a reminder) moves the base the next save builds on. */
+function adoptRevision(id: string, revision: number) {
+  revisions.set(id, Math.max(revisions.get(id) ?? 0, revision));
+  const pending = pendingNotes.get(id); if (pending) pending.revision = Math.max(pending.revision, revision);
+}
+/** Keep this window's draft: it is saved over the remote version the user has seen. */
+export async function keepLocalVersion(id: string) {
+  const remote = conflicts.get(id); if (!remote) return;
+  conflicts.delete(id);
+  revisions.set(id, Math.max(revisions.get(id) ?? 0, remote.revision));
+  const pending = pendingNotes.get(id); if (pending) pending.revision = Math.max(pending.revision, remote.revision);
+  if (pending) await flushNoteSave(id); else releaseIfClean(id);
+}
+/**
+ * Take the remote version. A local draft that differs is first saved as a new
+ * center note, so choosing the other version never throws input away.
+ */
+export async function takeRemoteVersion(id: string, local: { title: string; content: string }) {
+  const remote = conflicts.get(id); if (!remote) return { remote: undefined, copy: undefined };
+  let copy: PinNote | undefined;
+  if (local.content !== remote.content || local.title !== remote.title) {
+    copy = createNote({ title: `${local.title || '未命名便签'}（我的草稿）`, content: local.content, placement: 'center', theme: remote.theme, customColor: remote.customColor });
+    await saveNoteNow(copy);
+  }
+  revisions.set(id, Math.max(revisions.get(id) ?? 0, remote.revision));
+  discardPendingSave(id);
+  return { remote, copy };
+}
 let snapshot: Promise<NotesFile> | undefined;
 let following = false;
 /**
@@ -171,8 +271,7 @@ const mergeScope = (a: SaveScope | undefined, b: SaveScope): SaveScope => !a || 
 
 export function scheduleNoteSave(note: PinNote, onResult?: (error?: unknown) => void, scope: SaveScope = "all") {
   const merged = mergeScope(pendingNotes.has(note.id) ? scopes.get(note.id) : undefined, scope);
-  const bodyAlreadyDirty = pendingNotes.has(note.id) && scopes.get(note.id) !== "window";
-  if (merged !== "window" && !bodyAlreadyDirty) void invoke('note_draft',{id:note.id,dirty:true}).catch(()=>{});
+  if (scope !== "window") { markEdited(note.id); pendingGen.set(note.id, editState(note.id).gen); }
   pendingNotes.set(note.id, { ...note, window: { ...note.window } });
   scopes.set(note.id, merged);
   clearTimeout(timers.get(note.id));
@@ -197,37 +296,60 @@ export async function flushNoteSave(id?: string) {
       : []
     : Array.from(pendingNotes.values());
 
-  if (notes.length === 0) return pendingSave;
+  // Nothing of this note is pending: wait for writes in flight, but another
+  // note's earlier failure is not this caller's failure.
+  if (notes.length === 0) return pendingSave.catch(() => undefined);
 
   pendingSave = pendingSave.catch(() => undefined).then(async () => {
+    // Each note saves on its own: one failed or conflicted draft does not hold back the rest.
+    let failure: unknown;
     for (const snapshot of notes) {
-      const note = pendingNotes.get(snapshot.id);
-      if (!note) continue;
-      const scope = scopes.get(note.id) ?? "all";
-      const next = { ...note, updatedAt: Date.now() };
-      const revision = Math.max(revisions.get(note.id) ?? 0, note.revision);
-      const op = revision === 0 ? "create" : scope === "window" ? "window" : "save";
-      const patch = scope === "window" ? { window: next.window }
-        : scope === "body" ? { title: next.title, content: next.content }
-        : { title: next.title, content: next.content, window: next.window };
-      // Only a new note needs the full record; every other save sends just its fields.
-      const result = await invoke<PinNote>("note_operation", { request: {
-        id: note.id, op, expectedRevision: revision, patch, ...(op === "create" ? { note: next } : {}),
-      } });
-      if (result) { revisions.set(note.id, result.revision); void applyNoteChange({ id: note.id, note: result }); }
-      // A newer draft may have arrived while the native write was in flight.
-      if (pendingNotes.get(note.id) === note) {
-        pendingNotes.delete(note.id); scopes.delete(note.id);
-        if (scope !== "window") await invoke('note_draft',{id:note.id,dirty:false});
-      }
+      try { await saveOne(snapshot.id); } catch (error) { failure ??= error; }
     }
+    if (failure !== undefined) throw failure;
   });
 
   return pendingSave;
 }
 
+async function saveOne(id: string) {
+  const note = pendingNotes.get(id);
+  if (!note) return;
+  // A conflicted draft waits for the user's choice; it is never written blind.
+  if (conflicts.has(id)) throw new NoteConflictError(id);
+  const scope = scopes.get(id) ?? "all";
+  const gen = pendingGen.get(id);
+  const next = { ...note, updatedAt: Date.now() };
+  const revision = Math.max(revisions.get(id) ?? 0, note.revision);
+  const op = revision === 0 ? "create" : scope === "window" ? "window" : "save";
+  const patch = scope === "window" ? { window: next.window }
+    : scope === "body" ? { title: next.title, content: next.content }
+    : { title: next.title, content: next.content, window: next.window };
+  let result: PinNote;
+  try {
+    // Only a new note needs the full record; every other save sends just its fields.
+    result = await invoke<PinNote>("note_operation", { request: {
+      id, op, expectedRevision: revision, patch, ...(op === "create" ? { note: next } : {}),
+    } });
+  } catch (error) {
+    // The note changed underneath this draft: keep the draft and ask, never retry blind.
+    if (String(error).includes("VERSION_CONFLICT")) {
+      const remote = (await loadNotes().catch(() => undefined))?.notes[id];
+      if (remote) { setConflict(id, remote); throw new NoteConflictError(id); }
+    }
+    throw error;
+  }
+  if (result) { revisions.set(id, result.revision); void applyNoteChange({ id, note: result }); }
+  // A newer draft may have arrived while the native write was in flight.
+  if (pendingNotes.get(id) === note) { pendingNotes.delete(id); scopes.delete(id); pendingGen.delete(id); }
+  // Clean only up to the edits this text contained; later typing stays protected.
+  if (gen !== undefined) { const e = editState(id); e.saved = Math.max(e.saved, gen); }
+  releaseIfClean(id);
+}
+
 export async function saveNoteNow(note: PinNote, scope: SaveScope = "all") {
   const merged = mergeScope(pendingNotes.has(note.id) ? scopes.get(note.id) : undefined, scope);
+  if (scope !== "window") pendingGen.set(note.id, editState(note.id).gen);
   pendingNotes.set(note.id, { ...note, window: { ...note.window } });
   scopes.set(note.id, merged);
   await flushNoteSave(note.id);
@@ -255,10 +377,7 @@ export async function markNoteClosed(note: PinNote) {
 }
 
 export async function deleteNoteNow(id: string) {
-  clearTimeout(timers.get(id));
-  timers.delete(id);
-  pendingNotes.delete(id);
-  scopes.delete(id);
+  discardPendingSave(id);
   await pendingSave.catch(() => undefined);
 
   const current = (await loadNotes()).notes[id];

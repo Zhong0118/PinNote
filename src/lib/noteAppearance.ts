@@ -16,3 +16,9 @@ export function noteTint(theme:NoteTheme,customColor:string) {
   if(theme==='custom') return customColor;
   return ({paper:'#a1a1aa',mint:'#72bca0',rose:'#df9d9a',sky:'#7dafe1',grape:'#b69bd6',ink:'#555555'} as Record<string,string>)[theme]??'#a1a1aa';
 }
+
+/** The small colour mark of a note (list dots, capsule dot, edge-tab accent). */
+const dots: Record<string, string> = { paper: '#a1a1aa', mint: '#72bca0', rose: '#df9d9a', sky: '#7dafe1', grape: '#b69bd6', ink: '#8a8a8a' };
+export function noteDot(theme: NoteTheme, customColor: string) {
+  return theme === 'custom' ? customColor : dots[theme] ?? dots.paper;
+}

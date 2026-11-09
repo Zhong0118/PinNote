@@ -12,9 +12,13 @@
     initialPosition?: {from:number;to:number;scroll:number};
     readonly?: boolean;
     onReminder?: () => void;
+    /** Called synchronously on every document change, before the text is serialized. */
+    onEdit?: () => void;
+    /** Serialization found nothing new: the last value covers every edit so far. */
+    onSettled?: () => void;
   };
 
-  let { value, onChange, initialPosition, readonly = false, onReminder }: Props = $props();
+  let { value, onChange, initialPosition, readonly = false, onReminder, onEdit, onSettled }: Props = $props();
   let taskInput=$state('');
   let showTaskInput=$state(false);
   let taskField=$state<HTMLInputElement>();
@@ -30,9 +34,17 @@
 
   export function flush() {
     if (!editorInstance || disposed || readonly) return;
+    clearTimeout(updateTimer);
     const markdown = perfTime('md.serialize', () => editorInstance.action((ctx: any) =>
       ctx.get(serializerCtxRef)(ctx.get(editorViewCtxRef).state.doc)));
     if (markdown !== value) onChange(markdown);
+    else onSettled?.();
+  }
+  /** Debounced save: waits for typing to pause and for an IME composition to finish. */
+  function flushWhenIdle() {
+    const composing = editorInstance?.action((ctx: any) => ctx.get(editorViewCtxRef).composing);
+    if (composing) { updateTimer = setTimeout(flushWhenIdle, 250); return; }
+    flush();
   }
   export function capture() {
     if(!editorInstance || disposed) return;
@@ -163,11 +175,13 @@
         .use(prosePlugin(() => new Plugin({
           view: () => ({
             update: (view, previous) => {
-              if (view.state.doc.eq(previous.doc)) return;
+              if (view.state.doc.eq(previous.doc) || readonly) return;
+              // Mark the draft at once (cheap), so nothing from outside can replace it.
+              onEdit?.();
               // Serializing the whole document is O(size): do it once typing pauses,
               // not on every keystroke. Explicit flush() calls still save immediately.
               clearTimeout(updateTimer);
-              updateTimer = setTimeout(flush, 250);
+              updateTimer = setTimeout(flushWhenIdle, 250);
             },
             destroy: () => clearTimeout(updateTimer),
           }),
@@ -214,7 +228,7 @@
   .editor-layout{position:relative;height:100%;min-height:0;display:flex;flex-direction:column}
   .quiet-task{position:absolute;z-index:2;top:4px;right:14px;display:inline-flex;align-items:center;gap:3px;border:0;border-radius:6px;padding:2px 7px;font:inherit;font-size:11px;color:var(--pin-muted,#737373);background:color-mix(in srgb,var(--pin-bg,#fff) 88%,transparent);cursor:pointer;opacity:0;transition:opacity 140ms}
   .editor-layout:hover .quiet-task,.quiet-task:focus-visible{opacity:.85}.quiet-task:hover{color:var(--pin-accent,#2563eb);opacity:1}
-  @media(prefers-reduced-motion:reduce){.quiet-task{transition:none}}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:6px;padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background 140ms,transform 140ms}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:7px;background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:#737373;font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
+  @media(prefers-reduced-motion:reduce){.quiet-task{transition:none}}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:6px;padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background 140ms,transform 140ms}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:7px;background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:var(--pin-muted,var(--muted));font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
   .milkdown-host {
     flex:1;
     min-height: 0;

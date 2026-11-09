@@ -84,6 +84,17 @@ export function detachedBounds(size: { width: number; height: number }, pointer:
   return fitBounds({ x, y: pointer.y - 18 * scale, ...size, scaleFactor: scale }, displays);
 }
 
+/** Where the normal window goes back to: the remembered frame when it is still usable,
+ * otherwise the fallback; either way moved fully onto an available display. */
+export function restoreFrame(normal: Bounds | undefined, fallback: Bounds, displays: Display[]): Bounds {
+  return fitBounds(validWindow(normal, displays) ? normal : fallback, displays);
+}
+
+/** A frame change during a drag that altered the size is a resize, which never snaps. */
+export function isResize(start: Bounds, now: Bounds) {
+  return Math.abs(start.width - now.width) > 1 || Math.abs(start.height - now.height) > 1;
+}
+
 /** A remembered normal-window frame is usable when it is big enough and mostly on a display. */
 export function validWindow(bounds: Partial<Bounds> | undefined, displays: Display[]): bounds is Bounds {
   if (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(v => Number.isFinite(v))) return false;

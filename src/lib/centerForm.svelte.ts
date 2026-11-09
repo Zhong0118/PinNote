@@ -7,16 +7,16 @@ import { getCurrentWindow, availableMonitors, LogicalPosition, LogicalSize, Phys
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { animateWindow, canAnimateWindow } from './nativeMotion';
 import { isMacPlatform } from './settings';
-import { displayFor, fitBounds, normalizeBounds, normalizeDisplays, type Bounds, type Display } from './windowGeometry';
+import { displayFor, normalizeBounds, normalizeDisplays, type Bounds, type Display } from './windowGeometry';
 import { edgeLayout } from './edgeQueue';
 import type { PinNote } from './notesStore';
-import { CENTER_WINDOW_MIN, barBounds, detachedBounds, dockAt, dockDisplay, handleBounds, migrateSession, nearestSide,
-  snapSide, validWindow, type CenterDock, type CenterMode, type CenterSide, type Range } from './centerLayout';
+import { CENTER_WINDOW_MIN, barBounds, detachedBounds, dockAt, dockDisplay, handleBounds, isResize, migrateSession, nearestSide,
+  restoreFrame, snapSide, validWindow, type CenterDock, type CenterMode, type CenterSide, type Range } from './centerLayout';
 
 const STORE = 'pinnote.center';
 const mac = isMacPlatform();
 type Pointer = { x: number; y: number };
-type DockAction = { action: 'expand' | 'new' | 'detach' | 'drag' | 'drop' | 'moved'; pointer?: Pointer };
+type DockAction = { action: 'expand' | 'new' | 'detach' | 'drag' | 'drop' | 'cancel' | 'moved'; pointer?: Pointer };
 
 export type CenterFormHost = {
   /** Save the open draft before the window changes form. */
@@ -96,13 +96,17 @@ export class CenterForm {
     await win.show();
     await this.#animate({ bounds: to, alpha: 1, duration: ms, curve: 'out' });
   }
-  /** Fade toward `side`, hide, then put the frame back where it was while hidden. */
-  async #hideFaded(normal: Bounds, toward: CenterSide | 'up') {
+  /**
+   * Fade a short way toward `side` from where the window is now (`from`, e.g. where a
+   * drag was released), hide, then park the hidden frame at `restore` for the next show.
+   * The exit motion never travels to the remembered frame.
+   */
+  async #hideFaded(from: Bounds, restore: Bounds, toward: CenterSide | 'up') {
     const win = getCurrentWindow();
-    if (canAnimateWindow()) await this.#animate({ bounds: this.#nudge(normal, toward), alpha: 0, duration: 170, curve: 'in' });
+    if (canAnimateWindow()) await this.#animate({ bounds: this.#nudge(from, toward), alpha: 0, duration: 170, curve: 'in' });
     await win.hide();
     if (mac) await this.#animate({ alpha: 1, duration: 0 });
-    await this.applyOuter(normal);
+    await this.applyOuter(restore);
   }
 
   // ---- the handle/strip proxy window ----
@@ -141,9 +145,16 @@ export class CenterForm {
   async #hideDock() { this.#dockKind = undefined; await (await WebviewWindow.getByLabel('center-dock'))?.hide(); }
   /** Re-place the handle after its display, work area or neighbouring tabs changed. */
   async relayoutHandle() {
-    if (this.mode !== 'handle' || this.#busy) return;
+    if (this.mode === 'window' || this.#busy) return;
+    const displays = await this.displays();
+    // The hidden normal frame follows display changes too, so a later show lands on screen.
+    if (this.normal && !validWindow(this.normal, displays)) {
+      this.normal = restoreFrame(this.normal, this.normal, displays);
+      await this.applyOuter(this.normal); this.save();
+    }
+    if (this.mode !== 'handle') return;
     const dock = await WebviewWindow.getByLabel('center-dock');
-    const b = await this.handleFrame();
+    const b = handleBounds(this.dock, displays, this.#tabRanges(displays));
     await dock?.setPosition(mac ? new LogicalPosition(b.x, b.y) : new PhysicalPosition(b.x, b.y));
   }
 
@@ -166,8 +177,11 @@ export class CenterForm {
       }
     } finally { this.#busy = false; this.save(); }
   }
-  /** Collapse straight to the edge handle. `pointer` comes from a drag that hit the edge. */
-  collapse(side?: CenterSide, pointer?: Pointer, normal?: Bounds) {
+  /**
+   * Collapse straight to the edge handle. `pointer` comes from a drag released at an edge;
+   * `normal` is the frame to come back to (the one before that drag); `dock` re-docks exactly.
+   */
+  collapse(side?: CenterSide, pointer?: Pointer, normal?: Bounds, dock?: CenterDock) {
     return this.#run(async () => {
       if (this.mode === 'handle' && side && side !== this.dock.side) {
         this.dock = { ...this.dock, side };
@@ -175,16 +189,17 @@ export class CenterForm {
         return;
       }
       if (this.mode !== 'window') return;
-      await this.host.persist();
+      // A failed save is shown in the editor and stays protected; the window still collapses.
+      await this.host.persist().catch(() => undefined);
       const current = (await this.readOuter()).bounds;
       const displays = await this.displays();
-      const keep = normal && validWindow(normal, displays) ? normal : current;
+      const keep = restoreFrame(normal, current, displays);
       this.normal = keep;
-      const nextSide = side ?? nearestSide(current, displayFor(current, displays) ?? displays[0]);
-      this.dock = pointer ? dockAt(pointer, nextSide, displays)
-        : { ...this.dock, side: nextSide, display: dockAt({ x: keep.x + keep.width * keep.scaleFactor / 2, y: keep.y }, nextSide, displays).display };
+      const nextSide = side ?? dock?.side ?? nearestSide(current, displayFor(current, displays) ?? displays[0]);
+      this.dock = dock ?? (pointer ? dockAt(pointer, nextSide, displays)
+        : { ...this.dock, side: nextSide, display: dockAt({ x: current.x + current.width * current.scaleFactor / 2, y: current.y }, nextSide, displays).display });
       await this.#showDock('handle', await this.handleFrame());
-      await this.#hideFaded(keep, nextSide);
+      await this.#hideFaded(current, keep, nextSide);
       this.mode = 'handle';
       this.host.status('已收起到边缘 · 点击把手恢复');
     });
@@ -192,11 +207,12 @@ export class CenterForm {
   collapseToBar() {
     return this.#run(async () => {
       if (this.mode !== 'window') return;
-      await this.host.persist();
+      await this.host.persist().catch(() => undefined);
       const current = (await this.readOuter()).bounds;
-      this.normal = current;
-      await this.#showDock('bar', barBounds(current, await this.displays()));
-      await this.#hideFaded(current, 'up');
+      const displays = await this.displays();
+      this.normal = restoreFrame(current, current, displays);
+      await this.#showDock('bar', barBounds(current, displays));
+      await this.#hideFaded(current, this.normal, 'up');
       this.mode = 'bar';
       this.host.status('已收起为条 · 点击条恢复');
     });
@@ -207,7 +223,9 @@ export class CenterForm {
       if (this.mode === 'window') { await getCurrentWindow().show(); await getCurrentWindow().setFocus(); return; }
       const from = this.mode;
       const displays = await this.displays();
-      const target = validWindow(this.normal, displays) ? fitBounds(this.normal, displays) : (await this.readOuter()).bounds;
+      // The remembered frame, or (if it was lost) the hidden one, always on an available display.
+      const target = restoreFrame(this.normal, (await this.readOuter()).bounds, displays);
+      this.normal = target;
       await getCurrentWindow().setMinSize(new LogicalSize(CENTER_WINDOW_MIN.width, CENTER_WINDOW_MIN.height));
       await this.#showFaded(target, this.#nudge(target, from === 'handle' ? this.dock.side : 'up'), 240);
       await this.#hideDock();
@@ -221,6 +239,10 @@ export class CenterForm {
     if (this.#busy || this.#detaching || this.mode === 'window') return;
     this.mode = 'window';
     if (mac) await animateWindow({ alpha: 1, duration: 0 }).catch(() => {});
+    // A display may have gone while hidden: pull the frame back onto one.
+    const displays = await this.displays();
+    const { bounds } = await this.readOuter();
+    if (!validWindow(bounds, displays)) await this.applyOuter(restoreFrame(this.normal, bounds, displays));
     await this.#hideDock(); this.save();
   }
   async setPinned(next: boolean) {
@@ -243,6 +265,7 @@ export class CenterForm {
     }
     if (action === 'detach' && pointer && this.mode === 'handle' && !this.#busy) {
       this.#busy = true;
+      this.#detachDock = this.dock;
       this.#detaching = (async () => {
         const displays = await this.displays();
         const size = this.normal ?? (await this.readOuter()).bounds;
@@ -256,27 +279,46 @@ export class CenterForm {
     }
     if (action === 'drag' && pointer && this.#detaching) {
       await this.#detaching;
+      const displays = await this.displays();
       const size = this.normal ?? (await this.readOuter()).bounds;
-      const target = detachedBounds({ width: size.width, height: size.height }, pointer, this.dock.side, await this.displays());
+      const target = detachedBounds({ width: size.width, height: size.height }, pointer, this.#detachDock?.side ?? this.dock.side, displays);
+      // The same gesture may carry the window to another edge or display: hint where it would dock.
+      this.snapHint = this.host.edgeSnap() ? snapSide(target, pointer, displays) : null;
       return this.applyOuter(target);
     }
     if (action === 'drop' && this.#detaching) {
       await this.#detaching;
       if (pointer) await this.dockAction({ action: 'drag', pointer });
-      this.#detaching = undefined; this.#busy = false;
-      // Drag-out uses the pointer's position with the remembered size.
+      const side = this.snapHint;
+      this.#detaching = undefined; this.#busy = false; this.snapHint = null;
+      if (side && this.mode === 'window') {
+        // Released at an edge (this one, the other one, or on another display): dock there.
+        // The frame to come back to stays the one from before the handle was pulled out.
+        return this.collapse(side, pointer, this.normal);
+      }
+      // Released in the open: a free window where it was dropped, remembered as normal.
       this.normal = (await this.readOuter()).bounds;
       await this.#hideDock();
       await getCurrentWindow().setFocus();
       this.save();
+      return;
+    }
+    if (action === 'cancel' && this.#detaching) {
+      // A cancelled pull (Escape, lost pointer) goes back to the handle it came from.
+      await this.#detaching;
+      const dock = this.#detachDock;
+      this.#detaching = undefined; this.#busy = false; this.snapHint = null;
+      return this.collapse(dock?.side, undefined, this.normal, dock);
     }
   }
+  #detachDock: CenterDock | undefined;
 
   // ---- user moves/resizes of the normal window ----
   /** Call from the window's moved/resized events. Programmatic changes are ignored. */
-  windowChanged() {
+  windowChanged(kind: 'moved' | 'resized' = 'moved') {
     if (this.mode !== 'window' || this.#busy || Date.now() < this.#programmaticUntil) return;
-    if (!this.#tracking && this.host.edgeSnap()) void this.#trackDrag();
+    // Only a move can be a drag toward an edge; a resize never snaps.
+    if (kind === 'moved' && !this.#tracking && this.host.edgeSnap()) void this.#trackDrag();
     clearTimeout(this.#rememberTimer);
     this.#rememberTimer = setTimeout(() => void this.#remember(), 200);
   }
@@ -291,18 +333,24 @@ export class CenterForm {
     if (!first.pressed) return;
     this.#tracking = true;
     const start = this.normal;
+    const startFrame = (await this.readOuter()).bounds;
     let side: CenterSide | null = null;
     let pointer: Pointer | undefined;
+    let resizing = false;
     try {
       for (;;) {
         const state = await invoke<{ pressed: boolean; x?: number; y?: number }>('pointer_state');
         if (state.x != null && state.y != null) pointer = { x: state.x, y: state.y };
         if (!state.pressed) break;
-        side = snapSide((await this.readOuter()).bounds, pointer, await this.displays());
+        const frame = (await this.readOuter()).bounds;
+        // Dragging a border at the screen edge changes the size: that is a resize, not a snap.
+        resizing ||= isResize(startFrame, frame);
+        side = resizing || this.mode !== 'window' || Date.now() < this.#programmaticUntil ? null : snapSide(frame, pointer, await this.displays());
         this.snapHint = side;
         await new Promise(r => setTimeout(r, 50));
       }
     } finally { this.#tracking = false; this.snapHint = null; }
+    // Collapse from where it was released; the frame from before the drag is the one to come back to.
     if (side && this.mode === 'window') await this.collapse(side, pointer, start);
     else void this.#remember();
   }

@@ -452,7 +452,10 @@ pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
     });
     let _ = app.emit(
         "notes-changed",
-        json!({"id":request["id"],"note":note,"op":request["op"],"layout":layout}),
+        // `by` names the window whose save this is, so it can tell its own echo
+        // from someone else's change to a note it still has unsaved input in.
+        json!({"id":request["id"],"note":note,"op":request["op"],"layout":layout,
+               "source":request["source"],"by":request["owner"]}),
     );
     Ok(note)
 }
