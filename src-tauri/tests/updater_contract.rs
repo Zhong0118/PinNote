@@ -38,6 +38,9 @@ impl Server {
                     thread::sleep(Duration::from_millis(5));
                     continue;
                 };
+                // On macOS an accepted socket inherits the listener's non-blocking mode; a read
+                // racing the request would then see nothing and serve the wrong body.
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
