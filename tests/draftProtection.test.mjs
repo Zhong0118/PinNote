@@ -199,3 +199,25 @@ test('serialization that finds nothing new releases the draft flag', async () =>
   assert.equal(store.hasLocalEdits('a'), false);
   assert.ok(!backend.drafts.has('a'));
 });
+
+test('a late archive or trash with the same text still protects typing that was not serialized yet', async () => {
+  for (const lifecycle of ['archived', 'trashed']) {
+    const { store, backend } = setup();
+    const open = (await store.loadNotes()).notes.a;
+    store.markEdited('a'); // typed, still inside the 250 ms serialization window
+    // Another window archives/trashes the note: same title and text, new lifecycle.
+    const n = backend.notes.a; n.lifecycle = lifecycle; n.revision++;
+    const change = { id: 'a', op: lifecycle === 'archived' ? 'archive' : 'trash', by: 'note-a', note: structuredClone(n) };
+    const mine = { ...local(open), lifecycle: 'active', placement: 'center' };
+    assert.equal(store.classifyChange(change, mine), 'conflict', `${lifecycle} must not drop the input`);
+    const { copy } = await store.takeRemoteVersion('a', { title: 'a', content: 'base typed more' });
+    assert.equal(backend.notes[copy.id].content, 'base typed more', 'the input survives as a new note');
+    assert.equal(backend.notes[copy.id].lifecycle, 'active');
+    assert.equal(store.hasLocalEdits('a'), false);
+  }
+  // Without local input the same event simply applies.
+  const { store, backend } = setup();
+  const open = (await store.loadNotes()).notes.a;
+  const n = backend.notes.a; n.lifecycle = 'archived'; n.revision++;
+  assert.equal(store.classifyChange({ id: 'a', op: 'archive', by: 'note-a', note: structuredClone(n) }, { ...local(open), lifecycle: 'active', placement: 'center' }), 'apply');
+});

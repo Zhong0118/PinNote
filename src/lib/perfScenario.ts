@@ -88,7 +88,7 @@ export async function runWindowCheck(form: FormLike) {
 }
 
 /** Debug-only visual tour (PINNOTE_UI_TOUR): steps through states so each can be captured. */
-export async function runTour(hooks: { openSettings: () => Promise<void>; closeSettings: () => void; form: FormLike; select: (id: string) => Promise<void> }) {
+export async function runTour(hooks: { openSettings: () => Promise<void>; closeSettings: () => void; form: FormLike; select: (id: string) => Promise<void>; reminder?: (open: boolean) => void }) {
   const { emit } = await import('@tauri-apps/api/event');
   const { appearance } = await import('./theme');
   const base = appearance();
@@ -103,6 +103,7 @@ export async function runTour(hooks: { openSettings: () => Promise<void>; closeS
   await emit('appearance-preview', { ...base, theme: 'dark' }); await step('settings-dark');
   hooks.closeSettings(); await step('center-dark');
   if (capsule) { await emitTo(`note-${capsule.id}`, 'perf-hover', { inside: true }); await wait(1200); await step('preview-dark'); await emitTo(`note-${capsule.id}`, 'perf-hover', { inside: false }); await wait(600); }
+  if (hooks.reminder) { hooks.reminder(true); await step('reminder-dark'); hooks.reminder(false); await wait(400); }
   await hooks.form.collapse('right'); await step('handle-dark');
   await hooks.form.expand(); await wait(800);
   await emit('appearance-preview', base); await step('restored-light');

@@ -124,14 +124,14 @@
     await refresh();
   }
   /** Conflict: load the other version; a differing draft is kept as a new note. */
-  async function takeTheirs() {
+  async function takeTheirs(reason='已载入新版本') {
     if(!draft) return; editor?.flush();
     const {remote,copy}=await takeRemoteVersion(draft.id,{title:draft.title,content:draft.content});
     if(!remote) return;
     conflict=false; saveError=''; draft=structuredClone(remote); revision++;
     await refresh();
     if(copy&&!tabs.includes(copy.id)) tabs=[...tabs,copy.id];
-    status=copy?`已载入新版本 · 你的草稿另存为「${copy.title}」`:'已载入新版本';
+    status=copy?`${reason} · 你的草稿另存为「${copy.title}」`:reason;
   }
   async function retrySave() {
     if(!draft) return; editor?.flush();
@@ -307,7 +307,7 @@
       const perf=await perfConfig();
       if(perf.scenario) void import('$lib/perfScenario').then(m=>m.runScenario({select:id=>run(()=>select(id))}));
       if(perf.check) void import('$lib/perfScenario').then(m=>m.runWindowCheck(form));
-      if(perf.tour) void import('$lib/perfScenario').then(m=>m.runTour({openSettings,closeSettings:()=>settingsOpen=false,form,select:id=>run(()=>select(id))}));
+      if(perf.tour) void import('$lib/perfScenario').then(m=>m.runTour({openSettings,closeSettings:()=>settingsOpen=false,form,select:id=>run(()=>select(id)),reminder:open=>reminderOpen=open}));
     })().catch(e=>{status=String(e); void getCurrentWindow().show();});
     const changes=listen<NoteChange>('notes-changed',async({payload})=>{
       // Apply just this note's change; no full reload and no unrelated editor flush.
@@ -324,8 +324,13 @@
       // Delivery only marks the reminder; it keeps the revision.
       if(payload.op==='reminder') draft={...draft,reminder:n.reminder};
       // Unsaved input (even not yet serialized) is never replaced by a change from elsewhere.
-      const verdict=classifyChange(payload,{label:'main',revision:draft.revision,title:draft.title,content:draft.content});
-      if(verdict==='conflict'){conflict=true;status='这张便签刚在别处被修改，你的草稿已保留';return;}
+      const verdict=classifyChange(payload,{label:'main',revision:draft.revision,title:draft.title,content:draft.content,lifecycle:draft.lifecycle,placement:draft.placement});
+      if(verdict==='conflict'){
+        // Archived, trashed or moved elsewhere: this note can no longer take the draft,
+        // so the unsaved input is kept as a new note before the change is shown.
+        if(n.lifecycle!==draft.lifecycle||n.placement!==draft.placement){void takeTheirs('这张便签已在别处变更').catch(e=>{conflict=true;status=`草稿另存失败：${errorText(e)}`;});return;}
+        conflict=true;status='这张便签刚在别处被修改，你的草稿已保留';return;
+      }
       if(verdict==='apply'){
         // Same text (an echo, or only placement/lifecycle changed) keeps the editor as is.
         const changed=draft.content!==n.content || draft.placement!==n.placement || draft.lifecycle!==n.lifecycle;
@@ -460,7 +465,7 @@
       </div>
       {#if editable}
         <div class="editor-area">
-          <DraftBanner {conflict} error={saveError} busy={busy} onKeepMine={()=>run(keepMine)} onTakeTheirs={()=>run(takeTheirs)} onRetry={()=>run(retrySave)}/>
+          <DraftBanner {conflict} error={saveError} busy={busy} onKeepMine={()=>run(keepMine)} onTakeTheirs={()=>run(()=>takeTheirs())} onRetry={()=>run(retrySave)}/>
           {#key `${selected}:${revision}`}<MilkdownEditor bind:this={editor} value={draft.content} onChange={content=>update({content})} onEdit={()=>markEdited(selected)} onSettled={()=>markSettled(selected)} initialPosition={positions.get(selected)} onReminder={()=>reminderOpen=true}/>{/key}
         </div>
       {:else}

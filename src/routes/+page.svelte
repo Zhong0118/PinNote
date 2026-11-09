@@ -212,7 +212,13 @@
         if(payload.op==='appearance'&&payload.note){const {theme,customColor,opacity,alwaysOnTop}=payload.note;note={...note,theme,customColor,opacity,alwaysOnTop};return;}
         if (!payload.note || payload.note.lifecycle !== 'active' || payload.note.placement !== 'desktop') {
           editor?.flush();
-          if(hasLocalEdits(note.id)) { status='便签状态已变化，本地草稿已保留，请先导出';return; }
+          // Archived, trashed or taken back elsewhere while typing: the note can no longer take
+          // this input, so it is kept as a new center note before the window goes away.
+          if(hasLocalEdits(note.id) && !payload.note) { status='便签已被删除，本地草稿仍在这里，请先复制内容';return; }
+          if(hasLocalEdits(note.id) && payload.note && classifyChange(payload, { label: win.label, revision: note.revision, title: note.title, content: note.content, lifecycle: note.lifecycle, placement: note.placement }) === 'conflict') {
+            try { await takeRemoteVersion(note.id, { title: note.title, content: note.content }); }
+            catch (error) { conflict = true; status = `草稿另存失败：${errorText(error)}`; return; }
+          }
           discardPendingSave(note.id); ready = false; isDeleting = true; await win.destroy();
         } else if (payload.op !== 'window') {
           // Delivery only marks the reminder; it keeps the revision.

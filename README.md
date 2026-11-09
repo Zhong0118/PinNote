@@ -4,33 +4,33 @@
 
 **便签中心负责查找和整理，独立便签负责随手编辑，边缘胶囊负责随时查看。三种形态共享同一张便签。**
 
-当前版本 **1.3.0** · [下载安装包](https://github.com/Zhong0118/PinNote/releases/latest) · [1.3.0 更新说明](RELEASE_NOTES.md)
+当前版本 **1.3.1** · [下载安装包](https://github.com/Zhong0118/PinNote/releases/latest) · [1.3.1 更新说明](RELEASE_NOTES.md)
 
 ## 界面
 
-便签中心：搜索、工作 Tab、背景颜色与正文待办；标题栏右侧为置顶、收起到边缘和窗口选项。
+便签中心：搜索、工作 Tab、正文待办与代码；标题栏右侧为置顶、收起到边缘和窗口选项。
 
-<img src="image/center-1.3.png" alt="PinNote 1.3 便签中心，浅色主题，便签包含 Markdown 标题、任务清单和代码" width="800" />
+<img src="image/center-1.3.1.png" alt="PinNote 1.3.1 便签中心原生截图，浅色主题，长便签包含标题、任务清单和代码块" width="800" />
 
-深色主题下便签颜色作为底色调保留：
+深色主题与提醒：快捷时间和自定义日期、时间，实心按钮在深色下使用深色文字。
 
-<img src="image/center-dark-1.3.png" alt="PinNote 1.3 便签中心深色主题，薄荷色便签" width="800" />
+<img src="image/reminder-dark-1.3.1.png" alt="PinNote 1.3.1 深色主题下的提醒设置" width="800" />
 
 设置在中心窗口内打开：
 
-<img src="image/settings-1.3.png" alt="PinNote 1.3 中心内的设置视图，外观分类：主题、阴影与减少动态" width="800" />
+<img src="image/settings-1.3.1.png" alt="PinNote 1.3.1 中心内的设置视图，外观分类：主题、阴影与减少动态" width="800" />
 
-轻量提醒：快捷时间和自定义日期、时间。
+收起后的胶囊与悬停预览：
 
-<img src="image/reminder-1.2.png" alt="PinNote 1.2 提醒设置，支持 30 分钟后、1 小时后和自定义时间" width="1040" />
+<img src="image/capsule-1.3.1.png" alt="180×40 胶囊：颜色、标题、置顶和展开" width="180" />
 
-独立便签与收起后的胶囊：
+<img src="image/preview-1.3.1.png" alt="悬停预览卡片：标题、去掉 Markdown 符号的摘要、清单进度和打开编辑" width="320" />
+
+独立便签：
 
 <img src="image/note-1.3.png" alt="独立 Markdown 便签，标题栏为颜色圆点、标题、置顶、收起和更多菜单" width="420" />
 
-<img src="image/capsule-1.3.png" alt="180×40 胶囊：颜色、标题、置顶和展开" width="180" />
-
-以上截图来自实际 Svelte / Milkdown 界面，使用示例内容与模拟系统接口，不含个人便签；截图不代表原生多屏或通知验收。
+除独立便签一张外，以上截图均为 macOS 原生应用按窗口单独截取（1.3.1 构建，隔离的示例数据，不含个人便签）；独立便签截图沿用 1.3 的界面预览（模拟系统接口）。截图不代表多屏、拖动帧率或通知的实机验收。
 
 ## 1.3 更新
 
@@ -179,7 +179,7 @@ pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --loc
 
 ## 验证范围
 
-1.3.0 本地通过：86 项 Node 测试、23 项 Rust 单元测试和 1 项更新器集成测试、Svelte 类型检查、clippy、前端构建与 macOS debug 构建；1.3 尚未重新执行 release 打包。原生 macOS 上用调试场景验证了中心收起／展开、把手贴边与换边、把手位置记忆、拉出与快速连续操作。1.2.0 时的浏览器回归与 MCP 实际连接验收结论仍然适用。浏览器回归覆盖工作台预览、颜色、待办、提醒、保存失败与窗口操作路径。隔离原生应用的 MCP 实际连接验证了备份迁移、读写权限、冲突、恢复与后台提醒处理。
+1.3.1 本地通过：107 项 Node 测试（含迟到归档／回收站保护草稿、松手／取消后的旧拖动步骤、保存失败不收起三项回归）、23 项 Rust 单元测试和 1 项更新器集成测试、Svelte 类型检查、clippy、前端构建、macOS release 与 debug 构建。原生 macOS 上用调试场景验证了中心收起／展开、把手贴边与换边、把手位置记忆、拉出与快速连续操作，并以 release 构建在相同状态下对比了空闲资源（见 DEVELOPMENT.md）。1.2.0 时的浏览器回归与 MCP 实际连接验收结论仍然适用。浏览器回归覆盖工作台预览、颜色、待办、提醒、保存失败与窗口操作路径。隔离原生应用的 MCP 实际连接验证了备份迁移、读写权限、冲突、恢复与后台提醒处理。
 
 原生 Windows 桌面交互、真实鼠标拖动吸附与把手拉出、原生颜色菜单、混合 DPI 多屏拖动和热拔插、中文输入法连续组词、预览焦点连续性、帧率、各窗口的深色外观及系统通知实际展示仍需实机验收。自动化几何测试和模拟 IPC 不替代这些检查。
 

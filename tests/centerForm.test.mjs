@@ -38,7 +38,7 @@ export const getCurrentWindow = () => ({
   setPosition: async (p) => { n().frame.x = p.x; n().frame.y = p.y; },
   setSize: async () => {},
 });
-export const availableMonitors = async () => n().monitors.map(m => ({ ...m, position: m.workArea.position, size: m.workArea.size }));
+export const availableMonitors = async () => { if (n().displayDelay) await n().displayDelay(); return n().monitors.map(m => ({ ...m, position: m.workArea.position, size: m.workArea.size })); };
 const dock = { setAlwaysOnTop: async () => {}, setSize: async () => {}, show: async () => { n().dockVisible = true; },
   hide: async () => { n().dockVisible = false; }, setPosition: async (p) => { n().dock = { x: p.x, y: p.y }; } };
 export class WebviewWindow { static async getByLabel() { return dock; } }`);
@@ -49,7 +49,7 @@ const { CenterForm } = await import(pathToFileURL(`${out}/centerForm.mjs`).href)
 
 const work = { position: { x: 0, y: 25 }, size: { width: 1512, height: 957 } };
 const second = { position: { x: 1512, y: 0 }, size: { width: 1920, height: 1080 } };
-function setup({ monitors = [work] } = {}) {
+function setup({ monitors = [work], persist = async () => {} } = {}) {
   const store = new Map();
   globalThis.localStorage = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
   const native = globalThis.native = {
@@ -58,7 +58,7 @@ function setup({ monitors = [work] } = {}) {
     press: [], pointer: async () => native.press.shift() ?? { pressed: false },
   };
   const statuses = [];
-  const form = new CenterForm({ persist: async () => {}, notes: () => [], title: () => '', status: s => statuses.push(s), edgeSnap: () => true });
+  const form = new CenterForm({ persist, notes: () => [], title: () => '', status: s => statuses.push(s), edgeSnap: () => true });
   form.normal = { x: 300, y: 200, width: 900, height: 600, scaleFactor: 1 };
   return { form, native, statuses };
 }
@@ -163,4 +163,38 @@ test('rapid collapse/expand requests settle on the last intent', async () => {
   const a = form.collapse('right'); const b = form.expand(); const c = form.collapse('left'); const d = form.expand();
   await Promise.all([a, b, c, d]);
   assert.equal(form.mode, 'window');
+});
+
+test('a delayed drag step from a released or cancelled pull-out never moves the window afterwards', async () => {
+  for (const end of ['drop', 'cancel']) {
+    const { form, native } = setup();
+    await form.collapse('right');
+    await form.dockAction({ action: 'detach', pointer: { x: 1400, y: 500 } });
+    // The next drag step stalls while measuring displays (a slow IPC round trip).
+    let resume; native.displayDelay = () => new Promise(r => { resume = r; });
+    const stale = form.dockAction({ action: 'drag', pointer: { x: 4, y: 300 } });
+    await tick();
+    native.displayDelay = undefined;
+    await form.dockAction(end === 'drop' ? { action: 'drop', pointer: { x: 900, y: 400 } } : { action: 'cancel' });
+    await tick();
+    const settled = { mode: form.mode, frame: { ...native.frame }, side: form.dock.side };
+    resume(); await stale; await tick();
+    assert.deepEqual({ mode: form.mode, frame: { ...native.frame }, side: form.dock.side }, settled, `${end}: the late step changed nothing`);
+    assert.equal(form.snapHint, null, `${end}: no edge hint left behind`);
+    if (end === 'drop') assert.equal(form.mode, 'window', 'dropped in the open, not snapped to the stale left edge');
+  }
+});
+
+test('collapsing waits for the draft to save; a failed save keeps the center expanded', async () => {
+  let fail = true;
+  const { form, native, statuses } = setup({ persist: async () => { if (fail) throw new Error('磁盘已满'); } });
+  await form.collapse('right');
+  assert.equal(form.mode, 'window');
+  assert.equal(native.visible, true);
+  assert.match(statuses.at(-1), /未保存/);
+  await form.collapseToBar();
+  assert.equal(form.mode, 'window', 'the bar is refused too');
+  fail = false; // retry succeeds
+  await form.collapse('right');
+  assert.equal(form.mode, 'handle');
 });

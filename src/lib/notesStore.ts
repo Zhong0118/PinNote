@@ -117,17 +117,24 @@ const metadataOps = new Set(['focus', 'window', 'appearance']);
  * How an open editor should treat a change to its note.
  * - `ignore`: stale, or the echo of this window's own save.
  * - `apply`: nothing local to lose (or only metadata changed); take it.
- * - `conflict`: someone else changed the text while this window holds unsaved input.
+ * - `conflict`: someone else changed the text, or archived/trashed/moved the note, while this
+ *   window holds unsaved input.
  *   The local draft is kept and the remote version is remembered for the user to choose.
  */
-export function classifyChange(change: NoteChange, local: { label: string; revision: number; title: string; content: string }): 'ignore' | 'apply' | 'conflict' {
+export function classifyChange(change: NoteChange, local: { label: string; revision: number; title: string; content: string; lifecycle?: string; placement?: string }): 'ignore' | 'apply' | 'conflict' {
   const remote = change.note;
   if (!remote || metadataOps.has(change.op)) return 'apply';
   // The editor's copy can lag behind this window's own confirmed saves.
   if (remote.revision <= Math.max(local.revision, revisions.get(change.id) ?? 0)) return 'ignore';
-  if (change.by === local.label && change.op === 'save') return 'ignore';
-  if (remote.content === local.content && remote.title === local.title) { adoptRevision(change.id, remote.revision); return 'apply'; }
-  if (!hasLocalEdits(change.id)) { adoptRevision(change.id, remote.revision); return 'apply'; }
+  if (change.by === local.label) {
+    if (change.op === 'save') return 'ignore';
+    adoptRevision(change.id, remote.revision); return 'apply'; // this window's own action
+  }
+  // Archive/trash/handoff keep the text but end editing here, so they need the same
+  // protection as a text change: unsaved input must not be dropped with the editor.
+  const sameText = remote.content === local.content && remote.title === local.title;
+  const sameState = (local.lifecycle ?? remote.lifecycle) === remote.lifecycle && (local.placement ?? remote.placement) === remote.placement;
+  if (!hasLocalEdits(change.id) || (sameText && sameState)) { adoptRevision(change.id, remote.revision); return 'apply'; }
   setConflict(change.id, remote);
   return 'conflict';
 }

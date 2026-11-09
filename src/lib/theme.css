@@ -16,6 +16,8 @@
   --hover-strong: #00000012;
   --accent: #2563eb;
   --accent-strong: #1d4ed8;
+  /* Text on a solid accent fill. */
+  --on-accent: #ffffff;
   --accent-soft: #eff6ff;
   --accent-soft-strong: #dbeafe;
   --danger: #dc2626;
@@ -53,6 +55,8 @@
   --hover-strong: #ffffff1a;
   --accent: #6b98ff;
   --accent-strong: #8fb1ff;
+  /* The dark accent is light: white on it falls below 3:1, so solid fills take dark text. */
+  --on-accent: #0b1530;
   --accent-soft: #3b82f624;
   --accent-soft-strong: #3b82f63d;
   --danger: #f87171;

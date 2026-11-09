@@ -232,7 +232,7 @@
   .note-window.locating { animation: locate-glow 600ms ease-in-out 3; }
   @keyframes locate-glow { 50% { box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--pin-accent) 45%, transparent); } }
   .edge-indicator, .locate-indicator { position: absolute; z-index: 130; top: 46px; left: 50%; transform: translateX(-50%); padding: 4px 10px; border-radius: var(--radius); font-size: 11px; white-space: nowrap; pointer-events: none;
-    color: #fff; background: var(--accent); box-shadow: 0 4px 12px #0000001f; }
+    color: var(--on-accent); background: var(--accent); box-shadow: 0 4px 12px #0000001f; }
   .collapsed .locate-indicator { display: none; }
 
   /* ---- Title bar: colour · title · pin · collapse · more ---- */

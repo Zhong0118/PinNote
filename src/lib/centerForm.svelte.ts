@@ -189,8 +189,7 @@ export class CenterForm {
         return;
       }
       if (this.mode !== 'window') return;
-      // A failed save is shown in the editor and stays protected; the window still collapses.
-      await this.host.persist().catch(() => undefined);
+      if (!await this.#saved()) return;
       const current = (await this.readOuter()).bounds;
       const displays = await this.displays();
       const keep = restoreFrame(normal, current, displays);
@@ -207,7 +206,7 @@ export class CenterForm {
   collapseToBar() {
     return this.#run(async () => {
       if (this.mode !== 'window') return;
-      await this.host.persist().catch(() => undefined);
+      if (!await this.#saved()) return;
       const current = (await this.readOuter()).bounds;
       const displays = await this.displays();
       this.normal = restoreFrame(current, current, displays);
@@ -216,6 +215,18 @@ export class CenterForm {
       this.mode = 'bar';
       this.host.status('已收起为条 · 点击条恢复');
     });
+  }
+  /**
+   * The open draft must be saved before the window hides: a failed save or an open version
+   * conflict keeps the center expanded, so its banner and retry stay in view.
+   */
+  async #saved() {
+    try { await this.host.persist(); return true; }
+    catch (error) {
+      await this.#hideDock();
+      this.host.status(String((error as Error)?.message ?? error).startsWith('VERSION_CONFLICT') ? '先处理版本冲突，再收起' : '草稿未保存，便签中心保持展开 · 重试后再收起');
+      return false;
+    }
   }
   /** Restore the remembered normal frame from the handle or strip. */
   expand() {
@@ -265,6 +276,7 @@ export class CenterForm {
     }
     if (action === 'detach' && pointer && this.mode === 'handle' && !this.#busy) {
       this.#busy = true;
+      this.#gesture++;
       this.#detachDock = this.dock;
       this.#detaching = (async () => {
         const displays = await this.displays();
@@ -278,17 +290,16 @@ export class CenterForm {
       return;
     }
     if (action === 'drag' && pointer && this.#detaching) {
+      const gesture = this.#gesture;
       await this.#detaching;
-      const displays = await this.displays();
-      const size = this.normal ?? (await this.readOuter()).bounds;
-      const target = detachedBounds({ width: size.width, height: size.height }, pointer, this.#detachDock?.side ?? this.dock.side, displays);
-      // The same gesture may carry the window to another edge or display: hint where it would dock.
-      this.snapHint = this.host.edgeSnap() ? snapSide(target, pointer, displays) : null;
-      return this.applyOuter(target);
+      return this.#dragTo(pointer, gesture);
     }
     if (action === 'drop' && this.#detaching) {
       await this.#detaching;
-      if (pointer) await this.dockAction({ action: 'drag', pointer });
+      // Release ends the gesture: drag steps still in flight must not move the window after it.
+      const gesture = ++this.#gesture;
+      if (pointer) await this.#dragTo(pointer, gesture);
+      await this.#moves;
       const side = this.snapHint;
       this.#detaching = undefined; this.#busy = false; this.snapHint = null;
       if (side && this.mode === 'window') {
@@ -306,12 +317,30 @@ export class CenterForm {
     if (action === 'cancel' && this.#detaching) {
       // A cancelled pull (Escape, lost pointer) goes back to the handle it came from.
       await this.#detaching;
+      this.#gesture++;
+      await this.#moves;
       const dock = this.#detachDock;
       this.#detaching = undefined; this.#busy = false; this.snapHint = null;
       return this.collapse(dock?.side, undefined, this.normal, dock);
     }
   }
   #detachDock: CenterDock | undefined;
+  /** Bumped on detach, drop and cancel: a drag step from an ended gesture is dropped. */
+  #gesture = 0;
+  /** Window moves of a pull-out, applied strictly in order. */
+  #moves: Promise<unknown> = Promise.resolve();
+  async #dragTo(pointer: Pointer, gesture: number) {
+    if (gesture !== this.#gesture) return;
+    const displays = await this.displays();
+    const size = this.normal ?? (await this.readOuter()).bounds;
+    if (gesture !== this.#gesture) return; // released or cancelled while measuring
+    const target = detachedBounds({ width: size.width, height: size.height }, pointer, this.#detachDock?.side ?? this.dock.side, displays);
+    // The same gesture may carry the window to another edge or display: hint where it would dock.
+    this.snapHint = this.host.edgeSnap() ? snapSide(target, pointer, displays) : null;
+    const move = this.#moves.then(() => gesture === this.#gesture ? this.applyOuter(target) : undefined);
+    this.#moves = move.catch(() => undefined);
+    return move;
+  }
 
   // ---- user moves/resizes of the normal window ----
   /** Call from the window's moved/resized events. Programmatic changes are ignored. */
