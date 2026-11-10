@@ -30,7 +30,7 @@
 {#if note}{#key note.seq}
 <main class="from-{note.side}" class:leaving onpointerenter={enter} onpointerleave={leave}>
   <strong>{note.title || '未命名便签'}</strong>
-  <p>{note.excerpt || '空白便签'}</p>
+  <p>{note.excerpt || '暂无可显示的摘要'}</p>
   <footer>
     {#if note.total}<small>清单 {note.done}/{note.total}</small>{/if}
     {#if note.reminderAt}<small>{shortTime(note.reminderAt)}</small>{/if}

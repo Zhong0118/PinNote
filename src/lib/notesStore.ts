@@ -170,9 +170,10 @@ export function takeRemoteVersion(id: string, local: DraftText | (() => DraftTex
       const text = read();                 // the caller flushes its editor here
       const gen = editState(id).gen;       // edits up to now are in `text`
       const base = copy ?? first;
-      if (text.content !== base.content || (!copy && text.title !== first.title)) {
-        if (copy) copy.content = text.content;
-        else copy = createNote({ title: `${text.title || '未命名便签'}（我的草稿）`, content: text.content, placement: 'center', theme: first.theme, customColor: first.customColor });
+      const title = `${text.title.trim() || '未命名便签'}（我的草稿）`;
+      if (text.content !== base.content || (copy ? title !== copy.title : text.title !== first.title)) {
+        if (copy) { copy.content = text.content; copy.title = title; }
+        else copy = createNote({ title, content: text.content, placement: 'center', theme: first.theme, customColor: first.customColor });
         await saveNoteNow(copy);
       }
       if (editState(id).gen === gen) break; // nothing typed while the copy was saved

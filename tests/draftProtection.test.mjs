@@ -249,3 +249,26 @@ test('input typed while the draft copy is being written goes into that copy befo
     assert.equal(backend.notes.a.content, 'base', 'the archived note itself is untouched');
   }
 });
+
+for (const contentChanges of [false, true]) {
+  test(`title changed during draft copy is saved${contentChanges ? ' with new content' : ' on its own'}`, async () => {
+    const { store, backend } = setup();
+    const open = (await store.loadNotes()).notes.a;
+    let text = { title: '今日计划', content: 'my draft' };
+    store.markEdited('a');
+    const n = backend.notes.a; n.lifecycle = 'archived'; n.revision++;
+    store.classifyChange({ id: 'a', op: 'archive', note: structuredClone(n) }, { ...local(open), lifecycle: 'active' });
+    const hold = backend.holdNextWrite();
+    const taking = store.takeRemoteVersion('a', () => text);
+    await hold.begun;
+    text = { title: '本周计划', content: contentChanges ? 'new draft' : 'my draft' };
+    store.markEdited('a');
+    store.scheduleNoteSave({ ...open, ...text });
+    hold.release();
+    const { copy } = await taking;
+    assert.equal(backend.notes[copy.id].title, '本周计划（我的草稿）');
+    assert.equal(backend.notes[copy.id].content, text.content);
+    assert.equal(backend.notes.a.title, 'a');
+    assert.equal(store.hasLocalEdits('a'), false);
+  });
+}

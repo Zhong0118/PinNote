@@ -415,7 +415,7 @@
         {#each visible as note(note.id)}
           {@const info=summary(note)}{@const tasks=info.tasks}
           <button animate:shift class="note-row" class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})} draggable="true" ondragstart={e=>e.dataTransfer?.setData('text/pinnote',note.id)}>
-             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={13}/>{/if}</span><small>{info.excerpt||'空白便签'}</small>
+             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={13}/>{/if}</span><small>{info.excerpt||(note.content.trim() ? '打开查看内容' : '暂无正文')}</small>
              {#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}
           </button>
         {:else}<p class="empty">{query?'没有匹配的便签':'这里还没有便签'}</p>{/each}
@@ -428,7 +428,7 @@
       <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region>
         {#each tabs as id(id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="tab" class:current={selected===id} animate:shift draggable="true" ondragstart={()=>dragTab=id} ondragover={e=>e.preventDefault()} ondrop={()=>reorder(id)}>
+          <div class="tab" class:current={selected===id} animate:shift draggable="true" ondragstart={e=>{dragTab=id;e.dataTransfer?.setData('text/pinnote-tab',id);}} ondragend={()=>dragTab=''} ondragover={e=>e.preventDefault()} ondrop={e=>{e.preventDefault();if(e.dataTransfer?.getData('text/pinnote-tab')===dragTab)reorder(id);dragTab='';}}>
             <button class="tab-title" title={notes.find(n=>n.id===id)?.title||'未命名便签'} onclick={()=>run(()=>select(id))}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</button><button class="tab-close" aria-label="关闭 Tab" onclick={()=>run(()=>closeTab(id))}><X size={13}/></button>
           </div>
         {/each}
