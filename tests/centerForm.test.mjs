@@ -198,3 +198,19 @@ test('collapsing waits for the draft to save; a failed save keeps the center exp
   await form.collapse('right');
   assert.equal(form.mode, 'handle');
 });
+
+for (const finishAtEdge of [false, true]) {
+ test(`snap follows final pointer release ${finishAtEdge ? 'at' : 'away from'} edge`, async () => {
+  const {form,native}=setup();
+  let step=0;
+  native.pointer=async()=>{
+   const released=++step>=3;
+   const edge=released?finishAtEdge:!finishAtEdge;
+   native.frame.x=edge?652:300;
+   return {pressed:!released,x:edge?1510:700,y:440};
+  };
+  form.windowChanged('moved');
+  await new Promise(r=>setTimeout(r,250));
+  assert.equal(form.mode,finishAtEdge?'handle':'window');
+ });
+}

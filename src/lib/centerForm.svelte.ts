@@ -370,12 +370,12 @@ export class CenterForm {
       for (;;) {
         const state = await invoke<{ pressed: boolean; x?: number; y?: number }>('pointer_state');
         if (state.x != null && state.y != null) pointer = { x: state.x, y: state.y };
-        if (!state.pressed) break;
         const frame = (await this.readOuter()).bounds;
         // Dragging a border at the screen edge changes the size: that is a resize, not a snap.
         resizing ||= isResize(startFrame, frame);
         side = resizing || this.mode !== 'window' || Date.now() < this.#programmaticUntil ? null : snapSide(frame, pointer, await this.displays());
         this.snapHint = side;
+        if (!state.pressed) break;
         await new Promise(r => setTimeout(r, 50));
       }
     } finally { this.#tracking = false; this.snapHint = null; }
