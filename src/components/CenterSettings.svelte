@@ -7,7 +7,11 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
-  import { ArrowLeft, Palette, AppWindow, Keyboard, Plug, Database, Check, RotateCcw, FolderOpen, Copy, RefreshCw, Download } from 'lucide-svelte';
+  import { ArrowLeft, Palette, AppWindow, Keyboard, Plug, Database, Check, RotateCcw, FolderOpen, Copy, RefreshCw, Download, ArchiveRestore, HardDriveDownload, FolderDown } from 'lucide-svelte';
+  import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { loadNotes } from '$lib/notesStore';
+  import { shortTime } from '$lib/excerpt';
+  import { exportFiles, exportFolderName } from '$lib/library';
   import IntegrationSettings from './IntegrationSettings.svelte';
   import { noteColors } from '$lib/noteAppearance';
   import { applyAppearance } from '$lib/theme';
@@ -40,6 +44,43 @@
   let updateStatus = $state('');
   let version = $state('');
   let opacityPreview = $state<number>();
+  type Backup = { name: string; at: number; beforeRestore: boolean; size: number; notes: number };
+  let backups = $state<Backup[]>([]);
+  let backupStatus = $state('');
+  let exportStatus = $state('');
+  let exportedPath = $state('');
+  let restoring = $state('');
+  let showAllBackups = $state(false);
+  async function loadBackups() {
+    try { backups = await invoke<Backup[]>('list_backups'); }
+    catch (error) { backupStatus = `无法读取备份：${error}`; }
+  }
+  $effect(() => { if (category === 'data') void loadBackups(); });
+  async function backupNow() {
+    try {
+      const name = await invoke<string | null>('backup_now');
+      backupStatus = name ? '已备份当前全部便签' : '内容和最近一次备份相同，不需要再备份';
+      await loadBackups();
+    } catch (error) { backupStatus = `备份失败：${error}`; }
+  }
+  async function restore(backup: Backup) {
+    const when = shortTime(backup.at);
+    if (!window.confirm(`用 ${when} 的备份（${backup.notes} 张便签）替换当前全部便签？\n\n当前的全部便签会先另存为一份备份，然后 PinNote 会重新启动。`)) return;
+    restoring = backup.name; backupStatus = '正在保存所有便签，随后恢复并重新启动…';
+    try { await invoke('restore_backup', { name: backup.name }); }
+    catch (error) { backupStatus = `没有恢复：${error}`; restoring = ''; }
+  }
+  async function exportAll() {
+    exportStatus = ''; exportedPath = '';
+    try {
+      const dir = await openDialog({ directory: true, title: '选择导出位置' });
+      if (!dir || Array.isArray(dir)) return;
+      const files = exportFiles(Object.values((await loadNotes()).notes));
+      exportedPath = await invoke<string>('export_notes', { dir, folder: exportFolderName(), files });
+      exportStatus = `已导出 ${files.length} 张便签（归档的在「归档」文件夹里，回收站不导出）`;
+    } catch (error) { exportStatus = `导出失败：${error}`; }
+  }
+  const kb = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`;
   const mod = isMacPlatform() ? '⌘' : 'Ctrl+';
   const inApp = [
     ['导出 Markdown', `${mod}S`], ['切换置顶', `${mod}T`], ['切换源码模式', `${mod}/`], ['打开设置', `${mod},`],
@@ -169,6 +210,8 @@
         <input type="checkbox" role="switch" checked={settings.behavior.edgeSnap} onchange={e => patch('behavior', { ...settings!.behavior, edgeSnap: e.currentTarget.checked })} /></label>
       <label class="row"><div><b>悬停预览</b><small>指针停在胶囊或边缘标签上时显示摘要。</small></div>
         <input type="checkbox" role="switch" checked={settings.behavior.hoverPreview} onchange={e => patch('behavior', { ...settings!.behavior, hoverPreview: e.currentTarget.checked })} /></label>
+      <label class="row"><div><b>共享屏幕时隐藏</b><small>开会共享屏幕或截图、录屏时，尽量不让 PinNote 的窗口出现在画面里。Windows 上可靠；macOS 上取决于录制软件，部分软件仍可能录到。</small></div>
+        <input type="checkbox" role="switch" checked={settings.behavior.hideFromCapture} onchange={e => patch('behavior', { ...settings!.behavior, hideFromCapture: e.currentTarget.checked })} /></label>
       <label class="row"><div><b>恢复上次工作状态</b><small>重新打开时恢复中心的 Tab 和选中的便签。</small></div>
         <input type="checkbox" role="switch" checked={settings.behavior.restoreSession} onchange={e => patch('behavior', { ...settings!.behavior, restoreSession: e.currentTarget.checked })} /></label>
       <h3>新便签默认值</h3>
@@ -205,7 +248,21 @@
       <h2>数据与更新</h2>
       <div class="row"><div><b>数据目录</b><small class="path">{dataPath || '不可用'}</small>{#if dataStatus}<small>{dataStatus}</small>{/if}</div>
         <div class="actions"><button class="text" onclick={openData}><FolderOpen size={13} />打开</button><button class="text" onclick={copyData}><Copy size={13} />复制路径</button></div></div>
-      {#if onExportCurrent}<div class="row"><div><b>导出</b><small>把当前便签导出为 Markdown 文件。</small></div><button class="text" onclick={onExportCurrent}><Download size={13} />导出当前便签</button></div>{/if}
+      <div class="row"><div><b>导出全部</b><small>每张便签一个 Markdown 文件，归档的便签另放一个文件夹。</small>
+          {#if exportStatus}<small>{exportStatus}{#if exportedPath} <button class="link" onclick={() => void revealItemInDir(exportedPath).catch(() => undefined)}>在文件夹中显示</button>{/if}</small>{/if}</div>
+        <div class="actions">{#if onExportCurrent}<button class="text" onclick={onExportCurrent}><Download size={13} />当前便签</button>{/if}<button class="text" onclick={exportAll}><FolderDown size={13} />导出全部</button></div></div>
+      <div class="block">
+        <div class="head"><div><b>自动备份</b><small>每天自动备份一次全部便签，内容没变就不备份，保留最近 14 份。恢复前会先把当前内容另存一份，恢复也能撤回。</small></div>
+          <div class="actions">{#if backups.length > 5}<button class="text" onclick={() => showAllBackups = !showAllBackups}>{showAllBackups ? '收起' : `全部 ${backups.length} 份`}</button>{/if}<button class="text" onclick={backupNow}><HardDriveDownload size={13} />立即备份</button></div></div>
+        <div class="backups">
+          {#each showAllBackups ? backups : backups.slice(0, 5) as backup (backup.name)}
+            <div class="backup"><span class="when">{shortTime(backup.at)}</span>
+              <small>{backup.notes} 张便签 · {kb(backup.size)}</small>{#if backup.beforeRestore}<span class="label" title="恢复备份之前自动另存的内容">恢复前</span>{/if}
+              <button class="text" disabled={Boolean(restoring)} onclick={() => restore(backup)}><ArchiveRestore size={13} />{restoring === backup.name ? '恢复中…' : '恢复'}</button></div>
+          {:else}<p class="muted">还没有备份。应用运行一会儿后会自动备份，也可以现在备份。</p>{/each}
+        </div>
+        {#if backupStatus}<small class="status" role="status">{backupStatus}</small>{/if}
+      </div>
       <div class="row"><div><b>版本</b><small>PinNote {version}</small></div><button class="text" onclick={() => { updateStatus = '正在检查，结果会在系统对话框中显示'; void invoke('check_updates').catch(e => updateStatus = `检查失败：${e}`); }}><RefreshCw size={13} />检查更新</button></div>
       {#if updateStatus}<p class="muted" role="status">{updateStatus}</p>{/if}
     {/if}
@@ -250,6 +307,21 @@
   .icon:hover, .text:hover { background: var(--accent-soft); }
   .text { margin-top: 10px; }
   .row .text { margin-top: 0; }
+  .link { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .block { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+  .block .head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+  .block .head > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .block .text { margin-top: 0; }
+  .backups { display: flex; flex-direction: column; margin-top: 10px; border-radius: var(--radius); background: var(--surface-muted); box-shadow: inset 0 0 0 .5px var(--hairline); overflow: hidden; }
+  .backup { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 0 4px 0 12px; }
+  .backup + .backup { border-top: 1px solid var(--hairline); }
+  .backup .when { flex: 0 0 112px; color: var(--text); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .backup small { font-variant-numeric: tabular-nums; }
+  .backup .text { margin-left: auto; }
+  .backup .label { padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; line-height: 16px; }
+  .backups .muted { margin: 0; padding: 10px 12px; }
+  .block .status { display: block; margin-top: 8px; }
+  button:disabled { opacity: .5; cursor: default; }
   dl { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; margin: 10px 0 0; font-size: 12px; }
   dt { color: var(--text); } dd { margin: 0; }
   kbd { font: 11px ui-monospace, Menlo, monospace; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--surface-sunken); border: 1px solid var(--border); }

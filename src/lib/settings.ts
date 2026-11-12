@@ -11,7 +11,8 @@ export type ShortcutConfig = {
 export type ThemeMode = "system" | "light" | "dark";
 export type ShadowLevel = "off" | "light" | "standard";
 export type AppearanceSettings = { theme: ThemeMode; centerShadow: ShadowLevel; noteShadow: ShadowLevel; reduceMotion: boolean };
-export type BehaviorSettings = { edgeSnap: boolean; hoverPreview: boolean; restoreSession: boolean };
+/** `hideFromCapture`: ask the system to keep PinNote windows out of screenshots and screen sharing. */
+export type BehaviorSettings = { edgeSnap: boolean; hoverPreview: boolean; restoreSession: boolean; hideFromCapture: boolean };
 
 export type AppSettings = {
   autoStart: boolean;
@@ -42,7 +43,7 @@ export const macDefaultShortcuts: ShortcutConfig = {
 export const defaultShortcuts: ShortcutConfig = windowsDefaultShortcuts;
 
 export const defaultAppearance: AppearanceSettings = { theme: "system", centerShadow: "standard", noteShadow: "standard", reduceMotion: false };
-export const defaultBehavior: BehaviorSettings = { edgeSnap: true, hoverPreview: true, restoreSession: true };
+export const defaultBehavior: BehaviorSettings = { edgeSnap: true, hoverPreview: true, restoreSession: true, hideFromCapture: false };
 
 export const defaultSettings: AppSettings = {
   autoStart: false,

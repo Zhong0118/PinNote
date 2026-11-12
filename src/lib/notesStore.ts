@@ -33,6 +33,9 @@ export type PinNote = {
   updatedAt: number;
   /** Last title/body change (set by the store); older notes fall back to updatedAt. */
   editedAt?: number;
+  /** Starred notes stay at the top of the center list (time of starring; null = not starred). */
+  starredAt?: number | null;
+  tags?: string[];
   lastFocusedAt: number;
 };
 
@@ -219,8 +222,8 @@ export async function noteOperation(note: PinNote, op: string, extra: Record<str
   void applyNoteChange({ id: note.id, note: result });
   if (result) {
     if(op==='appearance') {
-      const {theme,customColor,opacity,alwaysOnTop}=result;
-      Object.assign(note,{theme,customColor,opacity,alwaysOnTop});
+      const {theme,customColor,opacity,alwaysOnTop,starredAt,tags}=result;
+      Object.assign(note,{theme,customColor,opacity,alwaysOnTop,starredAt,tags});
     } else { revisions.set(note.id, result.revision); Object.assign(note, result); }
   }
   return result;
@@ -285,6 +288,10 @@ export function createNote(seed: Partial<PinNote> = {}): PinNote {
     createdAt: seed.createdAt ?? now,
     updatedAt: seed.updatedAt ?? now,
     lastFocusedAt: seed.lastFocusedAt ?? now,
+    // Optional fields are carried through as-is: loading rebuilds every note through here.
+    ...(seed.editedAt !== undefined && { editedAt: seed.editedAt }),
+    ...(seed.starredAt != null && { starredAt: seed.starredAt }),
+    ...(seed.tags?.length && { tags: [...seed.tags] }),
   };
 }
 

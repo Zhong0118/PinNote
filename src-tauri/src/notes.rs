@@ -100,6 +100,13 @@ fn remember(path: &std::path::Path, file: &Value) {
     }
 }
 
+/// Drop the parsed copy, e.g. after a backup replaced the file.
+pub fn forget() {
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = None;
+    }
+}
+
 /// Atomically writes the notes file and keeps the in-memory copy authoritative.
 pub fn store(app: &AppHandle, file: &Value) -> Result<(), String> {
     let path = data_file(app, "notes.json")?;
@@ -158,6 +165,28 @@ pub fn load(app: &AppHandle) -> Result<Value, String> {
     }
     remember(&path, &file);
     Ok(file)
+}
+
+/// Tags: trimmed, at most 20 characters, no '#', no duplicates, at most 12 per note.
+pub fn clean_tags(tags: &Value) -> Result<Vec<String>, String> {
+    let list = tags.as_array().ok_or("Invalid tags")?;
+    let mut out: Vec<String> = Vec::new();
+    for tag in list {
+        let text = tag.as_str().ok_or("Invalid tags")?.trim().trim_start_matches('#').trim();
+        if text.is_empty() {
+            continue;
+        }
+        if text.chars().count() > 20 || text.chars().any(char::is_control) {
+            return Err("标签最多 20 个字".into());
+        }
+        if !out.iter().any(|t| t.to_lowercase() == text.to_lowercase()) {
+            out.push(text.to_string());
+        }
+    }
+    if out.len() > 12 {
+        return Err("每张便签最多 12 个标签".into());
+    }
+    Ok(out)
 }
 
 pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
@@ -252,6 +281,16 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
             }
             note["alwaysOnTop"] = pin.clone();
         }
+        // Starring (kept at the top of the list) and tags are list metadata, like colour.
+        if let Some(starred) = patch.get("starredAt") {
+            if !(starred.is_null() || starred.as_u64().is_some()) {
+                return Err("Invalid star".into());
+            }
+            note["starredAt"] = starred.clone();
+        }
+        if let Some(tags) = patch.get("tags") {
+            note["tags"] = json!(clean_tags(tags)?);
+        }
         // Independent presentation metadata must not invalidate an unsaved body.
         file["notes"][id] = note.clone();
         return Ok(note);
@@ -324,6 +363,20 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
             if note["title"] != before["title"] || note["content"] != before["content"] {
                 note["editedAt"] = json!(now());
             }
+        }
+        "revert" => {
+            // Restore an earlier title and body (looked up by `operation`); the version
+            // being replaced is kept, so the restore itself can be undone.
+            if before["lifecycle"] != "active" {
+                return Err("请先恢复便签".into());
+            }
+            let version = &request["version"];
+            if !version["title"].is_string() || !version["content"].is_string() {
+                return Err("恢复版本不存在".into());
+            }
+            note["title"] = version["title"].clone();
+            note["content"] = version["content"].clone();
+            note["editedAt"] = json!(now());
         }
         "archive" | "trash" => {
             note["lifecycle"] = json!(if op == "archive" { "archived" } else { "trash" });
@@ -400,14 +453,14 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
     Ok(note)
 }
 
-pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
+pub fn operation(app: &AppHandle, mut request: Value) -> Result<Value, String> {
     let state = app.state::<NotesFileLock>();
     let _guard = state.0.lock().map_err(|_| "Cannot lock notes")?;
     let mut file = load(app)?;
     if request["source"] == "ui"
         && matches!(
             request["op"].as_str(),
-            Some("archive" | "trash" | "restore" | "undo" | "center" | "desktop")
+            Some("archive" | "trash" | "restore" | "undo" | "revert" | "center" | "desktop")
         )
     {
         if let Some(owner) = app
@@ -446,8 +499,14 @@ pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
             }
         }
     }
+    if request["op"] == "revert" {
+        let at = request["versionAt"].as_u64().ok_or("Missing version")?;
+        request["version"] = crate::journal::find_version(app, request["id"].as_str().unwrap_or(""), at)?;
+    }
     let note = mutate(&mut file, &request)?;
     store(app, &file)?;
+    // Version history and activity counts are best effort: the note itself is saved.
+    crate::journal::after_change(app, &request, before.as_ref(), &note);
     // Edge queues only need to re-layout when docking-relevant state changed,
     // not on every body save.
     let layout = before.as_ref().is_none_or(|b| {
@@ -529,6 +588,28 @@ mod tests {
         assert!(f["notes"]["a"]["editedAt"].as_u64().is_some());
         mutate(&mut f,&json!({"id":"b","op":"create","note":{"title":"新","content":""}})).unwrap();
         assert!(f["notes"]["b"]["editedAt"].as_u64().is_some());
+    }
+    #[test]
+    fn stars_and_tags_are_metadata_that_never_bump_the_revision() {
+        let mut f = file();
+        mutate(&mut f,&json!({"id":"a","op":"appearance","patch":{"starredAt":5,"tags":[" 工作 ","#读书","工作",""]}})).unwrap();
+        assert_eq!(f["notes"]["a"]["revision"], 1);
+        assert_eq!(f["notes"]["a"]["starredAt"], 5);
+        assert_eq!(f["notes"]["a"]["tags"], json!(["工作","读书"]));
+        mutate(&mut f,&json!({"id":"a","op":"save","expectedRevision":1,"patch":{"content":"x","tags":[]}})).unwrap();
+        assert_eq!(f["notes"]["a"]["tags"], json!(["工作","读书"]), "a body save never drops tags");
+        assert!(mutate(&mut f,&json!({"id":"a","op":"appearance","patch":{"tags":["一二三四五六七八九十一二三四五六七八九十一"]}})).is_err());
+        assert!(mutate(&mut f,&json!({"id":"a","op":"appearance","patch":{"starredAt":"yes"}})).is_err());
+    }
+    #[test]
+    fn revert_restores_text_and_needs_an_active_note() {
+        let mut f = file();
+        mutate(&mut f,&json!({"id":"a","op":"revert","expectedRevision":1,"version":{"title":"早","content":"旧正文"}})).unwrap();
+        assert_eq!(f["notes"]["a"]["content"], "旧正文");
+        assert_eq!(f["notes"]["a"]["revision"], 2);
+        assert!(f["notes"]["a"]["editedAt"].as_u64().is_some());
+        mutate(&mut f, &json!({"id":"a","op":"archive","expectedRevision":2})).unwrap();
+        assert!(mutate(&mut f,&json!({"id":"a","op":"revert","expectedRevision":3,"version":{"title":"","content":""}})).is_err());
     }
     #[test]
     fn invalid_migration_preserves_data() {
