@@ -4,15 +4,24 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 const exports = {};
-runInNewContext(ts.transpileModule(readFileSync('src/lib/sortable.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports });
-const { insertionIndex, moveAmong, arrange } = exports;
+const require = () => ({ motionReduced: () => false, MOTION: 220 });
+runInNewContext(ts.transpileModule(readFileSync('src/lib/sortable.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports, require });
+const { targetIndex, slideFor, moveAmong, arrange } = exports;
 
-test('the drop slot is the number of item midpoints above the pointer', () => {
-  const mids = [10, 30, 50];
-  assert.equal(insertionIndex(mids, 0), 0);
-  assert.equal(insertionIndex(mids, 29), 1);
-  assert.equal(insertionIndex(mids, 31), 2);
-  assert.equal(insertionIndex(mids, 99), 3);
+test('the lifted item lands after every other item whose midpoint it has passed', () => {
+  const mids = [10, 30, 50, 70];
+  assert.equal(targetIndex(mids, 1, 5), 0);
+  assert.equal(targetIndex(mids, 1, 30), 1, 'its own midpoint never counts');
+  assert.equal(targetIndex(mids, 1, 51), 2);
+  assert.equal(targetIndex(mids, 1, 99), 3);
+});
+
+test('only the items between the old and new place slide, toward the gap', () => {
+  // Item 1 lifted and hovering at position 3: items 2 and 3 move up one step.
+  assert.deepEqual([0, 1, 2, 3].map(i => slideFor(i, 1, 3, 40)), [0, 0, -40, -40]);
+  // Item 3 lifted and hovering at position 0: items 0..2 move down one step.
+  assert.deepEqual([0, 1, 2, 3].map(i => slideFor(i, 3, 0, 40)), [40, 40, 40, 0]);
+  assert.deepEqual([0, 1, 2].map(i => slideFor(i, 1, 1, 40)), [0, 0, 0]);
 });
 
 test('moving within the full list', () => {

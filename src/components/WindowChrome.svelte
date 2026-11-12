@@ -309,10 +309,6 @@
   .resize-NorthEast, .resize-NorthWest, .resize-SouthEast, .resize-SouthWest { width: 12px; height: 12px; }
   .resize-NorthEast { top: 0; right: 0; cursor: nesw-resize; } .resize-SouthWest { bottom: 0; left: 0; cursor: nesw-resize; }
   .resize-NorthWest { top: 0; left: 0; cursor: nwse-resize; } .resize-SouthEast { bottom: 0; right: 0; cursor: nwse-resize; }
-  :global(::-webkit-scrollbar) { width: 7px; height: 7px; }
-  :global(::-webkit-scrollbar-track) { background: transparent; }
-  :global(::-webkit-scrollbar-thumb) { border: 2px solid transparent; border-radius: 999px; background-clip: content-box; background-color: #8885; }
-  :global(::-webkit-scrollbar-thumb:hover) { background-color: #8888; }
 
   /* ---- Morph: content keeps its expanded layout, anchored where the window folds to,
      and is clipped by the frame; it fades rather than reflowing every frame. ---- */
