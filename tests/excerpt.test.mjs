@@ -25,6 +25,15 @@ test('reminder times are short and relative to today', () => {
   assert.equal(shortTime(new Date(2027, 0, 2, 7, 0).getTime(), now), '2027年1月2日 07:00');
 });
 
+test('list edit times stay short: time today, then 昨天 / date', () => {
+  const { listTime } = exports;
+  const now = new Date(2026, 10, 8, 9, 0).getTime();
+  assert.equal(listTime(new Date(2026, 10, 8, 8, 5).getTime(), now), '08:05');
+  assert.equal(listTime(new Date(2026, 10, 7, 23, 59).getTime(), now), '昨天');
+  assert.equal(listTime(new Date(2026, 0, 3, 12, 0).getTime(), now), '1月3日');
+  assert.equal(listTime(new Date(2025, 11, 31, 12, 0).getTime(), now), '2025/12/31');
+});
+
 test('a first line that repeats the title is left out, and the preview can skip code', () => {
   const md = '# 周会要点\n\n- [x] 确认时间\n- [ ] 整理清单\n\n```bash\npnpm test\n```\n\n下周二前发出。';
   assert.equal(plainExcerpt(md, 160, { title: '周会要点', code: false }), '✓ 确认时间\n○ 整理清单\n\n下周二前发出。');

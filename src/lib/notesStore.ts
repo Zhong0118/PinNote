@@ -31,6 +31,8 @@ export type PinNote = {
   window: NoteWindowState;
   createdAt: number;
   updatedAt: number;
+  /** Last title/body change (set by the store); older notes fall back to updatedAt. */
+  editedAt?: number;
   lastFocusedAt: number;
 };
 

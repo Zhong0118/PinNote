@@ -11,7 +11,7 @@ import { displayFor, normalizeBounds, normalizeDisplays, type Bounds, type Displ
 import { edgeLayout } from './edgeQueue';
 import type { PinNote } from './notesStore';
 import { CENTER_WINDOW_MIN, barBounds, detachedBounds, dockAt, dockDisplay, handleBounds, isResize, migrateSession, nearestSide,
-  restoreFrame, snapSide, validWindow, type CenterDock, type CenterMode, type CenterSide, type Range } from './centerLayout';
+  restoreFrame, snapSide, validWindow, LIST_WIDTH, type CenterDock, type CenterMode, type CenterSide, type Range } from './centerLayout';
 
 const STORE = 'pinnote.center';
 const mac = isMacPlatform();
@@ -35,6 +35,8 @@ export class CenterForm {
   snapHint = $state<CenterSide | null>(null);
   tabs: string[] = [];
   selected = '';
+  order: string[] = [];
+  listWidth = LIST_WIDTH.default;
   /** The remembered normal frame (outer, normalized). */
   normal: Bounds | undefined;
   #busy = false;
@@ -52,12 +54,13 @@ export class CenterForm {
     const session = migrateSession(raw);
     this.mode = session.mode; this.dock = session.dock; this.pinned = session.pinned;
     this.normal = session.window; this.tabs = session.tabs; this.selected = session.selected;
+    this.order = session.order; this.listWidth = session.listWidth;
     return session;
   }
   save() {
     try {
       localStorage.setItem(STORE, JSON.stringify({ mode: this.mode, dock: this.dock, pinned: this.pinned,
-        window: this.normal, tabs: this.tabs, selected: this.selected }));
+        window: this.normal, tabs: this.tabs, selected: this.selected, order: this.order, listWidth: this.listWidth }));
     } catch { /* storage full: only the remembered layout is lost */ }
   }
 
