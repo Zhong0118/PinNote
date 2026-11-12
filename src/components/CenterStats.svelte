@@ -116,7 +116,7 @@
             <ul class="touched">
               {#each touched.slice(0, 6) as hit (hit.note.id)}
                 <li><button onclick={() => onOpen(hit.note.id)}><span class="kind" class:new={hit.created}>{hit.created ? '新建' : '编辑'}</span>
-                  <b>{hit.note.title || '未命名便签'}</b><small>{plainExcerpt(hit.note.content, 60, { title: hit.note.title }).replace(/\s*\n+\s*/g, ' ')}</small>
+                  <b>{hit.note.title || '未命名便签'}</b><small>{plainExcerpt(hit.note.content, 40, { title: hit.note.title }).replace(/\s*\n+\s*/g, ' ')}</small>
                   {#if hit.note.lifecycle === 'archived'}<span class="archived">已归档</span>{/if}</button></li>
               {/each}
             </ul>
@@ -186,7 +186,8 @@
   .pills { display: inline-flex; gap: 6px; }
   .pills span { display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 9px; border-radius: 999px; background: var(--surface-sunken); color: var(--muted); font-size: 11px; }
   .pills em { font-style: normal; font-size: 13px; font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
-  .touched { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+  .touched { margin: 10px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .touched li { min-width: 0; }
   .touched button { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
   .touched button:hover { background: var(--hover); }
   .touched b { flex: 0 1 auto; max-width: 40%; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

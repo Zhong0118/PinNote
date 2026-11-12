@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, emit, emitTo } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ChevronDown, ClockArrowDown, Star, ListFilter, History, ChartColumn, Hash, Check, Bell, ListTodo } from 'lucide-svelte';
+  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ClockArrowDown, Sun, Moon, Star, ListFilter, History, ChartColumn, Hash, Check, Bell, ListTodo, CheckCheck, MonitorDown, ArchiveRestore, CopyPlus, RefreshCw } from 'lucide-svelte';
   import { answerRelease } from '$lib/editorHandoff';
   import { fitBounds } from '$lib/windowGeometry';
   import { validWindow } from '$lib/centerLayout';
@@ -13,10 +13,10 @@
   import DraftBanner from '../../components/DraftBanner.svelte';
   import { openNoteWindow, findNoteWindow } from '$lib/noteWindows';
   import { requestWindowVisibility } from '$lib/windowVisibility';
-  import { loadSettings, isMacPlatform } from '$lib/settings';
+  import { loadSettings, saveSettings, isMacPlatform } from '$lib/settings';
   import { registerGlobalShortcuts, unregisterGlobalShortcuts } from '$lib/shortcuts';
   import CenterSettings from '../../components/CenterSettings.svelte';
-  import { onAppearance } from '$lib/theme';
+  import { onAppearance, applyAppearance } from '$lib/theme';
   import { defaultSettings, type AppSettings } from '$lib/settings';
   import { save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { defaultMarkdownFilename } from '$lib/filename';
@@ -257,9 +257,17 @@
     const note=(await loadNotes()).notes[undo.id]; await noteOperation(note,'undo',{historyId:undo.at});
     await select(note.id,true); undo=null; status='已撤销';
   }
+  /** The title-bar switch picks light or dark outright; "follow the system" stays in settings. */
+  async function toggleTheme() {
+    const current=await loadSettings();
+    const next={...current,appearance:{...current.appearance,theme:dark?'light' as const:'dark' as const}};
+    applyAppearance(next.appearance);
+    try{if(await saveSettings(next)==='saved')await emit('settings-changed',next);}
+    catch(e){status=`主题未保存：${errorText(e)}`;}
+  }
   /** Settings open inside the center; a collapsed center is restored first. */
   async function openSettings() {
-    menu=false; windowMenu=false;
+    menu=false;
     // Settings can restore history versions: save what is typed first. A failed
     // save is shown in the editor and stays protected; settings still open.
     await persist().catch(()=>undefined);
@@ -310,10 +318,10 @@
       else for(const note of all) await openNoteWindow(note);
     }).catch(e=>{status=String(e);});
   }
-  // ---- Center window form: normal window ⇄ edge handle (strip only from the window menu). ----
+  // ---- Center window form: normal window ⇄ edge handle or strip. ----
   const mac=isMacPlatform();
   let width=$state(960);
-  let windowMenu=$state(false);
+  let dark=$state(false);
   let appSettings:AppSettings=structuredClone(defaultSettings);
   let trashDays=$state<number>(defaultSettings.trashDays);
   let settingsOpen=$state(false);
@@ -325,10 +333,31 @@
     title:()=>draft?.title||(notes.length?'':'还没有便签'),
     status:text=>status=text,
     edgeSnap,
+    morph,
   });
-  const narrow=$derived(width<640);
+  // While the window shrinks into its handle (or grows back), the page keeps its full size and
+  // is scaled with the window, so the layout below never sees the passing small widths.
+  let mainEl=$state<HTMLElement>();
+  let heldWidth=$state<number|null>(null);
+  function morph(m:{size:{width:number;height:number};scale:number;ms:number;curve:string}|null){
+    const el=mainEl, root=document.documentElement;
+    if(!el) return;
+    if(!m){
+      heldWidth=null; root.style.removeProperty('overflow');
+      for(const p of ['width','height','transform','transform-origin','transition']) el.style.removeProperty(p);
+      return;
+    }
+    heldWidth=m.size.width; root.style.overflow='hidden';
+    el.style.width=`${m.size.width}px`; el.style.height=`${m.size.height}px`; el.style.transformOrigin='0 0';
+    el.style.transition=m.ms?`transform ${m.ms}ms ${m.curve}`:'none';
+    if(m.ms) void el.offsetWidth;
+    el.style.transform=`scale(${m.scale})`;
+    if(!m.ms) void el.offsetWidth;
+  }
+  const layoutWidth=$derived(heldWidth??width);
+  const narrow=$derived(layoutWidth<640);
   // The editor keeps at least 380px; the saved width comes back when the window grows again.
-  const shownListWidth=$derived(Math.max(LIST_WIDTH.min, Math.min(listWidth, width-380)));
+  const shownListWidth=$derived(Math.max(LIST_WIDTH.min, Math.min(listWidth, layoutWidth-380)));
   let restored=false;
   function restoreSession() {
     const session=form.restore();
@@ -470,7 +499,7 @@
       shortcutStatus=registered.ok||registered.cancelled?'':`全局快捷键注册失败（可能被其他应用占用）：${registered.message}`;
     });
     // Center shadow: "standard" is the native window shadow, "light" keeps only a hairline.
-    const stopAppearance=onAppearance(a=>{void getCurrentWindow().setShadow(a.centerShadow==='standard').catch(()=>undefined);});
+    const stopAppearance=onAppearance((a,isDark)=>{dark=isDark;void getCurrentWindow().setShadow(a.centerShadow==='standard').catch(()=>undefined);});
     const close=getCurrentWindow().onCloseRequested(e=>{e.preventDefault(); void run(async()=>{await persist(); await getCurrentWindow().hide();});});
     async function saveForQuit(attempt:number) {
       if(!quitGuard.begin(attempt)) return;
@@ -488,7 +517,7 @@
 
 <svelte:window bind:innerWidth={width} onkeydown={e=>{if((e.metaKey||e.ctrlKey)&&e.key===','&&!e.isComposing){e.preventDefault();void openSettings();}}}/>
 {#if form.snapHint}<div class="snap-hint side-{form.snapHint}" role="status"><span>松手收起到{form.snapHint==='left'?'左':'右'}侧边缘</span></div>{/if}
-<main class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:settings-open={settingsOpen} class:resizing style:--list-w="{shownListWidth}px">
+<main bind:this={mainEl} class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:settings-open={settingsOpen} class:resizing style:--list-w="{shownListWidth}px">
   {#if settingsOpen}<CenterSettings onClose={()=>settingsOpen=false} {shortcutStatus} onExportCurrent={draft?()=>void exportCurrent():undefined}/>{/if}
   {#if statsOpen&&!settingsOpen}<CenterStats {notes} {openTodos} onClose={()=>statsOpen=false} onTag={showTag} onOpen={id=>{statsOpen=false;void run(()=>select(id));}}/>{/if}
   {#if narrow}<button class="scrim" tabindex="-1" aria-label="关闭列表" onclick={()=>sidebar=false}></button>{/if}
@@ -542,14 +571,11 @@
       </div>
       {#if tabsOverflow}<select aria-label="更多工作便签" value={selected} onchange={e=>run(()=>select(e.currentTarget.value))}>{#each tabs as id}<option value={id}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</option>{/each}</select>{/if}
       <div class="window-tools">
+        <button class="theme-switch" class:dark role="switch" aria-checked={dark} aria-label="深色模式" title={dark?'切换到浅色':'切换到深色'} onclick={()=>void toggleTheme()}><span class="knob">{#if dark}<Moon size={11}/>{:else}<Sun size={11}/>{/if}</span></button>
         <button class="pin" class:on={form.pinned} aria-pressed={form.pinned} aria-label={form.pinned?'取消置顶便签中心':'置顶便签中心'} title={form.pinned?'取消置顶便签中心':'置顶便签中心'} onclick={()=>form.setPinned(!form.pinned)}><Pin size={16}/></button>
-        <button aria-label="收起到边缘" title="收起到边缘 · 也可以把窗口拖到屏幕左右边缘" onclick={()=>form.collapse()}>{#if form.dock.side==='left'}<ChevronsLeft size={16}/>{:else}<ChevronsRight size={16}/>{/if}</button>
-        <button class="window-more" class:on={windowMenu} aria-label="窗口选项" title="窗口选项" aria-expanded={windowMenu} onclick={()=>windowMenu=!windowMenu}><ChevronDown size={16}/></button>
-        {#if windowMenu}<div class="menu window-menu" use:popup={()=>windowMenu=false} transition:reveal role="menu" tabindex="-1">
-          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapse('left');}}><ChevronsLeft size={15}/>收起到左侧边缘</button>
-          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapse('right');}}><ChevronsRight size={15}/>收起到右侧边缘</button>
-          <button role="menuitem" onclick={()=>{windowMenu=false;void form.collapseToBar();}}><Minimize2 size={15}/>收起为小条</button>
-        </div>{/if}
+        <button aria-label="收起到左侧边缘" title="收起到左侧边缘 · 也可以把窗口拖到屏幕左边缘" onclick={()=>form.collapse('left')}><ChevronsLeft size={16}/></button>
+        <button aria-label="收起到右侧边缘" title="收起到右侧边缘 · 也可以把窗口拖到屏幕右边缘" onclick={()=>form.collapse('right')}><ChevronsRight size={16}/></button>
+        <button aria-label="收起为小条" title="收起为小条" onclick={()=>form.collapseToBar()}><Minimize2 size={15}/></button>
       </div>
     </header>
     {#if draft}
@@ -564,14 +590,14 @@
         <button class="more" aria-label="更多操作" title="更多操作" aria-expanded={menu} onclick={()=>menu=!menu}><MoreHorizontal size={16}/></button>
         {#if menu}<div class="menu" use:popup={()=>menu=false} transition:reveal role="dialog" tabindex="-1">
           {#if draft.lifecycle==='active'}
-            <button onclick={()=>{menu=false;reminderOpen=true;}}>设置提醒</button>
-            <button onclick={()=>{menu=false;void persist().catch(()=>undefined).then(()=>versionsOpen=true);}}>历史版本</button>
-            {#if editable && progress.done}<button onclick={()=>{editor?.clearCompleted();menu=false;}}>移除已完成项（可撤销）</button>{/if}
-            {#if draft.placement==='desktop'}<button onclick={()=>run(recall)}>收回中心</button>{/if}
-            <button onclick={()=>run(()=>operation('archive'))}>归档</button><button onclick={()=>run(()=>operation('trash'))}>移到回收站</button>
-          {:else}<button onclick={()=>run(()=>operation('restore'))}>恢复到中心</button>{#if draft.lifecycle==='trash'}<button class="danger" onclick={()=>run(()=>operation('purge'))}>永久删除</button>{/if}{/if}
-          <button onclick={()=>run(async()=>{if(!draft)return;const copy=createNote({title:`${draft.title}（草稿副本）`,content:draft.content});await saveNoteNow(copy);await select(copy.id);})}>保留草稿为新便签</button>
-          <button onclick={()=>run(async()=>{if(!draft)return;editor?.flush();const fresh=(await loadNotes()).notes[draft.id];if(hasLocalEdits(draft.id)&&!window.confirm('放弃本地草稿并载入已保存版本？'))return;discardPendingSave(draft.id);conflict=false;saveError='';draft=fresh;revision++;})}>重新载入已保存版本</button>
+            <button onclick={()=>{menu=false;reminderOpen=true;}}><Bell size={14}/>设置提醒</button>
+            <button onclick={()=>{menu=false;void persist().catch(()=>undefined).then(()=>versionsOpen=true);}}><History size={14}/>历史版本</button>
+            {#if editable && progress.done}<button onclick={()=>{editor?.clearCompleted();menu=false;}}><CheckCheck size={14}/>移除已完成项（可撤销）</button>{/if}
+            {#if draft.placement==='desktop'}<button onclick={()=>run(recall)}><MonitorDown size={14}/>收回中心</button>{/if}
+            <button onclick={()=>run(()=>operation('archive'))}><Archive size={14}/>归档</button><button onclick={()=>run(()=>operation('trash'))}><Trash2 size={14}/>移到回收站</button>
+          {:else}<button onclick={()=>run(()=>operation('restore'))}><ArchiveRestore size={14}/>恢复到中心</button>{#if draft.lifecycle==='trash'}<button class="danger" onclick={()=>run(()=>operation('purge'))}><Trash2 size={14}/>永久删除</button>{/if}{/if}
+          <button onclick={()=>run(async()=>{if(!draft)return;const copy=createNote({title:`${draft.title}（草稿副本）`,content:draft.content});await saveNoteNow(copy);await select(copy.id);})}><CopyPlus size={14}/>保留草稿为新便签</button>
+          <button onclick={()=>run(async()=>{if(!draft)return;editor?.flush();const fresh=(await loadNotes()).notes[draft.id];if(hasLocalEdits(draft.id)&&!window.confirm('放弃本地草稿并载入已保存版本？'))return;discardPendingSave(draft.id);conflict=false;saveError='';draft=fresh;revision++;})}><RefreshCw size={14}/>重新载入已保存版本</button>
         </div>{/if}
         {#if draft.tags?.length||draft.lifecycle==='active'}
           <div class="tag-row" aria-label="标签">
@@ -685,13 +711,13 @@
  .tabs{display:flex;align-items:center;gap:6px;height:44px;padding:0 8px;min-width:0;background:var(--surface-sunken);color:var(--text);border-bottom:1px solid var(--hairline);transition:padding-left var(--motion) var(--ease-out)}
  main.mac.folded .tabs{padding-left:84px}
  /* Icon buttons share one size, shape and set of states. */
- .list-toggle,.window-tools button,.more,.search button{width:28px;height:28px;padding:0;border-radius:50%;color:var(--muted)}
+ .list-toggle,.window-tools button,.more,.search button{flex:0 0 28px;width:28px;height:28px;padding:0;border-radius:50%;color:var(--muted)}
  /* On the sunken tab bar the ordinary 4% hover is nearly invisible: the bar's controls use the stronger step. */
  .list-toggle:hover,.window-tools button:hover,.more:hover,.search button:hover{color:var(--text);background:var(--hover-strong)}
  /* A lit control (pinned, menu open) stays lit on hover and only deepens. */
  .window-tools button.on,.more[aria-expanded="true"]{color:var(--accent);background:var(--accent-soft)}
  .window-tools button.on:hover,.more[aria-expanded="true"]:hover{color:var(--accent);background:var(--accent-soft-strong)}
- :global(:root[data-stale-hover]) .window-tools button:not(.on):hover,:global(:root[data-stale-hover]) .list-toggle:hover{background:transparent;color:var(--muted)}
+ :global(:root[data-stale-hover]) .window-tools button:not(.on,.theme-switch):hover,:global(:root[data-stale-hover]) .list-toggle:hover{background:transparent;color:var(--muted)}
  .window-tools .pin.on :global(svg){fill:currentColor;fill-opacity:.22}
  .tab-strip{display:flex;align-items:center;min-width:0;overflow:hidden;flex:1;gap:2px}
  .tab{position:relative;display:flex;align-items:center;flex:0 1 auto;min-width:72px;max-width:200px;height:28px;padding:0 3px 0 10px;border-radius:var(--radius);color:var(--muted);transition:background var(--motion-fast),color var(--motion-fast),box-shadow var(--motion-fast)}
@@ -705,11 +731,16 @@
  .tabs select{max-width:110px;border:0;background:var(--hover);color:var(--text);border-radius:var(--radius-sm)}
  .window-tools{position:relative;display:flex;align-items:center;gap:2px;margin-left:auto;padding-left:6px;border-left:1px solid var(--hairline)}
  .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--surface-raised);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--menu-shadow)}
- .menu button{display:block;text-align:left;width:100%;font-size:12px}
- .window-menu{top:38px;right:0;width:180px}
- /* Menu items sit inside .window-tools but must not inherit its round icon-button shape. */
- .window-menu button{display:flex;gap:8px;justify-content:flex-start;width:100%;height:auto;padding:6px 8px;border-radius:var(--radius-sm);color:var(--text)}
- .window-menu button:hover{background:var(--hover);color:var(--text)}
+ .menu button{display:flex;justify-content:flex-start;gap:9px;text-align:left;width:100%;font-size:12px}
+ .menu button :global(svg){flex:0 0 auto;color:var(--muted)}
+ .menu button.danger :global(svg){color:currentColor}
+ /* Light/dark switch: a small track whose knob carries the sun or moon. */
+ .window-tools .theme-switch{flex:0 0 34px;width:34px;height:20px;margin-right:4px;padding:2px;border-radius:999px;justify-content:flex-start;background:var(--hover-strong);transition:background var(--motion-fast)}
+ .window-tools .theme-switch:hover{background:color-mix(in srgb,var(--text) 16%,transparent)}
+ .window-tools .theme-switch.dark{background:var(--accent)}.window-tools .theme-switch.dark:hover{background:var(--accent-strong)}
+ .theme-switch .knob{display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--surface-raised);color:var(--muted);box-shadow:0 1px 2px #0003;transition:transform var(--motion-fast) var(--ease-out)}
+ .theme-switch.dark .knob{transform:translateX(14px);color:var(--accent)}
+ .window-tools .theme-switch:active{transform:none}
  .danger{color:var(--danger)}
  /* Title shares the editor's reading column so heading and body line up. */
  .title-row{position:relative;display:flex;align-items:center;gap:8px;width:100%;max-width:866px;margin:0 auto;padding:18px 30px 8px 14px}
@@ -757,5 +788,5 @@
  main.narrow .side-inner{width:100%}
  main.narrow .title-row{padding:12px 14px}main.narrow .tab{min-width:84px}main.narrow .desktop{padding:6px}
  @media(max-width:700px){.title-row{padding:12px}.desktop{font-size:11px}}
- @media(prefers-reduced-motion:reduce){main,main.narrow aside,.scrim,.tabs,.tab,.tab .tab-close,button,.work,.snap-hint,.list-resizer::after{transition:none;animation:none}}
+ @media(prefers-reduced-motion:reduce){.theme-switch .knob,main,main.narrow aside,.scrim,.tabs,.tab,.tab .tab-close,button,.work,.snap-hint,.list-resizer::after{transition:none;animation:none}}
 </style>

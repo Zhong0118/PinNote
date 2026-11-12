@@ -2,7 +2,7 @@ import { displayFor, fitBounds, type Bounds, type Display } from './windowGeomet
 
 /**
  * The note center is a normal window that collapses straight to an edge handle.
- * `bar` is an optional free strip reachable only from the window menu.
+ * `bar` is an optional free strip reachable from its own title-bar button.
  */
 export type CenterMode = 'window' | 'handle' | 'bar';
 export type CenterSide = 'left' | 'right';

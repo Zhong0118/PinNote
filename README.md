@@ -52,7 +52,7 @@
 | macOS · Apple Silicon / Intel | Universal `.dmg` | 打开后拖入「应用程序」 |
 | Windows · x64 | `.exe` / `.msi` | 运行安装程序，需要 WebView2 |
 
-macOS 安装包使用 ad-hoc 签名，尚未做 Developer ID 签名与 Apple 公证。当前源码版本为 **1.3.7**；安装包的版本以 Release 页面为准。
+macOS 安装包使用 ad-hoc 签名，尚未做 Developer ID 签名与 Apple 公证。当前源码版本为 **1.3.8**；安装包的版本以 Release 页面为准。
 
 1. **写下来** — 打开便签中心，点击「新建便签」，直接输入文字、Markdown 或待办清单。
 2. **放到手边** — 点击「放到桌面」，按需置顶；收起为胶囊，或拖到屏幕左右边缘收纳。

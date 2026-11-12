@@ -2,7 +2,7 @@
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import SourceEditor from "./SourceEditor.svelte";
-  import { ListTodo, Plus, Bell, CheckCheck } from 'lucide-svelte';
+  import { ListTodo, Plus, Bell, CheckCheck, X } from 'lucide-svelte';
   import { checklistProgress } from '$lib/checklist';
   import { perfCount, perfTime } from '$lib/perf';
 
@@ -209,7 +209,7 @@
     {#if progress.total || showTaskInput}
       <div class="task-tools">
         {#if progress.total}<span class="task-progress"><ListTodo size={13}/>{progress.done===progress.total?'待办已全部完成':'已完成'}<span class="count">{progress.done}/{progress.total}</span></span>{/if}
-        {#if !readonly}<button class="add-task" onclick={()=>showTaskInput=!showTaskInput} aria-expanded={showTaskInput}><Plus size={13}/>添加待办</button>{/if}
+        {#if !readonly}<button class="add-task" onclick={()=>showTaskInput=!showTaskInput} aria-expanded={showTaskInput}>{#if showTaskInput}<X size={13}/>取消添加{:else}<Plus size={13}/>添加待办{/if}</button>{/if}
         {#if progress.total && onReminder}<button aria-label="提醒这张待办便签" title="为这张便签设置提醒" onclick={onReminder}><Bell size={13}/></button>{/if}
         {#if progress.done && !readonly}<button title="移除已完成项 · 可撤销" aria-label="移除已完成待办" onclick={clearCompleted}><CheckCheck size={13}/></button>{/if}
       </div>
@@ -228,7 +228,7 @@
   .editor-layout{position:relative;height:100%;min-height:0;display:flex;flex-direction:column}
   .quiet-task{position:absolute;z-index:2;top:4px;right:14px;display:inline-flex;align-items:center;gap:3px;border:0;border-radius:var(--radius-sm);padding:2px 7px;font:inherit;font-size:11px;color:var(--pin-muted,#737373);background:color-mix(in srgb,var(--pin-bg,#fff) 88%,transparent);cursor:pointer;opacity:0;transition:opacity var(--motion-fast)}
   .editor-layout:hover .quiet-task,.quiet-task:focus-visible{opacity:.85}.quiet-task:hover{color:var(--pin-accent,#2563eb);opacity:1}
-  @media(prefers-reduced-motion:reduce){.quiet-task{transition:none}}.task-tools{display:flex;align-items:center;gap:8px;padding:5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:var(--radius-sm);padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background var(--motion-fast),transform var(--motion-fast)}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{display:grid;grid-template-columns:1fr auto;gap:5px;margin:4px 16px 8px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:var(--radius-sm);background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:var(--pin-muted,var(--muted));font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
+  @media(prefers-reduced-motion:reduce){.quiet-task{transition:none}}.task-tools{/* Same column as the text below: 820px plus the host's 16px padding and 10px scrollbar gutter. */box-sizing:border-box;width:100%;max-width:862px;margin:0 auto;display:flex;align-items:center;gap:8px;padding:5px 26px 5px 16px;color:var(--pin-muted,#737373);font-size:11px;flex-shrink:0}.task-progress{display:flex;align-items:center;gap:6px}.count{color:var(--pin-muted,#737373);opacity:.75}.task-tools button,.task-entry button{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:var(--radius-sm);padding:4px 6px;color:var(--pin-accent,#2563eb);background:transparent;cursor:pointer;font:inherit;transition:background var(--motion-fast),transform var(--motion-fast)}.task-tools button:hover,.task-entry button:hover{background:var(--pin-active,#eff6ff)}.task-tools button:active,.task-entry button:active{transform:scale(.96)}.task-tools .add-task{margin-left:auto}.task-entry{box-sizing:border-box;display:grid;grid-template-columns:1fr auto;gap:5px;width:100%;max-width:862px;margin:4px auto 8px;padding:0 26px 0 16px}.task-entry input{min-width:0;padding:7px 9px;border:1px solid var(--pin-border,#ddd);border-radius:var(--radius-sm);background:var(--pin-bg,#fff);color:var(--pin-text,#171717);font:inherit;font-size:12px}.task-entry small{grid-column:1/-1;font-size:10px;color:var(--pin-muted,#737373)}.readonly .milkdown-host{height:auto}.readonly :global(li[data-item-type="task"])::before{cursor:default}.render-error{padding:16px;color:var(--pin-muted,var(--muted));font-size:12px}@media(prefers-reduced-motion:reduce){.task-tools button,.task-entry button{transition:none}}
   .milkdown-host {
     flex:1;
     min-height: 0;
