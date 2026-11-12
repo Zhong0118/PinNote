@@ -490,7 +490,7 @@
 {#if form.snapHint}<div class="snap-hint side-{form.snapHint}" role="status"><span>松手收起到{form.snapHint==='left'?'左':'右'}侧边缘</span></div>{/if}
 <main class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:settings-open={settingsOpen} class:resizing style:--list-w="{shownListWidth}px">
   {#if settingsOpen}<CenterSettings onClose={()=>settingsOpen=false} {shortcutStatus} onExportCurrent={draft?()=>void exportCurrent():undefined}/>{/if}
-  {#if statsOpen&&!settingsOpen}<CenterStats {notes} {openTodos} onClose={()=>statsOpen=false} onTag={showTag}/>{/if}
+  {#if statsOpen&&!settingsOpen}<CenterStats {notes} {openTodos} onClose={()=>statsOpen=false} onTag={showTag} onOpen={id=>{statsOpen=false;void run(()=>select(id));}}/>{/if}
   {#if narrow}<button class="scrim" tabindex="-1" aria-label="关闭列表" onclick={()=>sidebar=false}></button>{/if}
   <aside inert={!sidebar||settingsOpen||statsOpen} aria-hidden={!sidebar||settingsOpen||statsOpen}>
     <div class="side-inner">
