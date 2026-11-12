@@ -1,5 +1,5 @@
 // The note center's window form: a normal window that collapses straight to an edge
-// handle (or, from the window menu only, a free strip). The hidden window always keeps
+// handle (or a free strip). The hidden window always keeps
 // its normal frame, so any outside show (tray, relaunch, shortcut) restores it as is.
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo } from '@tauri-apps/api/event';
@@ -25,7 +25,18 @@ export type CenterFormHost = {
   title: () => string;
   status: (text: string) => void;
   edgeSnap: () => boolean;
+  /**
+   * Hold the page at `size` (CSS px) and scale it, so a shrinking or growing window shows the
+   * whole page scaled instead of reflowing it. `ms` 0 applies at once; `null` lets it go.
+   */
+  morph?: (m: { size: { width: number; height: number }; scale: number; ms: number; curve: string } | null) => void;
 };
+
+// The native curves (see animate_note_window) as CSS, so page and window move together.
+const CSS_CURVE = { out: 'cubic-bezier(.2,.85,.25,1)', inOut: 'cubic-bezier(.45,0,.2,1)', in: 'cubic-bezier(.4,0,1,1)' } as const;
+/** How small the window gets as it flies into the handle or strip (and grows back from). */
+const MORPH_SCALE = 0.22;
+
 
 export class CenterForm {
   mode = $state<CenterMode>('window');
@@ -92,6 +103,33 @@ export class CenterForm {
   #nudge(b: Bounds, toward: CenterSide | 'up', d = 24): Bounds {
     return toward === 'up' ? { ...b, y: b.y + 8 * b.scaleFactor } : { ...b, x: b.x + (toward === 'left' ? -d : d) * b.scaleFactor };
   }
+  /** A frame `scale` times the size of `b`, centred on the middle of `at`. */
+  #shrunk(b: Bounds, at: Bounds, scale = MORPH_SCALE): Bounds {
+    const width = Math.max(48, Math.round(b.width * scale)), height = Math.max(48, Math.round(b.height * scale));
+    const cx = at.x + at.width * at.scaleFactor / 2, cy = at.y + at.height * at.scaleFactor / 2;
+    return { ...b, x: Math.round(cx - width * b.scaleFactor / 2), y: Math.round(cy - height * b.scaleFactor / 2), width, height };
+  }
+  /** Page size inside an outer frame (the overlay title bar adds no chrome on macOS). */
+  async #pageSize(b: Bounds) {
+    const { chrome } = await this.readOuter();
+    return { width: b.width - chrome.width, height: b.height - chrome.height };
+  }
+  /**
+   * Grow out of the handle or strip at `from` into `to`: the page is scaled with the window,
+   * so it reads as the same page getting bigger rather than reflowing on the way.
+   */
+  async #grow(to: Bounds, from: Bounds | undefined, toward: CenterSide | 'up') {
+    const win = getCurrentWindow(), morph = this.host.morph, ms = 300;
+    if (!canAnimateWindow() || !morph || !from) { await this.#showFaded(to, this.#nudge(to, toward), 240); return; }
+    const size = await this.#pageSize(to), start = this.#shrunk(to, from);
+    morph({ size, scale: start.width / to.width, ms: 0, curve: CSS_CURVE.out });
+    try {
+      await this.#animate({ bounds: start, alpha: 0, duration: 0 });
+      await win.show();
+      morph({ size, scale: 1, ms, curve: CSS_CURVE.out });
+      await this.#animate({ bounds: to, alpha: 1, duration: ms, curve: 'out' });
+    } finally { morph(null); }
+  }
   async #showFaded(to: Bounds, from: Bounds = to, ms = 240) {
     const win = getCurrentWindow();
     if (!canAnimateWindow()) { await this.applyOuter(to); await win.show(); return; }
@@ -104,10 +142,21 @@ export class CenterForm {
    * drag was released), hide, then park the hidden frame at `restore` for the next show.
    * The exit motion never travels to the remembered frame.
    */
-  async #hideFaded(from: Bounds, restore: Bounds, toward: CenterSide | 'up') {
-    const win = getCurrentWindow();
-    if (canAnimateWindow()) await this.#animate({ bounds: this.#nudge(from, toward), alpha: 0, duration: 170, curve: 'in' });
-    await win.hide();
+  async #hideFaded(from: Bounds, restore: Bounds, toward: CenterSide | 'up', into?: Bounds) {
+    const win = getCurrentWindow(), morph = this.host.morph;
+    if (canAnimateWindow() && into && morph) {
+      // Shrink along the way into the handle or strip, fading as it goes.
+      const end = this.#shrunk(from, into), ms = 280, size = await this.#pageSize(from);
+      morph({ size, scale: 1, ms: 0, curve: CSS_CURVE.inOut });
+      try {
+        morph({ size, scale: end.width / from.width, ms, curve: CSS_CURVE.inOut });
+        await this.#animate({ bounds: end, alpha: 0, duration: ms, curve: 'inOut' });
+        await win.hide();
+      } finally { morph(null); }
+    } else {
+      if (canAnimateWindow()) await this.#animate({ bounds: this.#nudge(from, toward), alpha: 0, duration: 170, curve: 'in' });
+      await win.hide();
+    }
     if (mac) await this.#animate({ alpha: 1, duration: 0 });
     await this.applyOuter(restore);
   }
@@ -144,6 +193,16 @@ export class CenterForm {
     await dock.setPosition(mac ? new LogicalPosition(bounds.x, bounds.y) : new PhysicalPosition(bounds.x, bounds.y));
     await this.syncDock();
     await dock.show();
+  }
+  /** Where the handle or strip is now (it may have been dragged since). */
+  async #dockFrame(): Promise<Bounds | undefined> {
+    try {
+      const dock = await WebviewWindow.getByLabel('center-dock');
+      if (!dock || !await dock.isVisible()) return undefined;
+      const [p, size, scale] = await Promise.all([dock.outerPosition(), dock.outerSize(), dock.scaleFactor()]);
+      const s = size.toLogical(scale);
+      return normalizeBounds({ x: p.x, y: p.y, width: s.width, height: s.height, scaleFactor: scale }, mac);
+    } catch { return undefined; }
   }
   async #hideDock() { this.#dockKind = undefined; await (await WebviewWindow.getByLabel('center-dock'))?.hide(); }
   /** Re-place the handle after its display, work area or neighbouring tabs changed. */
@@ -200,8 +259,9 @@ export class CenterForm {
       const nextSide = side ?? dock?.side ?? nearestSide(current, displayFor(current, displays) ?? displays[0]);
       this.dock = dock ?? (pointer ? dockAt(pointer, nextSide, displays)
         : { ...this.dock, side: nextSide, display: dockAt({ x: current.x + current.width * current.scaleFactor / 2, y: current.y }, nextSide, displays).display });
-      await this.#showDock('handle', await this.handleFrame());
-      await this.#hideFaded(current, keep, nextSide);
+      const handle = await this.handleFrame();
+      await this.#showDock('handle', handle);
+      await this.#hideFaded(current, keep, nextSide, handle);
       this.mode = 'handle';
       this.host.status('已收起到边缘 · 点击把手恢复');
     });
@@ -213,8 +273,9 @@ export class CenterForm {
       const current = (await this.readOuter()).bounds;
       const displays = await this.displays();
       this.normal = restoreFrame(current, current, displays);
-      await this.#showDock('bar', barBounds(current, displays));
-      await this.#hideFaded(current, this.normal, 'up');
+      const bar = barBounds(current, displays);
+      await this.#showDock('bar', bar);
+      await this.#hideFaded(current, this.normal, 'up', bar);
       this.mode = 'bar';
       this.host.status('已收起为条 · 点击条恢复');
     });
@@ -241,7 +302,7 @@ export class CenterForm {
       const target = restoreFrame(this.normal, (await this.readOuter()).bounds, displays);
       this.normal = target;
       await getCurrentWindow().setMinSize(new LogicalSize(CENTER_WINDOW_MIN.width, CENTER_WINDOW_MIN.height));
-      await this.#showFaded(target, this.#nudge(target, from === 'handle' ? this.dock.side : 'up'), 240);
+      await this.#grow(target, await this.#dockFrame(), from === 'handle' ? this.dock.side : 'up');
       await this.#hideDock();
       this.mode = 'window';
       await getCurrentWindow().setFocus();
