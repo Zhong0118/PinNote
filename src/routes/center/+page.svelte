@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, emit, emitTo } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ChevronDown } from 'lucide-svelte';
+  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ChevronDown, ClockArrowDown } from 'lucide-svelte';
   import { answerRelease } from '$lib/editorHandoff';
   import { fitBounds } from '$lib/windowGeometry';
   import { validWindow } from '$lib/centerLayout';
@@ -26,7 +26,9 @@
   import { checklistProgress } from '$lib/checklist';
   import NoteColorPicker from '../../components/NoteColorPicker.svelte';
   import {noteBackground,noteTint,noteDot} from '$lib/noteAppearance';
-  import { plainExcerpt, shortTime } from '$lib/excerpt';
+  import { plainExcerpt, shortTime, listTime } from '$lib/excerpt';
+  import { sortable, moveAmong, arrange, type SortDrag } from '$lib/sortable';
+  import { LIST_WIDTH, clampListWidth } from '$lib/centerLayout';
   import type {NoteTheme} from '$lib/settings';
   let reminderOpen=$state(false);
   let due=$state<PinNote[]>([]);
@@ -51,7 +53,15 @@
   let saveError = $state('');
   const errorText = (e:unknown) => String(e instanceof Error ? e.message : e).replace(/^Error:\s*/,'');
   let undo = $state<{id:string;at:number}|null>(null);
-  let dragTab = '';
+  // Manual list arrangement and list width live in the center session (see restoreSession).
+  let order = $state<string[]>([]);
+  let listWidth = $state(LIST_WIDTH.default);
+  let resizing = $state(false);
+  let rowDrag = $state<SortDrag|null>(null);
+  let tabDrag = $state<SortDrag|null>(null);
+  // Re-renders list times once a minute so "14:20" becomes "昨天" after midnight.
+  let clock = $state(Date.now());
+  const editedAt = (n:PinNote) => n.editedAt ?? n.updatedAt;
   const positions = new Map<string,{from:number;to:number;scroll:number}>();
   // List summaries (excerpt, to-do counts, search text) are derived once per note version.
   const summaries=new Map<string,{note:PinNote;excerpt:string;tasks:{done:number;total:number};search:string}>();
@@ -63,7 +73,8 @@
     }
     return s;
   }
-  const visible = $derived.by(()=>{const q=query.toLowerCase();return notes.filter(n => (filter === 'desktop' ? n.lifecycle === 'active' && n.placement === 'desktop' : n.lifecycle === filter) && (!q||summary(n).search.includes(q)));});
+  const arranged = $derived(arrange(notes, order));
+  const visible = $derived.by(()=>{const q=query.toLowerCase();return arranged.filter(n => (filter === 'desktop' ? n.lifecycle === 'active' && n.placement === 'desktop' : n.lifecycle === filter) && (!q||summary(n).search.includes(q)));});
   // One writer per note: the center edits center notes and desktop notes that are only a
   // capsule/edge tab. An expanded desktop window owns its note until editing is handed back.
   let handoff = $state('');
@@ -73,7 +84,7 @@
 
   async function refresh() {
     const all=(await notesSnapshot()).notes;
-    notes = Object.values(all).sort((a,b)=>b.updatedAt-a.updatedAt);
+    notes = Object.values(all).sort((a,b)=>editedAt(b)-editedAt(a));
     for(const id of summaries.keys()) if(!all[id]) summaries.delete(id);
     due=notes.filter(n=>n.lifecycle==='active'&&n.reminder?.state==='delivered');
   }
@@ -228,7 +239,28 @@
       status=`已导出 ${target.split(/[\\/]/).at(-1)}`;
     } catch(error) { status=`导出失败：${error}`; }
   }
-  function reorder(id:string) { if(!dragTab || dragTab===id) return; const next=tabs.filter(t=>t!==dragTab); next.splice(next.indexOf(id),0,dragTab); tabs=next; dragTab=''; }
+  /** A list row was released: reorder, or drop on 放到桌面 / the tab strip. */
+  function dropRow(id:string, index:number|null, target:Element|null) {
+    if(index!==null){ order=moveAmong(arranged.map(n=>n.id), visible.map(n=>n.id), id, index); return; }
+    if(target?.closest('[data-drop-desktop]')) void run(async()=>{ await select(id); await desktop(); });
+    else if(target?.closest('.tabs')) void run(()=>select(id));
+  }
+  function dropTab(id:string, index:number|null) { if(index!==null) tabs=moveAmong(tabs, tabs, id, index); }
+  /** Drag the list's right edge; double-click resets it. */
+  function resizeList(event:PointerEvent) {
+    if(event.button!==0) return;
+    event.preventDefault();
+    const handle=event.currentTarget as HTMLElement; handle.setPointerCapture(event.pointerId);
+    const start=event.clientX, from=shownListWidth; resizing=true;
+    const move=(e:PointerEvent)=>{ listWidth=clampListWidth(from+e.clientX-start); };
+    const end=()=>{ resizing=false; handle.removeEventListener('pointermove',move); handle.removeEventListener('pointerup',end); handle.removeEventListener('pointercancel',end); };
+    handle.addEventListener('pointermove',move); handle.addEventListener('pointerup',end); handle.addEventListener('pointercancel',end);
+  }
+  function resizeKey(event:KeyboardEvent) {
+    const step=event.shiftKey?40:10;
+    if(event.key==='ArrowLeft'){ event.preventDefault(); listWidth=clampListWidth(shownListWidth-step); }
+    else if(event.key==='ArrowRight'){ event.preventDefault(); listWidth=clampListWidth(shownListWidth+step); }
+  }
   let visibility=Promise.resolve();
   function toggleDesktop() {
     visibility=visibility.then(async()=>{
@@ -255,20 +287,25 @@
     edgeSnap,
   });
   const narrow=$derived(width<640);
+  // The editor keeps at least 380px; the saved width comes back when the window grows again.
+  const shownListWidth=$derived(Math.max(LIST_WIDTH.min, Math.min(listWidth, width-380)));
   let restored=false;
   function restoreSession() {
     const session=form.restore();
     if(!appSettings.behavior.restoreSession){ session.tabs=[]; session.selected=''; }
     // Reopen the last working tabs and note.
     tabs=session.tabs.filter(id=>notes.some(n=>n.id===id));
+    order=session.order; listWidth=session.listWidth;
     const last=notes.find(n=>n.id===session.selected);
     if(last){ selected=last.id; draft=structuredClone($state.snapshot(last)); if(!tabs.includes(last.id)) tabs=[...tabs,last.id]; revision++; }
     restored=true;
     return session;
   }
   $effect(()=>{
-    form.tabs=[...tabs]; form.selected=selected;
-    if(restored) form.save();
+    form.tabs=[...tabs]; form.selected=selected; form.order=[...order];
+    // A width drag saves once, on release.
+    if(!resizing) form.listWidth=listWidth;
+    if(restored&&!resizing) form.save();
   });
   // Entering a narrow layout closes the list drawer; it opens on demand.
   $effect(()=>{ if(narrow) sidebar=false; });
@@ -367,6 +404,12 @@
     });
     // The only display poller: note windows and the handle follow its broadcast.
     let displaySignature='';
+    const clockTimer=setInterval(()=>clock=Date.now(),60000);
+    // A button hovered when the window collapsed would stay grey when it comes back; the
+    // hover shows again on the next real pointer move.
+    const staleHover=()=>{ document.documentElement.dataset.staleHover=''; };
+    const freshHover=()=>{ delete document.documentElement.dataset.staleHover; };
+    window.addEventListener('blur',staleHover); window.addEventListener('pointermove',freshHover,{passive:true});
     const displayTimer=setInterval(()=>void form.displays().then(all=>{
       const signature=JSON.stringify(all);
       if(displaySignature&&signature!==displaySignature){ void emit('displays-changed'); void form.relayoutHandle(); }
@@ -396,26 +439,26 @@
     void quit.then(async()=>{const attempt=await invoke<number|null>('pending_quit');if(attempt!=null)void saveForQuit(attempt);});
     const cancelled=listen<number>('quit-save-cancelled',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
     const failed=listen<number>('quit-save-failed',e=>{if(quitGuard.cancel(e.payload))document.body.inert=false;});
-    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed,reminder,reminderError,agentOpen,release,dockHello,dockAction,focus,moved,resized].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();clearTimeout(handoffTimer);clearInterval(displayTimer);stopAppearance();stopConflict();};
+    return()=>{[changes,newNote,toggle,settings,settingsChanged,close,quit,cancelled,failed,reminder,reminderError,agentOpen,release,dockHello,dockAction,focus,moved,resized].forEach(p=>p.then(f=>f()));void unregisterGlobalShortcuts();clearTimeout(handoffTimer);clearInterval(displayTimer);clearInterval(clockTimer);window.removeEventListener('blur',staleHover);window.removeEventListener('pointermove',freshHover);stopAppearance();stopConflict();};
   });
 </script>
 
 <svelte:window bind:innerWidth={width} onkeydown={e=>{if((e.metaKey||e.ctrlKey)&&e.key===','&&!e.isComposing){e.preventDefault();void openSettings();}}}/>
 {#if form.snapHint}<div class="snap-hint side-{form.snapHint}" role="status"><span>松手收起到{form.snapHint==='left'?'左':'右'}侧边缘</span></div>{/if}
-<main class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:settings-open={settingsOpen}>
+<main class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:settings-open={settingsOpen} class:resizing style:--list-w="{shownListWidth}px">
   {#if settingsOpen}<CenterSettings onClose={()=>settingsOpen=false} {shortcutStatus} onExportCurrent={draft?()=>void exportCurrent():undefined}/>{/if}
   {#if narrow}<button class="scrim" tabindex="-1" aria-label="关闭列表" onclick={()=>sidebar=false}></button>{/if}
   <aside inert={!sidebar||settingsOpen} aria-hidden={!sidebar||settingsOpen}>
     <div class="side-inner">
       {#if mac}<div class="titlebar-space" data-tauri-drag-region></div>{/if}
       <div class="search"><Search size={15}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={16}/></button></div>
-      <nav><button class:active={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button class:active={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button></nav>
-      <div class="list">
+      <nav><button class:active={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button class:active={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button>{#if order.length}<button class="sort-reset" aria-label="恢复按编辑时间排序" title="恢复按编辑时间排序" onclick={()=>order=[]}><ClockArrowDown size={14}/></button>{/if}</nav>
+      <div class="list" use:sortable={{axis:'y',onDrag:d=>rowDrag=d,onDrop:dropRow}}>
         {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={13}/></button></div>{/each}
-        {#each visible as note(note.id)}
+        {#each visible as note,i(note.id)}
           {@const info=summary(note)}{@const tasks=info.tasks}
-          <button animate:shift class="note-row" class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})} draggable="true" ondragstart={e=>e.dataTransfer?.setData('text/pinnote',note.id)}>
-             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={13}/>{/if}</span><small>{info.excerpt||(note.content.trim() ? '打开查看内容' : '暂无正文')}</small>
+          <button animate:shift class="note-row" data-sort-id={note.id} class:chosen={selected===note.id} class:dragging={rowDrag?.id===note.id} class:drop-before={rowDrag?.index===i} class:drop-after={rowDrag?.index===visible.length&&i===visible.length-1} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})}>
+             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={13}/>{/if}<time datetime={new Date(editedAt(note)).toISOString()} title="编辑于 {shortTime(editedAt(note),clock)}">{listTime(editedAt(note),clock)}</time></span><small>{info.excerpt||(note.content.trim() ? '打开查看内容' : '暂无正文')}</small>
              {#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}
           </button>
         {:else}<p class="empty">{query?'没有匹配的便签':'这里还没有便签'}</p>{/each}
@@ -423,12 +466,13 @@
       <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={13}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={13}/>回收站</button><button aria-label="设置" title="设置（{mac?'⌘':'Ctrl+'},）" onclick={()=>void openSettings()}><Settings size={15}/></button></footer>
     </div>
   </aside>
+  {#if !narrow}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <div class="list-resizer" role="separator" aria-orientation="vertical" aria-label="调整列表宽度" aria-valuemin={LIST_WIDTH.min} aria-valuemax={LIST_WIDTH.max} aria-valuenow={shownListWidth} tabindex={sidebar?0:-1} title="拖动调整列表宽度 · 双击恢复默认" hidden={!sidebar||settingsOpen} onpointerdown={resizeList} onkeydown={resizeKey} ondblclick={()=>listWidth=LIST_WIDTH.default}></div>{/if}
   <section class="work" class:ink={draft?.theme==='ink'} style:--pin-bg={draft?noteBackground(draft.theme,draft.customColor):'var(--surface)'} style:--note-tint={draft?noteTint(draft.theme,draft.customColor):undefined} inert={busy||settingsOpen}>
     <header class="tabs" data-tauri-drag-region><button class="list-toggle" aria-label={sidebar?'隐藏列表':'显示列表'} title={sidebar?'隐藏列表':'显示列表'} onclick={()=>sidebar=!sidebar}><PanelLeft size={16}/></button>
-      <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region>
-        {#each tabs as id(id)}
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="tab" class:current={selected===id} animate:shift draggable="true" ondragstart={e=>{dragTab=id;e.dataTransfer?.setData('text/pinnote-tab',id);}} ondragend={()=>dragTab=''} ondragover={e=>e.preventDefault()} ondrop={e=>{e.preventDefault();if(e.dataTransfer?.getData('text/pinnote-tab')===dragTab)reorder(id);dragTab='';}}>
+      <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region use:sortable={{axis:'x',onDrag:d=>tabDrag=d,onDrop:dropTab}}>
+        {#each tabs as id,i(id)}
+          <div class="tab" data-sort-id={id} class:current={selected===id} class:dragging={tabDrag?.id===id} class:drop-before={tabDrag?.index===i} class:drop-after={tabDrag?.index===tabs.length&&i===tabs.length-1} animate:shift>
             <button class="tab-title" title={notes.find(n=>n.id===id)?.title||'未命名便签'} onclick={()=>run(()=>select(id))}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</button><button class="tab-close" aria-label="关闭 Tab" onclick={()=>run(()=>closeTab(id))}><X size={13}/></button>
           </div>
         {/each}
@@ -451,7 +495,7 @@
         {#if draft.lifecycle==='active'}<NoteColorPicker theme={draft.theme} customColor={draft.customColor} onChange={changeColor}/>{/if}
         {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{shortTime(draft.reminder.at)}</button>{/if}
         {#if draft.lifecycle==='active'}
-          <button class="desktop" disabled={busy} onclick={()=>run(desktop)} ondragover={e=>e.preventDefault()} ondrop={e=>{e.preventDefault();const id=e.dataTransfer?.getData('text/pinnote');void run(async()=>{if(id)await select(id);await desktop();});}}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
+          <button class="desktop" data-drop-desktop class:drop-target={rowDrag&&rowDrag.index===null} disabled={busy} onclick={()=>run(desktop)}><Monitor size={15}/>{draft.placement==='desktop'?'定位窗口':'放到桌面'}</button>
         {/if}
         <button class="more" aria-label="更多操作" title="更多操作" aria-expanded={menu} onclick={()=>menu=!menu}><MoreHorizontal size={16}/></button>
         {#if menu}<div class="menu" use:popup={()=>menu=false} transition:reveal role="dialog" tabindex="-1">
@@ -488,11 +532,17 @@
  :global(body){margin:0;font:13px/1.55 var(--font);color:var(--text);background:var(--surface);-webkit-font-smoothing:antialiased}
  /* Layout: list | work area. The list folds with a short, continuous slide. */
  main{position:relative;--pin-text:var(--text);--pin-heading:var(--text-strong);--pin-muted:var(--muted);--pin-accent:var(--accent);--pin-accent-strong:var(--accent-strong);--pin-border:var(--border);--pin-active:var(--accent-soft);--pin-bg:var(--surface);
-   display:grid;grid-template-columns:230px minmax(0,1fr);height:100vh;overflow:hidden;transition:grid-template-columns var(--motion) var(--ease-out)}
+   display:grid;grid-template-columns:var(--list-w,230px) minmax(0,1fr);height:100vh;overflow:hidden;transition:grid-template-columns var(--motion) var(--ease-out)}
  main.folded{grid-template-columns:0px minmax(0,1fr)}
+ main.resizing{transition:none;cursor:col-resize;user-select:none}
+ /* The list's right edge: a wide hit area with a hairline that turns accent on hover or drag. */
+ .list-resizer{position:absolute;z-index:5;top:0;bottom:0;left:calc(var(--list-w,230px) - 4px);width:8px;cursor:col-resize;touch-action:none}
+ .list-resizer::after{content:'';position:absolute;top:0;bottom:0;left:3px;width:2px;background:transparent;transition:background var(--motion-fast)}
+ .list-resizer:hover::after,main.resizing .list-resizer::after,.list-resizer:focus-visible::after{background:var(--accent)}
+ .list-resizer:focus-visible{outline:none}
  :global([data-center-shadow="light"]) main{box-shadow:inset 0 0 0 1px var(--border)}
  aside{grid-column:1;grid-row:1;min-width:0;min-height:0;overflow:hidden;display:block;background:var(--surface-muted);border-right:1px solid var(--hairline)}
- .side-inner{width:230px;height:100%;display:flex;flex-direction:column}
+ .side-inner{width:var(--list-w,230px);height:100%;display:flex;flex-direction:column}
  .titlebar-space{height:36px;flex:0 0 auto}
  .search{display:flex;align-items:center;gap:8px;padding:14px 10px;color:var(--muted)}main.mac .search{padding-top:4px}
  .search input{min-width:0;width:100%;background:transparent;color:var(--text)}
@@ -501,12 +551,25 @@
  button:hover{background:var(--hover)}button:active{transform:scale(.97)}button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}button:disabled{opacity:.5;cursor:wait}
  .active,.chosen{color:var(--accent)!important;background:var(--accent-soft)!important}
  nav{display:flex;padding:0 8px 10px;gap:5px}nav button{font-size:12px;flex:1}
+ /* Shown once the list has a manual order: one click returns to newest edit first. */
+ nav .sort-reset{flex:0 0 28px;padding:0;color:var(--muted)}nav .sort-reset:hover{color:var(--text);background:var(--hover-strong)}
  .list{flex:1;overflow:auto;padding:0 7px}
  .note-row{display:block;width:100%;text-align:left;padding:10px;margin:2px 0}
  .note-row span{display:flex;align-items:center;justify-content:space-between;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
  .note-row .row-heading{justify-content:flex-start}.row-heading b{flex:1;overflow:hidden;text-overflow:ellipsis;font-weight:500}
  .note-row small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--muted);margin-top:3px;font-size:12px}
  .note-row .list-progress{color:var(--accent);font-size:10px}
+ .row-heading time{flex:0 0 auto;margin-left:auto;color:var(--subtle);font-size:11px;font-variant-numeric:tabular-nums}
+ .note-row.chosen time{color:color-mix(in srgb,var(--accent) 70%,transparent)}
+ /* Drag to reorder: the lifted item dims and an accent line marks where it will land. */
+ .note-row,.tab{position:relative}
+ .note-row.dragging,.tab.dragging{opacity:.45}
+ .note-row.drop-before::before,.note-row.drop-after::after{content:'';position:absolute;left:8px;right:8px;height:2px;border-radius:1px;background:var(--accent);pointer-events:none}
+ .note-row.drop-before::before{top:-3px}.note-row.drop-after::after{bottom:-3px}
+ .tab.drop-before::before,.tab.drop-after::after{content:'';position:absolute;top:5px;bottom:5px;width:2px;border-radius:1px;background:var(--accent);pointer-events:none}
+ .tab.drop-before::before{left:-2px}.tab.drop-after::after{right:-2px}
+ :global(:root[data-sorting]),:global(:root[data-sorting] *){cursor:grabbing!important;user-select:none!important}
+ .desktop.drop-target{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
  .note-dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 .5px var(--hairline)}
  .due{display:flex;flex-wrap:wrap;font-size:11px;background:var(--accent-soft);border-radius:var(--radius-sm);margin:4px}.due button{font-size:11px}
  footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:var(--muted)}footer button:last-child{margin-left:auto}
@@ -520,8 +583,12 @@
  main.mac.folded .tabs{padding-left:84px}
  /* Icon buttons share one size, shape and set of states. */
  .list-toggle,.window-tools button,.more,.search button{width:28px;height:28px;padding:0;border-radius:50%;color:var(--muted)}
- .list-toggle:hover,.window-tools button:hover,.more:hover,.search button:hover{color:var(--text);background:var(--hover)}
- .window-tools .on,.more[aria-expanded="true"]{color:var(--accent);background:var(--accent-soft)}
+ /* On the sunken tab bar the ordinary 4% hover is nearly invisible: the bar's controls use the stronger step. */
+ .list-toggle:hover,.window-tools button:hover,.more:hover,.search button:hover{color:var(--text);background:var(--hover-strong)}
+ /* A lit control (pinned, menu open) stays lit on hover and only deepens. */
+ .window-tools button.on,.more[aria-expanded="true"]{color:var(--accent);background:var(--accent-soft)}
+ .window-tools button.on:hover,.more[aria-expanded="true"]:hover{color:var(--accent);background:var(--accent-soft-strong)}
+ :global(:root[data-stale-hover]) .window-tools button:not(.on):hover,:global(:root[data-stale-hover]) .list-toggle:hover{background:transparent;color:var(--muted)}
  .window-tools .pin.on :global(svg){fill:currentColor;fill-opacity:.22}
  .tab-strip{display:flex;align-items:center;min-width:0;overflow:hidden;flex:1;gap:2px}
  .tab{position:relative;display:flex;align-items:center;flex:0 1 auto;min-width:72px;max-width:200px;height:28px;padding:0 3px 0 10px;border-radius:var(--radius);color:var(--muted);transition:background var(--motion-fast),color var(--motion-fast),box-shadow var(--motion-fast)}
@@ -568,5 +635,5 @@
  main.narrow .side-inner{width:100%}
  main.narrow .title-row{padding:12px 14px}main.narrow .tab{min-width:84px}main.narrow .desktop{padding:6px}
  @media(max-width:700px){.title-row{padding:12px}.desktop{font-size:11px}}
- @media(prefers-reduced-motion:reduce){main,main.narrow aside,.scrim,.tabs,.tab,.tab .tab-close,button,.work,.snap-hint{transition:none;animation:none}}
+ @media(prefers-reduced-motion:reduce){main,main.narrow aside,.scrim,.tabs,.tab,.tab .tab-close,button,.work,.snap-hint,.list-resizer::after{transition:none;animation:none}}
 </style>

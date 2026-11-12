@@ -190,6 +190,7 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
         });
         note["createdAt"] = json!(now());
         note["updatedAt"] = json!(now());
+        note["editedAt"] = json!(now());
         file["notes"][id] = note.clone();
         if request["source"] == "agent" {
             let history = file["history"].as_array_mut().unwrap();
@@ -317,6 +318,11 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
             }
             if !note["title"].is_string() || !note["content"].is_string() {
                 return Err("Invalid content".into());
+            }
+            // The list shows when the words last changed; window, colour, reminder and
+            // lifecycle changes leave it alone.
+            if note["title"] != before["title"] || note["content"] != before["content"] {
+                note["editedAt"] = json!(now());
             }
         }
         "archive" | "trash" => {
@@ -510,6 +516,19 @@ mod tests {
             &json!({"id":"a","op":"create","note":{"title":"","content":""}})
         )
         .is_err());
+    }
+    #[test]
+    fn edited_at_follows_title_and_body_only() {
+        let mut f = file();
+        assert!(f["notes"]["a"]["editedAt"].is_null());
+        mutate(&mut f,&json!({"id":"a","op":"save","expectedRevision":1,"patch":{"window":{"x":1}}})).unwrap();
+        assert!(f["notes"]["a"]["editedAt"].is_null());
+        mutate(&mut f,&json!({"id":"a","op":"reminder","expectedRevision":2,"at":null})).unwrap();
+        assert!(f["notes"]["a"]["editedAt"].is_null());
+        mutate(&mut f,&json!({"id":"a","op":"save","expectedRevision":3,"patch":{"content":"新内容"}})).unwrap();
+        assert!(f["notes"]["a"]["editedAt"].as_u64().is_some());
+        mutate(&mut f,&json!({"id":"b","op":"create","note":{"title":"新","content":""}})).unwrap();
+        assert!(f["notes"]["b"]["editedAt"].as_u64().is_some());
     }
     #[test]
     fn invalid_migration_preserves_data() {

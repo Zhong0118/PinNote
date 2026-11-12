@@ -35,3 +35,13 @@ export function shortTime(at: number, now = Date.now()) {
     : d.getFullYear() === today.getFullYear() ? `${d.getMonth() + 1}月${d.getDate()}日` : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
   return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/** A compact edit time for list rows: 16:05 today, then 昨天 / 11月8日 / 2025/1/2. */
+export function listTime(at: number, now = Date.now()) {
+  const d = new Date(at), today = new Date(now);
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(today) - day(d)) / 864e5);
+  if (diff <= 0) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (diff === 1) return '昨天';
+  return d.getFullYear() === today.getFullYear() ? `${d.getMonth() + 1}月${d.getDate()}日` : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}

@@ -105,7 +105,15 @@ export function validWindow(bounds: Partial<Bounds> | undefined, displays: Displ
     Math.min(b.y + b.height * b.scaleFactor, p.y + s.height) - Math.max(b.y, p.y) >= 40);
 }
 
-export type CenterSession = { mode: CenterMode; dock: CenterDock; pinned: boolean; window?: Bounds; tabs: string[]; selected: string };
+export type CenterSession = { mode: CenterMode; dock: CenterDock; pinned: boolean; window?: Bounds; tabs: string[]; selected: string;
+  /** The user's arrangement of the note list (empty: newest edit first). */
+  order: string[];
+  /** Note list width in CSS px. */
+  listWidth: number };
+
+/** Note list width bounds and default (CSS px). */
+export const LIST_WIDTH = { min: 190, max: 420, default: 230 };
+export const clampListWidth = (width: number) => Math.round(Math.min(LIST_WIDTH.max, Math.max(LIST_WIDTH.min, width)));
 
 /** Reads any saved center state, including the old four-form layout. `panel` was an
  * intermediate step and now maps to the normal window; `handle` keeps its edge. */
@@ -120,7 +128,9 @@ export function migrateSession(raw: unknown): CenterSession {
     ? { x: w.x, y: w.y, width: w.width, height: w.height, scaleFactor: Number.isFinite(w.scaleFactor) ? w.scaleFactor : 1 } : undefined;
   return { mode, dock, pinned: Boolean(saved.pinned), window,
     tabs: Array.isArray(saved.tabs) ? saved.tabs.filter((t: unknown) => typeof t === 'string') : [],
-    selected: typeof saved.selected === 'string' ? saved.selected : '' };
+    selected: typeof saved.selected === 'string' ? saved.selected : '',
+    order: Array.isArray(saved.order) ? saved.order.filter((t: unknown) => typeof t === 'string') : [],
+    listWidth: Number.isFinite(saved.listWidth) ? clampListWidth(saved.listWidth) : LIST_WIDTH.default };
 }
 
 /** The strip keeps the window's top-left corner, so it collapses where the user was looking. */
