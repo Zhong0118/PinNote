@@ -35,6 +35,8 @@ export type PinNote = {
   editedAt?: number;
   /** Starred notes stay at the top of the center list (time of starring; null = not starred). */
   starredAt?: number | null;
+  /** When the note went into the trash; it is emptied after the chosen number of days. */
+  trashedAt?: number;
   tags?: string[];
   lastFocusedAt: number;
 };
@@ -291,6 +293,7 @@ export function createNote(seed: Partial<PinNote> = {}): PinNote {
     // Optional fields are carried through as-is: loading rebuilds every note through here.
     ...(seed.editedAt !== undefined && { editedAt: seed.editedAt }),
     ...(seed.starredAt != null && { starredAt: seed.starredAt }),
+    ...(seed.trashedAt !== undefined && { trashedAt: seed.trashedAt }),
     ...(seed.tags?.length && { tags: [...seed.tags] }),
   };
 }

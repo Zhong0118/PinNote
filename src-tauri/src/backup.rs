@@ -101,6 +101,8 @@ pub fn start(app: AppHandle) {
                 }
                 drop(guard);
             }
+            // After the backup, so whatever is emptied from the trash is still in it.
+            let _ = notes::empty_expired_trash(&app);
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         }
     });

@@ -16,7 +16,7 @@
   import { noteColors } from '$lib/noteAppearance';
   import { applyAppearance } from '$lib/theme';
   import { loadSettings, saveSettings, isMacPlatform, isNativeApp, normalizeShortcut, platformDefaultShortcuts, shortcutIdentity, shortcutKeyFromEvent,
-    type AppSettings, type AppearanceSettings, type ShadowLevel, type ThemeMode } from '$lib/settings';
+    trashDayOptions, type AppSettings, type AppearanceSettings, type ShadowLevel, type ThemeMode } from '$lib/settings';
 
   type Category = 'appearance' | 'window' | 'shortcuts' | 'integration' | 'data';
   let { onClose, shortcutStatus = '', onExportCurrent, initial = 'appearance' }:
@@ -251,6 +251,8 @@
       <div class="row"><div><b>导出全部</b><small>每张便签一个 Markdown 文件，归档的便签另放一个文件夹。</small>
           {#if exportStatus}<small>{exportStatus}{#if exportedPath} <button class="link" onclick={() => void revealItemInDir(exportedPath).catch(() => undefined)}>在文件夹中显示</button>{/if}</small>{/if}</div>
         <div class="actions">{#if onExportCurrent}<button class="text" onclick={onExportCurrent}><Download size={13} />当前便签</button>{/if}<button class="text" onclick={exportAll}><FolderDown size={13} />导出全部</button></div></div>
+      <div class="row"><div><b>回收站自动清空</b><small>移到回收站的便签保留这么多天，之后自动永久删除；删除前的内容仍在当天的自动备份里。</small></div>
+        <div class="segmented" role="radiogroup" aria-label="回收站保留天数">{#each trashDayOptions as days}<button role="radio" aria-checked={settings.trashDays === days} class:on={settings.trashDays === days} onclick={() => patch('trashDays', days)}>{days ? `${days} 天` : '永不'}</button>{/each}</div></div>
       <div class="block">
         <div class="head"><div><b>自动备份</b><small>每天自动备份一次全部便签，内容没变就不备份，保留最近 14 份。恢复前会先把当前内容另存一份，恢复也能撤回。</small></div>
           <div class="actions">{#if backups.length > 5}<button class="text" onclick={() => showAllBackups = !showAllBackups}>{showAllBackups ? '收起' : `全部 ${backups.length} 份`}</button>{/if}<button class="text" onclick={backupNow}><HardDriveDownload size={13} />立即备份</button></div></div>

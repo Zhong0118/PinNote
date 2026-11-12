@@ -30,7 +30,7 @@
   import { sortable, moveAmong, arrange, type SortDrag } from '$lib/sortable';
   import { LIST_WIDTH, clampListWidth } from '$lib/centerLayout';
   import type {NoteTheme} from '$lib/settings';
-  import { starredFirst, noQuickFilters, quickFilterCount, passesQuickFilters, tagCounts, highlightParts, matchSnippet } from '$lib/library';
+  import { starredFirst, noQuickFilters, quickFilterCount, passesQuickFilters, tagCounts, highlightParts, matchSnippet, trashDaysLeft } from '$lib/library';
   import VersionDialog from '../../components/VersionDialog.svelte';
   import CenterStats from '../../components/CenterStats.svelte';
   let reminderOpen=$state(false);
@@ -315,6 +315,7 @@
   let width=$state(960);
   let windowMenu=$state(false);
   let appSettings:AppSettings=structuredClone(defaultSettings);
+  let trashDays=$state<number>(defaultSettings.trashDays);
   let settingsOpen=$state(false);
   let shortcutStatus=$state('');
   const edgeSnap=()=>appSettings.behavior.edgeSnap;
@@ -362,7 +363,7 @@
   onMount(()=>{
     const setup=(async()=>{
       await refresh();
-      appSettings=await loadSettings();
+      appSettings=await loadSettings(); trashDays=appSettings.trashDays;
       void invoke('set_capture_protection',{enabled:appSettings.behavior.hideFromCapture}).catch(()=>undefined);
       const registered=await registerGlobalShortcuts(appSettings.shortcuts,{toggleWindow:toggleDesktop,newNote:()=>void run(create)});
       shortcutStatus=registered.ok||registered.cancelled?'':`全局快捷键注册失败：${registered.message}`;
@@ -463,7 +464,7 @@
     const settingsChanged=listen<AppSettings>('settings-changed',async({payload})=>{
       const before=JSON.stringify(appSettings.shortcuts);
       if(payload.behavior?.hideFromCapture!==appSettings.behavior.hideFromCapture) void invoke('set_capture_protection',{enabled:payload.behavior.hideFromCapture}).catch(()=>undefined);
-      appSettings=payload;
+      appSettings=payload; trashDays=payload.trashDays;
       if(JSON.stringify(payload.shortcuts)===before) return;
       const registered=await registerGlobalShortcuts(payload.shortcuts,{toggleWindow:toggleDesktop,newNote:()=>void run(create)});
       shortcutStatus=registered.ok||registered.cancelled?'':`全局快捷键注册失败（可能被其他应用占用）：${registered.message}`;
@@ -513,6 +514,7 @@
         {#if quick.todo}<button onclick={()=>quick={...quick,todo:false}}>有待办<X size={11}/></button>{/if}
         {#if quick.tag}<button onclick={()=>quick={...quick,tag:''}}>#{quick.tag}<X size={11}/></button>{/if}
       </div>{/if}
+      {#if filter==='trash'}<p class="trash-hint">{trashDays?`便签在回收站中保留 ${trashDays} 天，之后自动永久删除。`:'回收站中的便签不会自动删除。'}<button onclick={()=>void openSettings()}>更改</button></p>{/if}
       <div class="list" use:sortable={{axis:'y',onDrag:d=>rowDrag=d,onDrop:dropRow}}>
         {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={13}/></button></div>{/each}
         {#each visible as note,i(note.id)}
@@ -593,7 +595,7 @@
       {:else}
         <div class="preview" transition:reveal>
           {#if desktopEditing}<div class="notice">正在桌面窗口编辑 <button onclick={()=>run(editHere)}><PenLine size={13}/>在这里编辑</button><button onclick={()=>run(recall)}>收回中心</button></div>{/if}
-          {#if draft.lifecycle!=='active'}<div class="notice">{draft.lifecycle==='trash'?'已在回收站':'已归档'} <button onclick={()=>run(()=>operation('restore'))}>恢复</button></div>{/if}
+          {#if draft.lifecycle!=='active'}<div class="notice">{draft.lifecycle==='trash'?(trashDaysLeft(draft.trashedAt,trashDays,clock)?`已在回收站，${trashDaysLeft(draft.trashedAt,trashDays,clock)} 天后自动永久删除`:'已在回收站'):'已归档'} <button onclick={()=>run(()=>operation('restore'))}>恢复</button></div>{/if}
           {#key `${selected}:${revision}`}<MilkdownEditor readonly value={draft.content} onChange={()=>{}} onReminder={draft.lifecycle==='active'?()=>reminderOpen=true:undefined}/>{/key}
         </div>
       {/if}
@@ -673,6 +675,8 @@
  .due{display:flex;flex-wrap:wrap;font-size:11px;background:var(--accent-soft);border-radius:var(--radius-sm);margin:4px}.due button{font-size:11px}
  footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:var(--muted)}footer button:last-child{margin-left:auto}
  .empty,.empty-work{color:var(--muted);padding:16px}
+ .trash-hint{margin:0 7px 6px;padding:6px 10px;border-radius:var(--radius-sm);background:var(--surface-sunken);color:var(--muted);font-size:11.5px;line-height:1.5}
+ .trash-hint button{margin-left:4px;padding:0;border:0;background:none;color:var(--accent);font:inherit;cursor:pointer}
  /* Work area: tabs, title, editor, status. */
  .work{grid-column:2;grid-row:1;display:grid;grid-template-rows:44px auto minmax(0,1fr) 30px;min-width:0;min-height:0;background:var(--pin-bg);color:var(--pin-text);transition:background var(--motion-fast),color var(--motion-fast)}
  .work.ink{--pin-text:#f5f5f5;--pin-heading:#fff;--pin-muted:#aaa;--pin-border:#ffffff20;--pin-accent:#93b4ff;--pin-accent-strong:#b6cdff;--pin-active:#343434}

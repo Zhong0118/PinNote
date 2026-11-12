@@ -137,6 +137,13 @@ export function recent(days: Map<string, Day>, now: number, count: number, field
   return total;
 }
 
+/** Whole days left before a trashed note is emptied (at least 1), or null when the trash is kept. */
+export function trashDaysLeft(trashedAt: number | undefined, days: number, now: number) {
+  if (!days) return null;
+  const left = Math.ceil(((trashedAt ?? now) + days * 86400000 - now) / 86400000);
+  return Math.max(1, left);
+}
+
 // ---- Export all ----------------------------------------------------------------------------
 
 export const exportFolderName = (now = Date.now()) => {

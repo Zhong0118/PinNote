@@ -305,12 +305,7 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
         if before["lifecycle"] != "trash" {
             return Err("只能在回收站永久删除".into());
         }
-        file["notes"].as_object_mut().unwrap().remove(id);
-        file["tombstones"].as_array_mut().unwrap().push(json!(id));
-        file["history"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|h| h["note"]["id"] != id);
+        remove(file, id);
         return Ok(Value::Null);
     }
     let mut note = before.clone();
@@ -447,10 +442,88 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
             history.remove(0);
         }
     }
+    // When a note entered the trash, for emptying it after the chosen number of days.
+    if note["lifecycle"] == "trash" {
+        if before["lifecycle"] != "trash" || !note["trashedAt"].is_u64() {
+            note["trashedAt"] = json!(now());
+        }
+    } else if let Some(fields) = note.as_object_mut() {
+        fields.remove("trashedAt");
+    }
     note["revision"] = json!(before["revision"].as_u64().unwrap_or(0) + 1);
     note["updatedAt"] = json!(now());
     file["notes"][id] = note.clone();
     Ok(note)
+}
+
+/// Delete a note for good, with its undo history; the tombstone keeps it from coming back.
+fn remove(file: &mut Value, id: &str) {
+    file["notes"].as_object_mut().unwrap().remove(id);
+    file["tombstones"].as_array_mut().unwrap().push(json!(id));
+    file["history"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|h| h["note"]["id"] != id);
+}
+
+const DAY: u64 = 24 * 3600 * 1000;
+
+/// Empty trash older than `days` (0 keeps it forever). Notes trashed before `trashedAt`
+/// existed are stamped now instead, so an upgrade never deletes anything straight away.
+/// Returns whether the file changed and which notes were deleted.
+pub fn sweep_trash(file: &mut Value, now: u64, days: u64) -> (bool, Vec<String>) {
+    let mut stamped = false;
+    let mut expired = Vec::new();
+    for (id, note) in file["notes"].as_object_mut().unwrap() {
+        if note["lifecycle"] != "trash" {
+            continue;
+        }
+        match note["trashedAt"].as_u64() {
+            None => {
+                note["trashedAt"] = json!(now);
+                stamped = true;
+            }
+            Some(at) if days > 0 && now.saturating_sub(at) >= days * DAY => expired.push(id.clone()),
+            Some(_) => {}
+        }
+    }
+    for id in &expired {
+        remove(file, id);
+    }
+    (stamped || !expired.is_empty(), expired)
+}
+
+/// The trash setting from settings.json; 30 days when unset or unreadable.
+fn trash_days(app: &AppHandle) -> u64 {
+    data_file(app, "settings.json")
+        .ok()
+        .and_then(|path| read_optional(path).ok().flatten())
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|settings| settings["trashDays"].as_u64())
+        .filter(|days| matches!(days, 0 | 30 | 60 | 90))
+        .unwrap_or(30)
+}
+
+/// Run by the background loop: delete expired trash and tell every window.
+pub fn empty_expired_trash(app: &AppHandle) -> Result<(), String> {
+    let days = trash_days(app);
+    let state = app.state::<NotesFileLock>();
+    let _guard = state.0.lock().map_err(|_| "Cannot lock notes")?;
+    let mut file = load(app)?;
+    let (changed, expired) = sweep_trash(&mut file, now(), days);
+    if !changed {
+        return Ok(());
+    }
+    store(app, &file)?;
+    for id in expired {
+        let request = json!({"id":id,"op":"purge","source":"system"});
+        crate::journal::after_change(app, &request, None, &Value::Null);
+        let _ = app.emit(
+            "notes-changed",
+            json!({"id":id,"note":Value::Null,"op":"purge","layout":false,"source":"system","by":Value::Null}),
+        );
+    }
+    Ok(())
 }
 
 pub fn operation(app: &AppHandle, mut request: Value) -> Result<Value, String> {
@@ -539,6 +612,44 @@ pub fn note_operation(
     request["source"] = json!("ui");
     request["owner"] = json!(window.label());
     operation(&app, request)
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use super::*;
+
+    fn file_with(notes: Value) -> Value {
+        json!({"version":2,"notes":notes,"history":[{"at":1,"op":"trash","note":{"id":"old"}}],"tombstones":[]})
+    }
+
+    #[test]
+    fn trashing_stamps_the_time_and_restoring_clears_it() {
+        let mut f = file_with(json!({"a":{"id":"a","title":"","content":"","revision":1,"lifecycle":"active","placement":"center","window":{}}}));
+        let note = mutate(&mut f, &json!({"id":"a","op":"trash","expectedRevision":1})).unwrap();
+        assert!(note["trashedAt"].is_u64());
+        let note = mutate(&mut f, &json!({"id":"a","op":"restore","expectedRevision":2})).unwrap();
+        assert!(note.get("trashedAt").is_none());
+    }
+
+    #[test]
+    fn the_sweep_deletes_only_expired_trash_and_never_unstamped_notes() {
+        let now = 100 * DAY;
+        let mut f = file_with(json!({
+            "old":{"id":"old","lifecycle":"trash","trashedAt":now - 31 * DAY},
+            "new":{"id":"new","lifecycle":"trash","trashedAt":now - 29 * DAY},
+            "legacy":{"id":"legacy","lifecycle":"trash"},
+            "kept":{"id":"kept","lifecycle":"archived","trashedAt":0}
+        }));
+        let (changed, gone) = sweep_trash(&mut f, now, 30);
+        assert!(changed);
+        assert_eq!(gone, vec!["old".to_string()]);
+        assert_eq!(f["notes"]["legacy"]["trashedAt"], json!(now), "stamped, not deleted");
+        assert!(f["notes"].get("kept").is_some() && f["notes"].get("new").is_some());
+        assert_eq!(f["tombstones"], json!(["old"]));
+        assert_eq!(f["history"], json!([]), "its undo history goes too");
+        assert_eq!(sweep_trash(&mut f, now, 30), (false, vec![]));
+        assert_eq!(sweep_trash(&mut f, now + 365 * DAY, 0), (false, vec![]), "0 keeps the trash");
+    }
 }
 
 #[cfg(test)]

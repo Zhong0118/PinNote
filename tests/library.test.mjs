@@ -85,3 +85,12 @@ test('export puts archived notes in a folder, skips the trash and never reuses a
   assert.deepEqual(plain(files.map(f => f.path)), ['周会.md', '周会 (2).md', '归档/a-b.md', '未命名便签.md']);
   assert.match(lib.exportFolderName(new Date(2026, 0, 2, 3, 4).getTime()), /^PinNote 导出 2026-01-02 0304$/);
 });
+
+test('trash countdown rounds up, never shows zero, and is off when the trash is kept', () => {
+  const day = 86400000, now = 100 * day;
+  assert.equal(lib.trashDaysLeft(now - 10 * day, 30, now), 20);
+  assert.equal(lib.trashDaysLeft(now - 10.5 * day, 30, now), 20);
+  assert.equal(lib.trashDaysLeft(now - 40 * day, 30, now), 1);
+  assert.equal(lib.trashDaysLeft(undefined, 60, now), 60);
+  assert.equal(lib.trashDaysLeft(now, 0, now), null);
+});

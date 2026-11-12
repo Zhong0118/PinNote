@@ -14,11 +14,16 @@ export type AppearanceSettings = { theme: ThemeMode; centerShadow: ShadowLevel; 
 /** `hideFromCapture`: ask the system to keep PinNote windows out of screenshots and screen sharing. */
 export type BehaviorSettings = { edgeSnap: boolean; hoverPreview: boolean; restoreSession: boolean; hideFromCapture: boolean };
 
+export type TrashDays = 0 | 30 | 60 | 90;
+export const trashDayOptions: TrashDays[] = [30, 60, 90, 0];
+
 export type AppSettings = {
   autoStart: boolean;
   shortcuts: ShortcutConfig;
   appearance: AppearanceSettings;
   behavior: BehaviorSettings;
+  /** Days a note stays in the trash before it is deleted for good; 0 keeps it. */
+  trashDays: TrashDays;
   /** Applied to new notes only; never rewrites existing notes. */
   defaultNote: {
     alwaysOnTop: boolean;
@@ -50,6 +55,7 @@ export const defaultSettings: AppSettings = {
   shortcuts: { ...platformDefaultShortcuts() },
   appearance: { ...defaultAppearance },
   behavior: { ...defaultBehavior },
+  trashDays: 30,
   defaultNote: {
     alwaysOnTop: true,
     opacity: 0.96,
@@ -113,6 +119,7 @@ function normalizeSettings(settings: Partial<AppSettings>) {
     shortcuts,
     appearance: normalizeAppearance(settings.appearance),
     behavior: { ...defaultBehavior, ...pickBooleans(settings.behavior, defaultBehavior) },
+    trashDays: trashDayOptions.includes(settings.trashDays as TrashDays) ? settings.trashDays as TrashDays : defaultSettings.trashDays,
     defaultNote: {
       ...defaultSettings.defaultNote,
       ...settings.defaultNote,
