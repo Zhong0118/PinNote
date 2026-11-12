@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, emit, emitTo } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ChevronDown, ClockArrowDown } from 'lucide-svelte';
+  import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ChevronDown, ClockArrowDown, Star, ListFilter, History, ChartColumn, Hash, Check, Bell, ListTodo } from 'lucide-svelte';
   import { answerRelease } from '$lib/editorHandoff';
   import { fitBounds } from '$lib/windowGeometry';
   import { validWindow } from '$lib/centerLayout';
@@ -30,6 +30,9 @@
   import { sortable, moveAmong, arrange, type SortDrag } from '$lib/sortable';
   import { LIST_WIDTH, clampListWidth } from '$lib/centerLayout';
   import type {NoteTheme} from '$lib/settings';
+  import { starredFirst, noQuickFilters, quickFilterCount, passesQuickFilters, tagCounts, highlightParts, matchSnippet, trashDaysLeft } from '$lib/library';
+  import VersionDialog from '../../components/VersionDialog.svelte';
+  import CenterStats from '../../components/CenterStats.svelte';
   let reminderOpen=$state(false);
   let due=$state<PinNote[]>([]);
   const quitGuard = createQuitGuard();
@@ -63,17 +66,26 @@
   const editedAt = (n:PinNote) => n.editedAt ?? n.updatedAt;
   const positions = new Map<string,{from:number;to:number;scroll:number}>();
   // List summaries (excerpt, to-do counts, search text) are derived once per note version.
-  const summaries=new Map<string,{note:PinNote;excerpt:string;tasks:{done:number;total:number};search:string}>();
+  const summaries=new Map<string,{note:PinNote;excerpt:string;plain:string;tasks:{done:number;total:number};search:string}>();
   function summary(n:PinNote){
     let s=summaries.get(n.id);
-    if(!s||s.note.content!==n.content||s.note.title!==n.title){
-      s={note:n,excerpt:plainExcerpt(n.content,100,{title:n.title}).replace(/\s*\n+\s*/g,' '),tasks:checklistProgress(n.content),search:`${n.title}\n${n.content}`.toLowerCase()};
+    if(!s||s.note.content!==n.content||s.note.title!==n.title||s.note.tags!==n.tags){
+      const plain=plainExcerpt(n.content,4000,{title:n.title});
+      s={note:n,plain,excerpt:matchSnippet(plain,'',100),tasks:checklistProgress(n.content),search:`${n.title}\n${n.content}\n${(n.tags??[]).join(' ')}`.toLowerCase()};
       summaries.set(n.id,s);
     }
     return s;
   }
-  const arranged = $derived(arrange(notes, order));
-  const visible = $derived.by(()=>{const q=query.toLowerCase();return arranged.filter(n => (filter === 'desktop' ? n.lifecycle === 'active' && n.placement === 'desktop' : n.lifecycle === filter) && (!q||summary(n).search.includes(q)));});
+  const openTodos=(n:PinNote)=>{const t=summary(n).tasks;return t.total-t.done;};
+  // Quick filters (star, reminder, open to-dos, one tag) narrow whichever list is shown.
+  let quick=$state(noQuickFilters());
+  let filterMenu=$state(false);
+  let statsOpen=$state(false);
+  let versionsOpen=$state(false);
+  let tagDraft=$state<string|null>(null);
+  const tagsInUse=$derived(tagCounts(notes));
+  const arranged = $derived(starredFirst(arrange(notes, order)));
+  const visible = $derived.by(()=>{const q=query.trim().toLowerCase();return arranged.filter(n => (filter === 'desktop' ? n.lifecycle === 'active' && n.placement === 'desktop' : n.lifecycle === filter) && (!q||summary(n).search.includes(q)) && passesQuickFilters(n,quick,openTodos(n)));});
   // One writer per note: the center edits center notes and desktop notes that are only a
   // capsule/edge tab. An expanded desktop window owns its note until editing is handed back.
   let handoff = $state('');
@@ -179,6 +191,34 @@
     draft={...draft,theme:current.theme,customColor:current.customColor};
     await refresh();status='颜色已同步到桌面便签';
   }
+  /** Star or unstar: starred notes stay at the top of the list. List metadata, so drafts are untouched. */
+  async function toggleStar(id:string) {
+    const current=(await loadNotes()).notes[id]; if(!current) return;
+    const result=await noteOperation(current,'appearance',{patch:{starredAt:current.starredAt?null:Date.now()}});
+    if(draft?.id===id) draft={...draft,starredAt:result?.starredAt};
+    await refresh(); status=result?.starredAt?'已收藏，固定在列表顶部':'已取消收藏';
+  }
+  async function setTags(tags:string[]) {
+    if(!draft) return;
+    const current=(await loadNotes()).notes[draft.id];
+    const result=await noteOperation(current,'appearance',{patch:{tags}});
+    if(draft?.id===current.id) draft={...draft,tags:result?.tags??[]};
+    await refresh();
+  }
+  function addTag(text:string) {
+    const tag=text.trim().replace(/^#+/,'').trim(); tagDraft=null;
+    if(!tag||!draft) return;
+    if((draft.tags??[]).some(t=>t.toLowerCase()===tag.toLowerCase())) return;
+    void run(()=>setTags([...(draft!.tags??[]),tag]));
+  }
+  async function restoreVersion(at:number) {
+    if(!draft) return;
+    await persist(); const id=draft.id;
+    const note=(await loadNotes()).notes[id];
+    await noteOperation(note,'revert',{versionAt:at});
+    await select(id,true); status='已恢复到所选版本 · 恢复前的内容已保留为一个版本';
+  }
+  function showTag(tag:string) { quick={...noQuickFilters(),tag}; filter='active'; statsOpen=false; settingsOpen=false; sidebar=true; }
   /** Hand editing of an expanded desktop note to the center; the desktop keeps its capsule/tab. */
   async function editHere() {
     if(!draft) return;
@@ -275,6 +315,7 @@
   let width=$state(960);
   let windowMenu=$state(false);
   let appSettings:AppSettings=structuredClone(defaultSettings);
+  let trashDays=$state<number>(defaultSettings.trashDays);
   let settingsOpen=$state(false);
   let shortcutStatus=$state('');
   const edgeSnap=()=>appSettings.behavior.edgeSnap;
@@ -322,7 +363,8 @@
   onMount(()=>{
     const setup=(async()=>{
       await refresh();
-      appSettings=await loadSettings();
+      appSettings=await loadSettings(); trashDays=appSettings.trashDays;
+      void invoke('set_capture_protection',{enabled:appSettings.behavior.hideFromCapture}).catch(()=>undefined);
       const registered=await registerGlobalShortcuts(appSettings.shortcuts,{toggleWindow:toggleDesktop,newNote:()=>void run(create)});
       shortcutStatus=registered.ok||registered.cancelled?'':`全局快捷键注册失败：${registered.message}`;
       const hidden=await invoke<boolean>('startup_hidden');
@@ -358,7 +400,7 @@
         // Collapsing or expanding a desktop window moves the editor between it and here.
         draft={...draft,window:n.window}; if(handoff===payload.id) handoff=''; void form.syncDock(); return;
       }
-      if(payload.op==='appearance'){draft={...draft,theme:n.theme,customColor:n.customColor,opacity:n.opacity,alwaysOnTop:n.alwaysOnTop};return;}
+      if(payload.op==='appearance'){draft={...draft,theme:n.theme,customColor:n.customColor,opacity:n.opacity,alwaysOnTop:n.alwaysOnTop,starredAt:n.starredAt,tags:n.tags};return;}
       // Delivery only marks the reminder; it keeps the revision.
       if(payload.op==='reminder') draft={...draft,reminder:n.reminder};
       // Unsaved input (even not yet serialized) is never replaced by a change from elsewhere.
@@ -420,7 +462,9 @@
     const toggle=listen('toggle-notes-visibility-requested',toggleDesktop);
     const settings=listen('open-settings-requested',()=>void openSettings());
     const settingsChanged=listen<AppSettings>('settings-changed',async({payload})=>{
-      const before=JSON.stringify(appSettings.shortcuts); appSettings=payload;
+      const before=JSON.stringify(appSettings.shortcuts);
+      if(payload.behavior?.hideFromCapture!==appSettings.behavior.hideFromCapture) void invoke('set_capture_protection',{enabled:payload.behavior.hideFromCapture}).catch(()=>undefined);
+      appSettings=payload; trashDays=payload.trashDays;
       if(JSON.stringify(payload.shortcuts)===before) return;
       const registered=await registerGlobalShortcuts(payload.shortcuts,{toggleWindow:toggleDesktop,newNote:()=>void run(create)});
       shortcutStatus=registered.ok||registered.cancelled?'':`全局快捷键注册失败（可能被其他应用占用）：${registered.message}`;
@@ -446,28 +490,48 @@
 {#if form.snapHint}<div class="snap-hint side-{form.snapHint}" role="status"><span>松手收起到{form.snapHint==='left'?'左':'右'}侧边缘</span></div>{/if}
 <main class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:settings-open={settingsOpen} class:resizing style:--list-w="{shownListWidth}px">
   {#if settingsOpen}<CenterSettings onClose={()=>settingsOpen=false} {shortcutStatus} onExportCurrent={draft?()=>void exportCurrent():undefined}/>{/if}
+  {#if statsOpen&&!settingsOpen}<CenterStats {notes} {openTodos} onClose={()=>statsOpen=false} onTag={showTag}/>{/if}
   {#if narrow}<button class="scrim" tabindex="-1" aria-label="关闭列表" onclick={()=>sidebar=false}></button>{/if}
-  <aside inert={!sidebar||settingsOpen} aria-hidden={!sidebar||settingsOpen}>
+  <aside inert={!sidebar||settingsOpen||statsOpen} aria-hidden={!sidebar||settingsOpen||statsOpen}>
     <div class="side-inner">
       {#if mac}<div class="titlebar-space" data-tauri-drag-region></div>{/if}
       <div class="search"><Search size={15}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={16}/></button></div>
-      <nav><button class:active={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button class:active={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button>{#if order.length}<button class="sort-reset" aria-label="恢复按编辑时间排序" title="恢复按编辑时间排序" onclick={()=>order=[]}><ClockArrowDown size={14}/></button>{/if}</nav>
+      <nav><button class:active={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button class:active={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button>{#if order.length}<button class="sort-reset" aria-label="恢复按编辑时间排序" title="恢复按编辑时间排序" onclick={()=>order=[]}><ClockArrowDown size={14}/></button>{/if}
+        <button class="filter-toggle" class:on={quickFilterCount(quick)>0||filterMenu} aria-label="筛选" title="筛选：收藏、提醒、待办、标签" aria-expanded={filterMenu} onclick={()=>filterMenu=!filterMenu}><ListFilter size={14}/>{#if quickFilterCount(quick)}<span class="count">{quickFilterCount(quick)}</span>{/if}</button>
+        {#if filterMenu}<div class="menu filter-menu" use:popup={()=>filterMenu=false} transition:reveal role="menu" tabindex="-1">
+          <button role="menuitemcheckbox" aria-checked={quick.starred} onclick={()=>quick={...quick,starred:!quick.starred}}><Star size={14}/>已收藏{#if quick.starred}<Check size={13}/>{/if}</button>
+          <button role="menuitemcheckbox" aria-checked={quick.reminder} onclick={()=>quick={...quick,reminder:!quick.reminder}}><Bell size={14}/>有提醒{#if quick.reminder}<Check size={13}/>{/if}</button>
+          <button role="menuitemcheckbox" aria-checked={quick.todo} onclick={()=>quick={...quick,todo:!quick.todo}}><ListTodo size={14}/>有未完成待办{#if quick.todo}<Check size={13}/>{/if}</button>
+          <div class="menu-label">标签</div>
+          {#each tagsInUse as item (item.tag)}<button role="menuitemradio" aria-checked={quick.tag===item.tag} onclick={()=>quick={...quick,tag:quick.tag===item.tag?'':item.tag}}><Hash size={14}/><span class="grow">{item.tag}</span><small>{item.count}</small>{#if quick.tag===item.tag}<Check size={13}/>{/if}</button>
+          {:else}<p class="menu-hint">在便签标题下方添加标签后，可以在这里按标签筛选。</p>{/each}
+          {#if quickFilterCount(quick)}<button class="clear" onclick={()=>{quick=noQuickFilters();filterMenu=false;}}>清除筛选</button>{/if}
+        </div>{/if}
+      </nav>
+      {#if quickFilterCount(quick)}<div class="chips" aria-label="当前筛选">
+        {#if quick.starred}<button onclick={()=>quick={...quick,starred:false}}>已收藏<X size={11}/></button>{/if}
+        {#if quick.reminder}<button onclick={()=>quick={...quick,reminder:false}}>有提醒<X size={11}/></button>{/if}
+        {#if quick.todo}<button onclick={()=>quick={...quick,todo:false}}>有待办<X size={11}/></button>{/if}
+        {#if quick.tag}<button onclick={()=>quick={...quick,tag:''}}>#{quick.tag}<X size={11}/></button>{/if}
+      </div>{/if}
+      {#if filter==='trash'}<p class="trash-hint">{trashDays?`便签在回收站中保留 ${trashDays} 天，之后自动永久删除。`:'回收站中的便签不会自动删除。'}<button onclick={()=>void openSettings()}>更改</button></p>{/if}
       <div class="list" use:sortable={{axis:'y',onDrag:d=>rowDrag=d,onDrop:dropRow}}>
         {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={13}/></button></div>{/each}
         {#each visible as note,i(note.id)}
           {@const info=summary(note)}{@const tasks=info.tasks}
           <button animate:shift class="note-row" data-sort-id={note.id} class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})}>
-             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={13}/>{/if}<time datetime={new Date(editedAt(note)).toISOString()} title="编辑于 {shortTime(editedAt(note),clock)}">{listTime(editedAt(note),clock)}</time></span><small>{info.excerpt||(note.content.trim() ? '打开查看内容' : '暂无正文')}</small>
-             {#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}
+             <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{#each highlightParts(note.title||'未命名便签',query) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</b>{#if note.starredAt}<Star size={12} class="starred" aria-label="已收藏"/>{/if}{#if note.placement==='desktop'}<Monitor size={13}/>{/if}<time datetime={new Date(editedAt(note)).toISOString()} title="编辑于 {shortTime(editedAt(note),clock)}">{listTime(editedAt(note),clock)}</time></span>
+             <small>{#if query.trim()}{#each highlightParts(matchSnippet(info.plain,query,100),query) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}{:else}{info.excerpt||(note.content.trim() ? '打开查看内容' : '暂无正文')}{/if}</small>
+             {#if tasks.total||note.tags?.length}<span class="row-meta">{#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}{#each (note.tags??[]).slice(0,3) as tag}<small class="row-tag">#{tag}</small>{/each}</span>{/if}
           </button>
         {:else}<p class="empty">{query?'没有匹配的便签':'这里还没有便签'}</p>{/each}
       </div>
-      <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={13}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={13}/>回收站</button><button aria-label="设置" title="设置（{mac?'⌘':'Ctrl+'},）" onclick={()=>void openSettings()}><Settings size={15}/></button></footer>
+      <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={13}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={13}/>回收站</button><button class="stats-open" aria-label="记录概览" title="记录概览" onclick={()=>{settingsOpen=false;statsOpen=true;}}><ChartColumn size={15}/></button><button aria-label="设置" title="设置（{mac?'⌘':'Ctrl+'},）" onclick={()=>void openSettings()}><Settings size={15}/></button></footer>
     </div>
   </aside>
   {#if !narrow}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div class="list-resizer" role="separator" aria-orientation="vertical" aria-label="调整列表宽度" aria-valuemin={LIST_WIDTH.min} aria-valuemax={LIST_WIDTH.max} aria-valuenow={shownListWidth} tabindex={sidebar?0:-1} title="拖动调整列表宽度 · 双击恢复默认" hidden={!sidebar||settingsOpen} onpointerdown={resizeList} onkeydown={resizeKey} ondblclick={()=>listWidth=LIST_WIDTH.default}></div>{/if}
-  <section class="work" class:ink={draft?.theme==='ink'} style:--pin-bg={draft?noteBackground(draft.theme,draft.customColor):'var(--surface)'} style:--note-tint={draft?noteTint(draft.theme,draft.customColor):undefined} inert={busy||settingsOpen}>
+  <section class="work" class:ink={draft?.theme==='ink'} style:--pin-bg={draft?noteBackground(draft.theme,draft.customColor):'var(--surface)'} style:--note-tint={draft?noteTint(draft.theme,draft.customColor):undefined} inert={busy||settingsOpen||statsOpen}>
     <header class="tabs" data-tauri-drag-region><button class="list-toggle" aria-label={sidebar?'隐藏列表':'显示列表'} title={sidebar?'隐藏列表':'显示列表'} onclick={()=>sidebar=!sidebar}><PanelLeft size={16}/></button>
       <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region use:sortable={{axis:'x',onDrop:dropTab}}>
         {#each tabs as id,i(id)}
@@ -491,6 +555,7 @@
     {#if draft}
       <div class="title-row">
         <input aria-label="便签标题" value={draft.title} readonly={!editable} oninput={e=>update({title:e.currentTarget.value})}/>
+        {#if draft.lifecycle==='active'}<button class="star" class:on={Boolean(draft.starredAt)} aria-pressed={Boolean(draft.starredAt)} aria-label={draft.starredAt?'取消收藏':'收藏'} title={draft.starredAt?'取消收藏':'收藏：固定在列表顶部'} onclick={()=>run(()=>toggleStar(draft!.id))}><Star size={16}/></button>{/if}
         {#if draft.lifecycle==='active'}<NoteColorPicker theme={draft.theme} customColor={draft.customColor} onChange={changeColor}/>{/if}
         {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{shortTime(draft.reminder.at)}</button>{/if}
         {#if draft.lifecycle==='active'}
@@ -500,6 +565,7 @@
         {#if menu}<div class="menu" use:popup={()=>menu=false} transition:reveal role="dialog" tabindex="-1">
           {#if draft.lifecycle==='active'}
             <button onclick={()=>{menu=false;reminderOpen=true;}}>设置提醒</button>
+            <button onclick={()=>{menu=false;void persist().catch(()=>undefined).then(()=>versionsOpen=true);}}>历史版本</button>
             {#if editable && progress.done}<button onclick={()=>{editor?.clearCompleted();menu=false;}}>移除已完成项（可撤销）</button>{/if}
             {#if draft.placement==='desktop'}<button onclick={()=>run(recall)}>收回中心</button>{/if}
             <button onclick={()=>run(()=>operation('archive'))}>归档</button><button onclick={()=>run(()=>operation('trash'))}>移到回收站</button>
@@ -507,6 +573,19 @@
           <button onclick={()=>run(async()=>{if(!draft)return;const copy=createNote({title:`${draft.title}（草稿副本）`,content:draft.content});await saveNoteNow(copy);await select(copy.id);})}>保留草稿为新便签</button>
           <button onclick={()=>run(async()=>{if(!draft)return;editor?.flush();const fresh=(await loadNotes()).notes[draft.id];if(hasLocalEdits(draft.id)&&!window.confirm('放弃本地草稿并载入已保存版本？'))return;discardPendingSave(draft.id);conflict=false;saveError='';draft=fresh;revision++;})}>重新载入已保存版本</button>
         </div>{/if}
+        {#if draft.tags?.length||draft.lifecycle==='active'}
+          <div class="tag-row" aria-label="标签">
+            {#each draft.tags??[] as tag (tag)}<span class="tag"><button class="tag-name" title="在列表中只看「{tag}」" onclick={()=>showTag(tag)}>#{tag}</button>{#if draft.lifecycle==='active'}<button class="tag-remove" aria-label="移除标签 {tag}" onclick={()=>run(()=>setTags((draft!.tags??[]).filter(t=>t!==tag)))}><X size={11}/></button>{/if}</span>{/each}
+            {#if draft.lifecycle==='active'}
+              {#if tagDraft!==null}<!-- svelte-ignore a11y_autofocus -->
+                <input class="tag-input" list="pinnote-tags" aria-label="新标签" placeholder="标签名，回车添加" maxlength="20" autofocus bind:value={tagDraft}
+                  onkeydown={e=>{if(e.isComposing)return;if(e.key==='Enter'){e.preventDefault();addTag(tagDraft??'');}else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();tagDraft=null;}}}
+                  onblur={()=>{if(tagDraft?.trim())addTag(tagDraft);else tagDraft=null;}}/>
+                <datalist id="pinnote-tags">{#each tagsInUse.filter(t=>!(draft?.tags??[]).includes(t.tag)) as item}<option value={item.tag}></option>{/each}</datalist>
+              {:else}<button class="tag-add" aria-label="添加标签" title="添加标签" onclick={()=>tagDraft=''}><Hash size={12}/>{draft.tags?.length?'':'添加标签'}</button>{/if}
+            {/if}
+          </div>
+        {/if}
       </div>
       {#if editable}
         <div class="editor-area">
@@ -516,7 +595,7 @@
       {:else}
         <div class="preview" transition:reveal>
           {#if desktopEditing}<div class="notice">正在桌面窗口编辑 <button onclick={()=>run(editHere)}><PenLine size={13}/>在这里编辑</button><button onclick={()=>run(recall)}>收回中心</button></div>{/if}
-          {#if draft.lifecycle!=='active'}<div class="notice">{draft.lifecycle==='trash'?'已在回收站':'已归档'} <button onclick={()=>run(()=>operation('restore'))}>恢复</button></div>{/if}
+          {#if draft.lifecycle!=='active'}<div class="notice">{draft.lifecycle==='trash'?(trashDaysLeft(draft.trashedAt,trashDays,clock)?`已在回收站，${trashDaysLeft(draft.trashedAt,trashDays,clock)} 天后自动永久删除`:'已在回收站'):'已归档'} <button onclick={()=>run(()=>operation('restore'))}>恢复</button></div>{/if}
           {#key `${selected}:${revision}`}<MilkdownEditor readonly value={draft.content} onChange={()=>{}} onReminder={draft.lifecycle==='active'?()=>reminderOpen=true:undefined}/>{/key}
         </div>
       {/if}
@@ -524,6 +603,7 @@
     <div class="status" role="status">{status}{#if undo}<button onclick={()=>run(undoLast)}>撤销移除</button>{/if}</div>
   </section>
 </main>
+{#if versionsOpen&&draft}<VersionDialog id={draft.id} title={draft.title} current={draft.content} onRestore={restoreVersion} onClose={()=>versionsOpen=false}/>{/if}
 {#if reminderOpen&&draft}<ReminderDialog currentAt={draft.reminder?.at} onClose={()=>reminderOpen=false} onSet={async at=>{await persist();const note=(await loadNotes()).notes[draft!.id];await noteOperation(note,'reminder',{at});draft=note;await refresh();}}/>{/if}
 
 <style>
@@ -552,12 +632,34 @@
  nav{display:flex;padding:0 8px 10px;gap:5px}nav button{font-size:12px;flex:1}
  /* Shown once the list has a manual order: one click returns to newest edit first. */
  nav .sort-reset{flex:0 0 28px;padding:0;color:var(--muted)}nav .sort-reset:hover{color:var(--text);background:var(--hover-strong)}
+ nav{position:relative}
+ /* Quick filters: a compact toggle with a count, a menu, and removable chips for what is on. */
+ nav .filter-toggle{position:relative;flex:0 0 28px;padding:0;color:var(--muted)}nav .filter-toggle:hover{color:var(--text);background:var(--hover-strong)}
+ nav .filter-toggle.on{color:var(--accent);background:var(--accent-soft)}
+ .filter-toggle .count{position:absolute;top:1px;right:1px;min-width:13px;height:13px;padding:0 3px;border-radius:7px;background:var(--accent);color:var(--on-accent);font-size:9px;line-height:13px;font-weight:600}
+ .filter-menu{top:34px;left:8px;right:auto;width:min(220px,calc(var(--list-w,230px) - 16px));max-height:min(360px,60vh);overflow:auto}
+ .menu.filter-menu button{display:flex;align-items:center;gap:8px;justify-content:flex-start}
+ .menu.filter-menu button :global(svg:last-child:not(:first-child)){margin-left:auto;color:var(--accent)}
+ .menu.filter-menu .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .menu.filter-menu small{color:var(--subtle);font-size:11px;font-variant-numeric:tabular-nums}
+ .menu.filter-menu .clear{margin-top:4px;border-top:1px solid var(--hairline);border-radius:0 0 var(--radius-sm) var(--radius-sm);color:var(--accent)}
+ .menu-label{padding:8px 8px 2px;font-size:11px;color:var(--subtle)}
+ .menu-hint{margin:0;padding:4px 8px 8px;font-size:11.5px;line-height:1.5;color:var(--muted)}
+ .chips{display:flex;flex-wrap:wrap;gap:4px;padding:0 10px 8px}
+ .chips button{gap:3px;padding:2px 6px 2px 8px;border-radius:999px;font-size:11px;color:var(--accent);background:var(--accent-soft)}
+ .chips button:hover{background:var(--accent-soft-strong)}
  .list{flex:1;overflow:auto;padding:0 7px}
  .note-row{display:block;width:100%;text-align:left;padding:10px;margin:2px 0}
  .note-row span{display:flex;align-items:center;justify-content:space-between;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
  .note-row .row-heading{justify-content:flex-start}.row-heading b{flex:1;overflow:hidden;text-overflow:ellipsis;font-weight:500}
  .note-row small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--muted);margin-top:3px;font-size:12px}
  .note-row .list-progress{color:var(--accent);font-size:10px}
+ .note-row .row-meta{justify-content:flex-start;gap:6px;margin-top:3px}
+ .note-row .row-meta small{margin-top:0;flex:0 1 auto}
+ .note-row .row-tag{color:var(--muted);font-size:10.5px}
+ .note-row :global(.starred){flex:0 0 auto;color:#e9a23b;fill:#e9a23b}
+ /* Search matches: a soft highlighter mark that stays readable on the selected row. */
+ mark{background:color-mix(in srgb,#f5c542 45%,transparent);color:inherit;border-radius:2px;padding:0 1px}
  .row-heading time{flex:0 0 auto;margin-left:auto;color:var(--subtle);font-size:11px;font-variant-numeric:tabular-nums}
  .note-row.chosen time{color:color-mix(in srgb,var(--accent) 70%,transparent)}
  /* Drag to reorder: the lifted item dims and an accent line marks where it will land. */
@@ -573,6 +675,8 @@
  .due{display:flex;flex-wrap:wrap;font-size:11px;background:var(--accent-soft);border-radius:var(--radius-sm);margin:4px}.due button{font-size:11px}
  footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:var(--muted)}footer button:last-child{margin-left:auto}
  .empty,.empty-work{color:var(--muted);padding:16px}
+ .trash-hint{margin:0 7px 6px;padding:6px 10px;border-radius:var(--radius-sm);background:var(--surface-sunken);color:var(--muted);font-size:11.5px;line-height:1.5}
+ .trash-hint button{margin-left:4px;padding:0;border:0;background:none;color:var(--accent);font:inherit;cursor:pointer}
  /* Work area: tabs, title, editor, status. */
  .work{grid-column:2;grid-row:1;display:grid;grid-template-rows:44px auto minmax(0,1fr) 30px;min-width:0;min-height:0;background:var(--pin-bg);color:var(--pin-text);transition:background var(--motion-fast),color var(--motion-fast)}
  .work.ink{--pin-text:#f5f5f5;--pin-heading:#fff;--pin-muted:#aaa;--pin-border:#ffffff20;--pin-accent:#93b4ff;--pin-accent-strong:#b6cdff;--pin-active:#343434}
@@ -611,6 +715,22 @@
  .title-row{position:relative;display:flex;align-items:center;gap:8px;width:100%;max-width:866px;margin:0 auto;padding:18px 30px 8px 14px}
  .title-row input{flex:1;min-width:0;font-size:17px;font-weight:600;background:transparent;color:var(--pin-heading)}
  .time{font-size:11px;color:var(--accent);background:var(--accent-soft)}
+ .title-row{flex-wrap:wrap}
+ .star{width:28px;height:28px;padding:0;border-radius:50%;color:var(--pin-muted)}
+ .star:hover{color:var(--pin-text)}
+ .star.on{color:#e9a23b}.star.on :global(svg){fill:currentColor}
+ /* Tags sit under the title as small chips; adding one opens an inline field with suggestions. */
+ .tag-row{flex:0 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:24px;margin-top:2px}
+ .tag{display:inline-flex;align-items:center;height:22px;border-radius:999px;background:color-mix(in srgb,var(--pin-text),transparent 93%);color:var(--pin-text);font-size:11.5px}
+ .tag button{height:22px;padding:0 4px;border-radius:999px}
+ .tag .tag-name{padding-left:8px}
+ .tag .tag-remove{width:20px;color:var(--pin-muted);opacity:.6}.tag .tag-remove:hover{opacity:1}
+ .tag-add{height:22px;padding:0 8px;gap:3px;border-radius:999px;font-size:11.5px;color:var(--pin-muted)}
+ .tag-add:hover{color:var(--pin-accent)}
+ /* With no tags yet, line the # up with the title and body text rather than the button edge. */
+ .tag-row>.tag-add:first-child{margin-left:-6px}
+ .tag-input{width:140px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;background:color-mix(in srgb,var(--pin-text),transparent 93%)}
+ .tag-input:focus{box-shadow:0 0 0 1.5px var(--pin-accent)}
  .desktop{font-size:12px;color:var(--pin-accent)}
  .editor-area{display:flex;flex-direction:column;min-height:0;--banner-inset:max(14px,calc((100% - 852px) / 2))}
  .editor-area > :global(.banner){margin-top:2px;margin-bottom:6px}

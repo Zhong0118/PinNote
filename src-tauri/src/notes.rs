@@ -100,6 +100,13 @@ fn remember(path: &std::path::Path, file: &Value) {
     }
 }
 
+/// Drop the parsed copy, e.g. after a backup replaced the file.
+pub fn forget() {
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = None;
+    }
+}
+
 /// Atomically writes the notes file and keeps the in-memory copy authoritative.
 pub fn store(app: &AppHandle, file: &Value) -> Result<(), String> {
     let path = data_file(app, "notes.json")?;
@@ -158,6 +165,28 @@ pub fn load(app: &AppHandle) -> Result<Value, String> {
     }
     remember(&path, &file);
     Ok(file)
+}
+
+/// Tags: trimmed, at most 20 characters, no '#', no duplicates, at most 12 per note.
+pub fn clean_tags(tags: &Value) -> Result<Vec<String>, String> {
+    let list = tags.as_array().ok_or("Invalid tags")?;
+    let mut out: Vec<String> = Vec::new();
+    for tag in list {
+        let text = tag.as_str().ok_or("Invalid tags")?.trim().trim_start_matches('#').trim();
+        if text.is_empty() {
+            continue;
+        }
+        if text.chars().count() > 20 || text.chars().any(char::is_control) {
+            return Err("标签最多 20 个字".into());
+        }
+        if !out.iter().any(|t| t.to_lowercase() == text.to_lowercase()) {
+            out.push(text.to_string());
+        }
+    }
+    if out.len() > 12 {
+        return Err("每张便签最多 12 个标签".into());
+    }
+    Ok(out)
 }
 
 pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
@@ -252,6 +281,16 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
             }
             note["alwaysOnTop"] = pin.clone();
         }
+        // Starring (kept at the top of the list) and tags are list metadata, like colour.
+        if let Some(starred) = patch.get("starredAt") {
+            if !(starred.is_null() || starred.as_u64().is_some()) {
+                return Err("Invalid star".into());
+            }
+            note["starredAt"] = starred.clone();
+        }
+        if let Some(tags) = patch.get("tags") {
+            note["tags"] = json!(clean_tags(tags)?);
+        }
         // Independent presentation metadata must not invalidate an unsaved body.
         file["notes"][id] = note.clone();
         return Ok(note);
@@ -266,12 +305,7 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
         if before["lifecycle"] != "trash" {
             return Err("只能在回收站永久删除".into());
         }
-        file["notes"].as_object_mut().unwrap().remove(id);
-        file["tombstones"].as_array_mut().unwrap().push(json!(id));
-        file["history"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|h| h["note"]["id"] != id);
+        remove(file, id);
         return Ok(Value::Null);
     }
     let mut note = before.clone();
@@ -324,6 +358,20 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
             if note["title"] != before["title"] || note["content"] != before["content"] {
                 note["editedAt"] = json!(now());
             }
+        }
+        "revert" => {
+            // Restore an earlier title and body (looked up by `operation`); the version
+            // being replaced is kept, so the restore itself can be undone.
+            if before["lifecycle"] != "active" {
+                return Err("请先恢复便签".into());
+            }
+            let version = &request["version"];
+            if !version["title"].is_string() || !version["content"].is_string() {
+                return Err("恢复版本不存在".into());
+            }
+            note["title"] = version["title"].clone();
+            note["content"] = version["content"].clone();
+            note["editedAt"] = json!(now());
         }
         "archive" | "trash" => {
             note["lifecycle"] = json!(if op == "archive" { "archived" } else { "trash" });
@@ -394,20 +442,98 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
             history.remove(0);
         }
     }
+    // When a note entered the trash, for emptying it after the chosen number of days.
+    if note["lifecycle"] == "trash" {
+        if before["lifecycle"] != "trash" || !note["trashedAt"].is_u64() {
+            note["trashedAt"] = json!(now());
+        }
+    } else if let Some(fields) = note.as_object_mut() {
+        fields.remove("trashedAt");
+    }
     note["revision"] = json!(before["revision"].as_u64().unwrap_or(0) + 1);
     note["updatedAt"] = json!(now());
     file["notes"][id] = note.clone();
     Ok(note)
 }
 
-pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
+/// Delete a note for good, with its undo history; the tombstone keeps it from coming back.
+fn remove(file: &mut Value, id: &str) {
+    file["notes"].as_object_mut().unwrap().remove(id);
+    file["tombstones"].as_array_mut().unwrap().push(json!(id));
+    file["history"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|h| h["note"]["id"] != id);
+}
+
+const DAY: u64 = 24 * 3600 * 1000;
+
+/// Empty trash older than `days` (0 keeps it forever). Notes trashed before `trashedAt`
+/// existed are stamped now instead, so an upgrade never deletes anything straight away.
+/// Returns whether the file changed and which notes were deleted.
+pub fn sweep_trash(file: &mut Value, now: u64, days: u64) -> (bool, Vec<String>) {
+    let mut stamped = false;
+    let mut expired = Vec::new();
+    for (id, note) in file["notes"].as_object_mut().unwrap() {
+        if note["lifecycle"] != "trash" {
+            continue;
+        }
+        match note["trashedAt"].as_u64() {
+            None => {
+                note["trashedAt"] = json!(now);
+                stamped = true;
+            }
+            Some(at) if days > 0 && now.saturating_sub(at) >= days * DAY => expired.push(id.clone()),
+            Some(_) => {}
+        }
+    }
+    for id in &expired {
+        remove(file, id);
+    }
+    (stamped || !expired.is_empty(), expired)
+}
+
+/// The trash setting from settings.json; 30 days when unset or unreadable.
+fn trash_days(app: &AppHandle) -> u64 {
+    data_file(app, "settings.json")
+        .ok()
+        .and_then(|path| read_optional(path).ok().flatten())
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|settings| settings["trashDays"].as_u64())
+        .filter(|days| matches!(days, 0 | 30 | 60 | 90))
+        .unwrap_or(30)
+}
+
+/// Run by the background loop: delete expired trash and tell every window.
+pub fn empty_expired_trash(app: &AppHandle) -> Result<(), String> {
+    let days = trash_days(app);
+    let state = app.state::<NotesFileLock>();
+    let _guard = state.0.lock().map_err(|_| "Cannot lock notes")?;
+    let mut file = load(app)?;
+    let (changed, expired) = sweep_trash(&mut file, now(), days);
+    if !changed {
+        return Ok(());
+    }
+    store(app, &file)?;
+    for id in expired {
+        let request = json!({"id":id,"op":"purge","source":"system"});
+        crate::journal::after_change(app, &request, None, &Value::Null);
+        let _ = app.emit(
+            "notes-changed",
+            json!({"id":id,"note":Value::Null,"op":"purge","layout":false,"source":"system","by":Value::Null}),
+        );
+    }
+    Ok(())
+}
+
+pub fn operation(app: &AppHandle, mut request: Value) -> Result<Value, String> {
     let state = app.state::<NotesFileLock>();
     let _guard = state.0.lock().map_err(|_| "Cannot lock notes")?;
     let mut file = load(app)?;
     if request["source"] == "ui"
         && matches!(
             request["op"].as_str(),
-            Some("archive" | "trash" | "restore" | "undo" | "center" | "desktop")
+            Some("archive" | "trash" | "restore" | "undo" | "revert" | "center" | "desktop")
         )
     {
         if let Some(owner) = app
@@ -446,8 +572,14 @@ pub fn operation(app: &AppHandle, request: Value) -> Result<Value, String> {
             }
         }
     }
+    if request["op"] == "revert" {
+        let at = request["versionAt"].as_u64().ok_or("Missing version")?;
+        request["version"] = crate::journal::find_version(app, request["id"].as_str().unwrap_or(""), at)?;
+    }
     let note = mutate(&mut file, &request)?;
     store(app, &file)?;
+    // Version history and activity counts are best effort: the note itself is saved.
+    crate::journal::after_change(app, &request, before.as_ref(), &note);
     // Edge queues only need to re-layout when docking-relevant state changed,
     // not on every body save.
     let layout = before.as_ref().is_none_or(|b| {
@@ -480,6 +612,44 @@ pub fn note_operation(
     request["source"] = json!("ui");
     request["owner"] = json!(window.label());
     operation(&app, request)
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use super::*;
+
+    fn file_with(notes: Value) -> Value {
+        json!({"version":2,"notes":notes,"history":[{"at":1,"op":"trash","note":{"id":"old"}}],"tombstones":[]})
+    }
+
+    #[test]
+    fn trashing_stamps_the_time_and_restoring_clears_it() {
+        let mut f = file_with(json!({"a":{"id":"a","title":"","content":"","revision":1,"lifecycle":"active","placement":"center","window":{}}}));
+        let note = mutate(&mut f, &json!({"id":"a","op":"trash","expectedRevision":1})).unwrap();
+        assert!(note["trashedAt"].is_u64());
+        let note = mutate(&mut f, &json!({"id":"a","op":"restore","expectedRevision":2})).unwrap();
+        assert!(note.get("trashedAt").is_none());
+    }
+
+    #[test]
+    fn the_sweep_deletes_only_expired_trash_and_never_unstamped_notes() {
+        let now = 100 * DAY;
+        let mut f = file_with(json!({
+            "old":{"id":"old","lifecycle":"trash","trashedAt":now - 31 * DAY},
+            "new":{"id":"new","lifecycle":"trash","trashedAt":now - 29 * DAY},
+            "legacy":{"id":"legacy","lifecycle":"trash"},
+            "kept":{"id":"kept","lifecycle":"archived","trashedAt":0}
+        }));
+        let (changed, gone) = sweep_trash(&mut f, now, 30);
+        assert!(changed);
+        assert_eq!(gone, vec!["old".to_string()]);
+        assert_eq!(f["notes"]["legacy"]["trashedAt"], json!(now), "stamped, not deleted");
+        assert!(f["notes"].get("kept").is_some() && f["notes"].get("new").is_some());
+        assert_eq!(f["tombstones"], json!(["old"]));
+        assert_eq!(f["history"], json!([]), "its undo history goes too");
+        assert_eq!(sweep_trash(&mut f, now, 30), (false, vec![]));
+        assert_eq!(sweep_trash(&mut f, now + 365 * DAY, 0), (false, vec![]), "0 keeps the trash");
+    }
 }
 
 #[cfg(test)]
@@ -529,6 +699,28 @@ mod tests {
         assert!(f["notes"]["a"]["editedAt"].as_u64().is_some());
         mutate(&mut f,&json!({"id":"b","op":"create","note":{"title":"新","content":""}})).unwrap();
         assert!(f["notes"]["b"]["editedAt"].as_u64().is_some());
+    }
+    #[test]
+    fn stars_and_tags_are_metadata_that_never_bump_the_revision() {
+        let mut f = file();
+        mutate(&mut f,&json!({"id":"a","op":"appearance","patch":{"starredAt":5,"tags":[" 工作 ","#读书","工作",""]}})).unwrap();
+        assert_eq!(f["notes"]["a"]["revision"], 1);
+        assert_eq!(f["notes"]["a"]["starredAt"], 5);
+        assert_eq!(f["notes"]["a"]["tags"], json!(["工作","读书"]));
+        mutate(&mut f,&json!({"id":"a","op":"save","expectedRevision":1,"patch":{"content":"x","tags":[]}})).unwrap();
+        assert_eq!(f["notes"]["a"]["tags"], json!(["工作","读书"]), "a body save never drops tags");
+        assert!(mutate(&mut f,&json!({"id":"a","op":"appearance","patch":{"tags":["一二三四五六七八九十一二三四五六七八九十一"]}})).is_err());
+        assert!(mutate(&mut f,&json!({"id":"a","op":"appearance","patch":{"starredAt":"yes"}})).is_err());
+    }
+    #[test]
+    fn revert_restores_text_and_needs_an_active_note() {
+        let mut f = file();
+        mutate(&mut f,&json!({"id":"a","op":"revert","expectedRevision":1,"version":{"title":"早","content":"旧正文"}})).unwrap();
+        assert_eq!(f["notes"]["a"]["content"], "旧正文");
+        assert_eq!(f["notes"]["a"]["revision"], 2);
+        assert!(f["notes"]["a"]["editedAt"].as_u64().is_some());
+        mutate(&mut f, &json!({"id":"a","op":"archive","expectedRevision":2})).unwrap();
+        assert!(mutate(&mut f,&json!({"id":"a","op":"revert","expectedRevision":3,"version":{"title":"","content":""}})).is_err());
     }
     #[test]
     fn invalid_migration_preserves_data() {

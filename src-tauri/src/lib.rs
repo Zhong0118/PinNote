@@ -1,4 +1,6 @@
+mod backup;
 mod integration;
+mod journal;
 mod notes;
 mod perf;
 mod reminders;
@@ -422,13 +424,13 @@ fn request_save(
     Ok(attempt)
 }
 
-fn resume_after_update(app: &AppHandle, attempt: u64) {
+pub(crate) fn resume_after_update(app: &AppHandle, attempt: u64) {
     if app.state::<QuitLock>().0.lock().unwrap().cancel(attempt) {
         let _ = app.emit("quit-save-cancelled", attempt);
     }
 }
 
-async fn prepare_update(app: &AppHandle) -> Result<u64, String> {
+pub(crate) async fn prepare_update(app: &AppHandle) -> Result<u64, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let attempt = request_save(app, Some(tx))?;
     match tokio::time::timeout(std::time::Duration::from_secs(15), rx).await {
@@ -723,6 +725,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .on_page_load(|webview, _| backup::protect_new(webview))
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::Destroyed) {
                 if let Ok(mut drafts) = window.state::<notes::Drafts>().0.lock() {
@@ -747,6 +750,7 @@ pub fn run() {
             reminders::start(app.handle().clone());
             integration::start(app.handle().clone())?;
             updater::start_background_checks(app.handle().clone());
+            backup::start(app.handle().clone());
 
             if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| {
@@ -771,6 +775,13 @@ pub fn run() {
             load_notes,
             notes::note_operation,
             notes::note_draft,
+            journal::note_versions,
+            journal::load_activity,
+            backup::backup_now,
+            backup::list_backups,
+            backup::restore_backup,
+            backup::export_notes,
+            backup::set_capture_protection,
             reminders::reminder_permission,
             integration::integration_status,
             integration::integration_configure,

@@ -186,3 +186,17 @@ test('the window snapshot loads once and then follows single-note changes', asyn
   assert.equal((await store.notesSnapshot()).notes.a, undefined);
   assert.equal(loads, 1);
 });
+
+test('loading keeps edit time, star and tags', async () => {
+  const file = { version: 2, history: [], lastActiveNoteId: 'a', lastClosedNoteId: 'a', notes: {
+    a: { id: 'a', title: 't', content: 'c', revision: 1, lifecycle: 'active', placement: 'center', createdAt: 1, updatedAt: 9, editedAt: 5, starredAt: 7, trashedAt: 3, tags: ['工作'] },
+    b: { id: 'b', title: 'u', content: 'd', revision: 1, lifecycle: 'active', placement: 'center', createdAt: 1, updatedAt: 9 },
+  } };
+  const store = loadStore(async (command) => command === 'load_notes' ? JSON.stringify(file) : null);
+  const { notes } = await store.loadNotes();
+  assert.equal(notes.a.editedAt, 5);
+  assert.equal(notes.a.starredAt, 7);
+  assert.equal(notes.a.trashedAt, 3);
+  assert.deepEqual([...notes.a.tags], ['工作']);
+  assert.equal('starredAt' in notes.b || 'tags' in notes.b || 'editedAt' in notes.b, false);
+});
