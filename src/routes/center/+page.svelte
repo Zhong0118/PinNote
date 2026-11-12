@@ -58,7 +58,6 @@
   let listWidth = $state(LIST_WIDTH.default);
   let resizing = $state(false);
   let rowDrag = $state<SortDrag|null>(null);
-  let tabDrag = $state<SortDrag|null>(null);
   // Re-renders list times once a minute so "14:20" becomes "昨天" after midnight.
   let clock = $state(Date.now());
   const editedAt = (n:PinNote) => n.editedAt ?? n.updatedAt;
@@ -457,7 +456,7 @@
         {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={13}/></button></div>{/each}
         {#each visible as note,i(note.id)}
           {@const info=summary(note)}{@const tasks=info.tasks}
-          <button animate:shift class="note-row" data-sort-id={note.id} class:chosen={selected===note.id} class:dragging={rowDrag?.id===note.id} class:drop-before={rowDrag?.index===i} class:drop-after={rowDrag?.index===visible.length&&i===visible.length-1} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})}>
+          <button animate:shift class="note-row" data-sort-id={note.id} class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})}>
              <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{note.title||'未命名便签'}</b>{#if note.placement==='desktop'}<Monitor size={13}/>{/if}<time datetime={new Date(editedAt(note)).toISOString()} title="编辑于 {shortTime(editedAt(note),clock)}">{listTime(editedAt(note),clock)}</time></span><small>{info.excerpt||(note.content.trim() ? '打开查看内容' : '暂无正文')}</small>
              {#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}
           </button>
@@ -470,9 +469,9 @@
     <div class="list-resizer" role="separator" aria-orientation="vertical" aria-label="调整列表宽度" aria-valuemin={LIST_WIDTH.min} aria-valuemax={LIST_WIDTH.max} aria-valuenow={shownListWidth} tabindex={sidebar?0:-1} title="拖动调整列表宽度 · 双击恢复默认" hidden={!sidebar||settingsOpen} onpointerdown={resizeList} onkeydown={resizeKey} ondblclick={()=>listWidth=LIST_WIDTH.default}></div>{/if}
   <section class="work" class:ink={draft?.theme==='ink'} style:--pin-bg={draft?noteBackground(draft.theme,draft.customColor):'var(--surface)'} style:--note-tint={draft?noteTint(draft.theme,draft.customColor):undefined} inert={busy||settingsOpen}>
     <header class="tabs" data-tauri-drag-region><button class="list-toggle" aria-label={sidebar?'隐藏列表':'显示列表'} title={sidebar?'隐藏列表':'显示列表'} onclick={()=>sidebar=!sidebar}><PanelLeft size={16}/></button>
-      <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region use:sortable={{axis:'x',onDrag:d=>tabDrag=d,onDrop:dropTab}}>
+      <div class="tab-strip" bind:this={tabStrip} data-tauri-drag-region use:sortable={{axis:'x',onDrop:dropTab}}>
         {#each tabs as id,i(id)}
-          <div class="tab" data-sort-id={id} class:current={selected===id} class:dragging={tabDrag?.id===id} class:drop-before={tabDrag?.index===i} class:drop-after={tabDrag?.index===tabs.length&&i===tabs.length-1} animate:shift>
+          <div class="tab" data-sort-id={id} class:current={selected===id} animate:shift>
             <button class="tab-title" title={notes.find(n=>n.id===id)?.title||'未命名便签'} onclick={()=>run(()=>select(id))}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</button><button class="tab-close" aria-label="关闭 Tab" onclick={()=>run(()=>closeTab(id))}><X size={13}/></button>
           </div>
         {/each}
@@ -563,11 +562,11 @@
  .note-row.chosen time{color:color-mix(in srgb,var(--accent) 70%,transparent)}
  /* Drag to reorder: the lifted item dims and an accent line marks where it will land. */
  .note-row,.tab{position:relative}
- .note-row.dragging,.tab.dragging{opacity:.45}
- .note-row.drop-before::before,.note-row.drop-after::after{content:'';position:absolute;left:8px;right:8px;height:2px;border-radius:1px;background:var(--accent);pointer-events:none}
- .note-row.drop-before::before{top:-3px}.note-row.drop-after::after{bottom:-3px}
- .tab.drop-before::before,.tab.drop-after::after{content:'';position:absolute;top:5px;bottom:5px;width:2px;border-radius:1px;background:var(--accent);pointer-events:none}
- .tab.drop-before::before{left:-2px}.tab.drop-after::after{right:-2px}
+ /* The lifted copy (see sortable.ts) floats above everything and follows the pointer. */
+ /* !important: the copy keeps the item's own classes, whose component rules are more specific. */
+ :global(.sort-ghost){border-radius:var(--radius)!important;box-shadow:none!important;opacity:.97;transition:scale var(--motion-fast) var(--ease-out),box-shadow var(--motion-fast) var(--ease-out)!important}
+ :global(.sort-ghost.lifted){scale:1.03;box-shadow:var(--menu-shadow)!important}
+ :global(.sort-ghost.settling){transition:transform var(--motion) var(--ease-out),scale var(--motion) var(--ease-out),box-shadow var(--motion) var(--ease-out)!important}
  :global(:root[data-sorting]),:global(:root[data-sorting] *){cursor:grabbing!important;user-select:none!important}
  .desktop.drop-target{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
  .note-dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 .5px var(--hairline)}
@@ -603,7 +602,10 @@
  .window-tools{position:relative;display:flex;align-items:center;gap:2px;margin-left:auto;padding-left:6px;border-left:1px solid var(--hairline)}
  .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--surface-raised);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--menu-shadow)}
  .menu button{display:block;text-align:left;width:100%;font-size:12px}
- .window-menu{top:38px;right:0;width:180px}.window-menu button{display:flex;gap:8px;justify-content:flex-start}
+ .window-menu{top:38px;right:0;width:180px}
+ /* Menu items sit inside .window-tools but must not inherit its round icon-button shape. */
+ .window-menu button{display:flex;gap:8px;justify-content:flex-start;width:100%;height:auto;padding:6px 8px;border-radius:var(--radius-sm);color:var(--text)}
+ .window-menu button:hover{background:var(--hover);color:var(--text)}
  .danger{color:var(--danger)}
  /* Title shares the editor's reading column so heading and body line up. */
  .title-row{position:relative;display:flex;align-items:center;gap:8px;width:100%;max-width:866px;margin:0 auto;padding:18px 30px 8px 14px}

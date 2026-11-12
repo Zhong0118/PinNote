@@ -15,9 +15,11 @@ export function reveal(_node: Element): TransitionConfig {
   return { duration: motionReduced() ? 0 : MOTION_FAST, easing: cubicOut, css: (t) => `opacity: ${t}; transform: scale(${0.97 + t * 0.03})` };
 }
 
-/** List and tab reordering: one duration and curve everywhere, none when motion is reduced. */
+/** List and tab reordering: one duration and curve everywhere, none when motion is reduced.
+ * A finished drag (sortable.ts) has already slid every item into place, so it is not replayed. */
 export function shift(node: Element, rects: { from: DOMRect; to: DOMRect }, params: FlipParams = {}): AnimationConfig {
-  return flip(node, rects, { duration: motionReduced() ? 0 : MOTION, easing: cubicOut, ...params });
+  const settled = document.documentElement.dataset.sortSettle !== undefined;
+  return flip(node, rects, { duration: motionReduced() || settled ? 0 : MOTION, easing: cubicOut, ...params });
 }
 
 /** Keep compact popovers keyboard accessible without adding a UI dependency. */
