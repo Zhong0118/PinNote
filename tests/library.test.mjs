@@ -94,3 +94,17 @@ test('trash countdown rounds up, never shows zero, and is off when the trash is 
   assert.equal(lib.trashDaysLeft(undefined, 60, now), 60);
   assert.equal(lib.trashDaysLeft(now, 0, now), null);
 });
+
+test('a day lists the notes created or last edited on it, newest first', () => {
+  const at = (d, h) => new Date(2026, 10, d, h).getTime();
+  const notes = [
+    { id: 'a', lifecycle: 'active', createdAt: at(10, 9), updatedAt: at(12, 9), editedAt: at(12, 9) },
+    { id: 'b', lifecycle: 'active', createdAt: at(12, 8), updatedAt: at(12, 8) },
+    { id: 'c', lifecycle: 'trash', createdAt: at(12, 7), updatedAt: at(12, 7) },
+    { id: 'd', lifecycle: 'archived', createdAt: at(11, 7), updatedAt: at(11, 7) },
+  ];
+  assert.deepEqual(plain(lib.notesOnDay(notes, '2026-11-12').map(h => [h.note.id, h.created])), [['a', false], ['b', true]]);
+  assert.deepEqual(plain(lib.notesOnDay(notes, '2026-11-10').map(h => h.note.id)), ['a']);
+  const grid = lib.heatmap(new Map([['2026-11-12', { edits: 2, created: 1, done: 0 }], ['2026-11-10', { edits: 0, created: 0, done: 3 }]]), at(12, 12), 2);
+  assert.deepEqual(plain(lib.heatTotals(grid)), { days: 2, edits: 2, created: 1, done: 3 });
+});

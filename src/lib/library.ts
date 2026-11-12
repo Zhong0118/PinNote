@@ -130,6 +130,32 @@ export function heatmap(days: Map<string, Day>, now: number, weeks = 20): HeatCe
   }));
 }
 
+/**
+ * Notes created or last edited on a local day, newest first. Only each note's creation and
+ * latest edit are known, so a note edited again since then shows on its later day instead.
+ */
+export function notesOnDay<T extends Dated & { id: string }>(notes: T[], key: string) {
+  const hits: Array<{ note: T; created: boolean; at: number }> = [];
+  for (const note of notes) {
+    if (note.lifecycle === 'trash') continue;
+    const edited = note.editedAt ?? note.updatedAt;
+    const created = dayKey(note.createdAt) === key;
+    if (created || dayKey(edited) === key) hits.push({ note, created, at: dayKey(edited) === key ? edited : note.createdAt });
+  }
+  return hits.sort((a, b) => b.at - a.at);
+}
+
+/** Totals over the heatmap: active days, edits, notes created and to-dos finished. */
+export function heatTotals(grid: HeatCell[][]) {
+  const t = { days: 0, edits: 0, created: 0, done: 0 };
+  for (const week of grid) for (const cell of week) {
+    if (cell.future) continue;
+    if (cell.day.edits + cell.day.created + cell.day.done) t.days++;
+    t.edits += cell.day.edits; t.created += cell.day.created; t.done += cell.day.done;
+  }
+  return t;
+}
+
 /** Sum of a day field over the `count` days ending today. */
 export function recent(days: Map<string, Day>, now: number, count: number, field: keyof Day) {
   let total = 0;
