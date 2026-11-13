@@ -3,32 +3,29 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PinNote · 随手写下，贴在桌边</title>
-<meta name="description" content="试着把桌面便签收成胶囊、贴到屏幕边缘，体验 Markdown 清单、全文搜索与版本恢复。下载适用于 macOS 和 Windows 的 PinNote。">
+<meta name="description" content="随手写下一个想法，从便签中心把它钉到桌面。试试贴边预览、换色、提醒和记录概览。下载适用于 macOS 和 Windows 的 PinNote。">
 <link rel="icon" href="./media/icon.png"><link rel="stylesheet" href="./site.css"><script defer src="./showcase.js"></script>
 </head>
 <body>
-<header><a class="brand" href="./"><img src="./media/icon.png" width="32" height="32" alt="">PinNote</a><nav><a href="#workspace">功能</a><a href="#install">安装</a><a href="https://github.com/Zhong0118/PinNote">GitHub ↗</a></nav></header>
+<header><a class="brand" href="./"><img src="./media/icon.png" width="32" height="32" alt="">PinNote</a><nav><a href="#workspace">工作台</a><a href="#stats">统计</a><a href="#install">安装</a><a href="https://github.com/Zhong0118/PinNote">GitHub ↗</a></nav></header>
 <main>
-<section class="hero">
-<div class="intro"><h1>随手写下<br><em>贴在桌边</em></h1><p>一张 Markdown 便签，装下出发前的清单。需要时放在手边，忙起来就收进屏幕边缘。</p><a class="button" href="https://github.com/Zhong0118/PinNote/releases/latest">下载安装包 ↓</a><a class="textlink" href="#install">Homebrew 安装</a><small>macOS · Windows x64</small></div>
-<div class="showcase"><div class="desk" id="desk" data-mode="open">
-<div class="deskbar"><b>桌面演示</b><span>星期五　09:41</span></div>
-<div class="itinerary" aria-hidden="true"><small>WEEKEND ITINERARY</small><strong>山间两日</strong><i>周六　08:30 出发</i></div>
-<div class="mountains" aria-hidden="true"></div>
-<div class="floating"><button class="float-title" id="note-toggle" aria-label="将出发清单收为胶囊"><i></i>出发清单</button><div class="float-body"><b>周六去山里</b><p>集合地点在车站东门。</p><span>☑ 下载离线地图</span><span>□ 带好雨衣</span></div></div>
-<div class="peek"><b>出发清单</b><p>集合地点在车站东门。</p><small>还有 1 项待办</small></div></div>
-<div class="controls" aria-label="便签形态"><button data-mode="open" aria-pressed="true">展开</button><button data-mode="capsule" aria-pressed="false">胶囊</button><button data-mode="edge" aria-pressed="false">贴边</button><button id="play">播放演示</button></div><p class="caption" id="mode-caption" aria-live="polite">桌面便签独立展开，可以边看行程边核对清单。</p></div>
-</section>
-<section class="chapter" id="workspace"><div class="story"><h2>清单就写在<br>正文中</h2><p>集合地点写成一句话，要带的东西写成待办。勾选一项，进度就跟着变。代码块、列表和表格也可以写在同一张便签里。</p><p class="aside">出发时间定下来后，可以给整张便签设一次提醒。应用在后台运行时，到点会发出系统通知。</p></div>
-<div class="paper"><div class="paper-head"><b>出发清单</b><span>Markdown</span></div><h3>周六去山里</h3><p>08:30 在车站东门集合</p><div class="tasks"><label><input type="checkbox" checked>下载离线地图</label><label><input type="checkbox">带好雨衣</label><label><input type="checkbox">装满水壶</label></div><div class="progress"><progress max="3" value="1"></progress><output id="count" aria-live="polite">已完成 1 / 3</output></div></div></section>
-<section class="chapter reverse"><div class="story"><h2>记得一个词<br>就能找回来</h2><p>标题想不起来也没关系。中心会一起搜索标题、正文和标签。收藏常用便签，或筛出还有待办的几张，接着上次的地方写。</p><p class="aside">在示例中搜「东门」或「装备」，看看会留下哪张便签。</p></div>
-<div class="library"><label for="query">便签中心</label><input id="query" type="search" placeholder="搜索标题、正文或标签"><ul id="results"><li><b>出发清单</b><span>车站东门集合 · #出行</span></li><li><b>借用登记</b><span>周一归还登山杖 · #装备</span></li><li><b>下次想走的路线</b><span>从北坡上山，沿溪流返回 · #路线</span></li></ul><small id="matches" role="status">3 张便签</small></div></section>
-<section class="chapter"><div class="story"><h2>改过的内容<br>还找得到</h2><p>每张便签保留最近 20 个历史版本。集合地点被改掉时，可以翻回原来的记录，确认后恢复。</p><p class="aside">每天自动备份整个便签库，保留最近 14 份。换电脑时，也可以把全部便签导出为 Markdown。</p></div>
-<div class="history"><h3>集合地点</h3><p id="current">周六 08:30，高铁站南门集合。</p><hr><div class="paper-head"><b>上一版</b><span>昨天 18:24</span></div><p>周六 08:30，车站东门集合。</p><button id="restore">恢复这版示例</button><small role="status" id="restored"></small></div></section>
+<section class="lead">
+<div><h1>想到一句，<br><em>就钉在桌面。</em></h1><p>播客的开场白、刚冒出的产品点子、一句还没想好下文的话。先随手记下来，把想继续琢磨的那张留在桌面。</p><a class="button" href="https://github.com/Zhong0118/PinNote/releases/latest">下载 PinNote ↓</a><a class="textlink" href="#workspace">试写一个想法 ↓</a></div>
+<div class="pinboard" aria-label="桌面灵感便签示意"><div class="poster peach"><small>播客 · 开场</small><strong>如果只听声音，<br>能认出这条街吗？</strong><p>第一期，录下清晨拉开卷帘门的声音。</p></div><div class="poster blue"><small>设计随想</small><strong>让窗边的光，<br>决定封面的颜色。</strong></div><div class="poster mint">书名备选 · 城市的耳朵</div></div></section>
+<section id="workspace" class="studio"><h2>在便签中心写，在桌面接着想</h2><p>点左侧便签切换想法，或新建一张。写上自己的话，再点「放到桌面」。中心和桌面用的是同一张便签。</p>
+<div class="workbench"><aside><strong>便签中心</strong><input id="search" type="search" aria-label="搜索示例便签" placeholder="搜索想法"><button id="new">＋ 新建便签</button><div id="list"></div></aside>
+<div class="editor"><div class="bar"><span id="location"></span><button id="pin">放到桌面 ↗</button></div><label>标题<input id="title" maxlength="64"></label><label>正文<textarea id="body" rows="4" maxlength="1500"></textarea></label><fieldset id="palette"><legend>便签颜色</legend></fieldset><small>网页演示 · 输入只保留在本次页面中</small></div></div></section>
+<section id="desktop" class="chapter"><div class="story"><h2>靠边一放，<br>腾出桌面</h2><p>拖住便签标题，到左右边缘松手。把指针停在边签上看摘要，点开继续读，再收起就回到刚才的槽位。向内拖出即可解除停靠。</p><p class="aside">只想缩小一点？收成胶囊，标题和刚选的颜色还在。可以用下方按钮试同样的动作。</p></div>
+<div><div id="desk" class="surface" data-mode="open"><span class="surface-label">桌面演示</span><div id="card"><button id="grip" title="拖动标题，或点击展开和收起"></button><textarea id="desktop-body" aria-label="桌面便签正文" maxlength="1500"></textarea></div><div id="peek"></div><p id="empty" hidden>在上方工作台将这张便签放到桌面</p></div>
+<div class="controls"><button id="fold">收成胶囊</button><button id="left">贴左边</button><button id="right">贴右边</button><button id="undock">拖回桌面</button></div></div></section>
+<section class="chapter reverse"><div class="story"><h2>让想法在合适的<br>时候回来</h2><p>有个开场白想留到录音前再看？给这张便签设一次提醒。到点后可以从中心打开原文，也可以延后十分钟。</p><p class="aside">下面用示例时钟演示。桌面应用运行在后台时，会通过系统通知提醒。</p></div>
+<div class="reminder"><small>便签提醒 · 示例时钟 <time id="clock"></time></small><h3 id="rem-title"></h3><p role="status" id="rem-msg"></p><div class="controls" id="rem-actions"></div></div></section>
+<section class="studio" id="stats"><h2>哪天冒出了最多想法？</h2><p>工作台的「记录概览」把最近半年的活动铺成一张热力图。点一天看新建、编辑和完成项，颜色越深，当天记录越多。</p>
+<div class="overview"><div class="bar"><b>记录概览</b><small>示例活动 · 本机统计</small></div><div id="metrics"></div><div id="heat" aria-label="最近 26 周活动"></div><output id="day" aria-live="polite"></output></div></section>
 <section class="more"><h2>按自己的习惯用</h2><div class="features">
 <article><h3>让 AI 查便签</h3><p>在设置中启用本地 MCP，让兼容的 AI 工具搜索和读取便签。需要它追加内容或安排提醒时，再打开写入权限。</p><a href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md#本地-mcp">连接方法 ↗</a></article>
 <article><h3>共享屏幕时藏起来</h3><p>共享屏幕时可以隐藏便签窗口。平时用自己的颜色区分便签，也可以跟随系统深色外观、减少窗口动画。</p></article>
-<article><h3>回看这半年的记录</h3><p>在记录概览里看最近编辑过多少便签、本月完成多少待办。半年热力图和连续记录天数都在本机统计。</p></article></div></section>
+<article><h3>给想法留个底稿</h3><p>每张便签保留最近 20 个历史版本。整个便签库每天自动备份，保留 14 份，也可以全部导出为 Markdown。</p></article></div></section>
 <section class="faq"><h2>下载之前</h2>
 <details><summary>便签会同步到其他电脑吗？</summary><p>便签保存在当前电脑。可以从「设置 → 数据与更新」打开数据目录、恢复备份或导出全部 Markdown 文件。</p></details>
 <details><summary>关掉便签中心，还会收到提醒吗？</summary><p>关闭中心后 PinNote 仍可在托盘运行，到点会尝试发送系统通知。完全退出期间错过的提醒会在下次启动时处理。</p></details>
