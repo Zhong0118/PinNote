@@ -1,22 +1,38 @@
 <!doctype html>
-<html lang="zh-CN"><head>
+<html lang="zh-CN">
+<head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PinNote · macOS 与 Windows 桌面便签</title>
-<meta name="description" content="把 Markdown 清单贴在桌面，收进屏幕边缘。PinNote 支持本地保存、提醒和备份，适用于 macOS 与 Windows。">
-<link rel="icon" href="./media/icon.png"><link rel="stylesheet" href="./site.css">
-</head><body>
-<header><a class="brand" href="./"><img src="./media/icon.png" width="32" height="32" alt="">PinNote</a>
-<nav aria-label="主导航"><a href="#features">功能</a><a href="#install">安装</a><a href="https://github.com/Zhong0118/PinNote">GitHub ↗</a></nav></header>
-<main><section class="hero"><div class="intro"><h1>手边的<br>Markdown 便签</h1>
-<p>把正在用的清单放到桌面。忙完轻轻一收，便签就在屏幕边缘，点一下继续写。</p>
-<a class="button" href="https://github.com/Zhong0118/PinNote/releases/latest">下载安装包 <span aria-hidden="true">↓</span></a>
-<a class="textlink" href="#install">用 Homebrew 安装</a><small>macOS · Windows x64</small></div>
-<figure><img class="window" src="./media/center.png" alt="PinNote 便签中心中的本周计划，右侧勾选待办，左侧切换便签"><img class="capsule" src="./media/capsule.png" alt="收起后的桌面便签胶囊"></figure></section>
-<section id="features"><h2>从随手记到找回来</h2><div class="features">
-<article><h3>写在同一张便签里</h3><p>把文字、代码和勾选项穿插在一起。为整张便签设一个提醒，到点从中心打开。</p></article>
-<article><h3>给桌面留点空间</h3><p>需要对照时置顶，暂时不用就收成胶囊。拖到屏幕边缘停靠，悬停即可查看摘要。</p></article>
-<article><h3>旧记录也有去处</h3><p>用收藏、标签和全文搜索找到便签。内容保存在本机，可以恢复历史版本，也能批量导出 Markdown。</p></article></div></section>
-<section id="install"><div><h2>安装 PinNote</h2><p>Mac 用户可以在终端运行</p><pre><code>brew install --cask zhong0118/tap/pinnote</code></pre></div>
-<div class="packages"><h3>手动安装</h3><p>macOS 下载 universal DMG，支持 Apple Silicon 和 Intel。Windows x64 选择 EXE 或 MSI。</p><a class="textlink" href="https://github.com/Zhong0118/PinNote/releases/latest">查看最新安装包 ↗</a></div></section></main>
-<footer><b>PinNote</b><a href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md">使用手册</a><a href="https://github.com/Zhong0118/PinNote/issues">反馈问题</a></footer>
+<title>PinNote · 随手写下，贴在桌边</title>
+<meta name="description" content="试着把桌面便签收成胶囊、贴到屏幕边缘，体验 Markdown 清单、全文搜索与版本恢复。下载适用于 macOS 和 Windows 的 PinNote。">
+<link rel="icon" href="./media/icon.png"><link rel="stylesheet" href="./site.css"><script defer src="./showcase.js"></script>
+</head>
+<body>
+<header><a class="brand" href="./"><img src="./media/icon.png" width="32" height="32" alt="">PinNote</a><nav><a href="#workspace">功能</a><a href="#install">安装</a><a href="https://github.com/Zhong0118/PinNote">GitHub ↗</a></nav></header>
+<main>
+<section class="hero">
+<div class="intro"><h1>随手写下<br><em>贴在桌边</em></h1><p>一张 Markdown 便签，装下出发前的清单。需要时放在手边，忙起来就收进屏幕边缘。</p><a class="button" href="https://github.com/Zhong0118/PinNote/releases/latest">下载安装包 ↓</a><a class="textlink" href="#install">Homebrew 安装</a><small>macOS · Windows x64</small></div>
+<div class="showcase"><div class="desk" id="desk" data-mode="open">
+<div class="deskbar"><b>桌面演示</b><span>星期五　09:41</span></div>
+<div class="itinerary" aria-hidden="true"><small>WEEKEND ITINERARY</small><strong>山间两日</strong><i>周六　08:30 出发</i></div>
+<div class="mountains" aria-hidden="true"></div>
+<div class="floating"><button class="float-title" id="note-toggle" aria-label="将出发清单收为胶囊"><i></i>出发清单</button><div class="float-body"><b>周六去山里</b><p>集合地点在车站东门。</p><span>☑ 下载离线地图</span><span>□ 带好雨衣</span></div></div>
+<div class="peek"><b>出发清单</b><p>集合地点在车站东门。</p><small>还有 1 项待办</small></div></div>
+<div class="controls" aria-label="便签形态"><button data-mode="open" aria-pressed="true">展开</button><button data-mode="capsule" aria-pressed="false">胶囊</button><button data-mode="edge" aria-pressed="false">贴边</button><button id="play">播放演示</button></div><p class="caption" id="mode-caption" aria-live="polite">桌面便签独立展开，可以边看行程边核对清单。</p></div>
+</section>
+<section class="chapter" id="workspace"><div class="story"><h2>清单就写在<br>正文中</h2><p>集合地点写成一句话，要带的东西写成待办。勾选一项，进度就跟着变。代码块、列表和表格也可以写在同一张便签里。</p><p class="aside">出发时间定下来后，可以给整张便签设一次提醒。应用在后台运行时，到点会发出系统通知。</p></div>
+<div class="paper"><div class="paper-head"><b>出发清单</b><span>Markdown</span></div><h3>周六去山里</h3><p>08:30 在车站东门集合</p><div class="tasks"><label><input type="checkbox" checked>下载离线地图</label><label><input type="checkbox">带好雨衣</label><label><input type="checkbox">装满水壶</label></div><div class="progress"><progress max="3" value="1"></progress><output id="count" aria-live="polite">已完成 1 / 3</output></div></div></section>
+<section class="chapter reverse"><div class="story"><h2>记得一个词<br>就能找回来</h2><p>标题想不起来也没关系。中心会一起搜索标题、正文和标签。收藏常用便签，或筛出还有待办的几张，接着上次的地方写。</p><p class="aside">在示例中搜「东门」或「装备」，看看会留下哪张便签。</p></div>
+<div class="library"><label for="query">便签中心</label><input id="query" type="search" placeholder="搜索标题、正文或标签"><ul id="results"><li><b>出发清单</b><span>车站东门集合 · #出行</span></li><li><b>借用登记</b><span>周一归还登山杖 · #装备</span></li><li><b>下次想走的路线</b><span>从北坡上山，沿溪流返回 · #路线</span></li></ul><small id="matches" role="status">3 张便签</small></div></section>
+<section class="chapter"><div class="story"><h2>改过的内容<br>还找得到</h2><p>每张便签保留最近 20 个历史版本。集合地点被改掉时，可以翻回原来的记录，确认后恢复。</p><p class="aside">每天自动备份整个便签库，保留最近 14 份。换电脑时，也可以把全部便签导出为 Markdown。</p></div>
+<div class="history"><h3>集合地点</h3><p id="current">周六 08:30，高铁站南门集合。</p><hr><div class="paper-head"><b>上一版</b><span>昨天 18:24</span></div><p>周六 08:30，车站东门集合。</p><button id="restore">恢复这版示例</button><small role="status" id="restored"></small></div></section>
+<section class="more"><h2>按自己的习惯用</h2><div class="features">
+<article><h3>让 AI 查便签</h3><p>在设置中启用本地 MCP，让兼容的 AI 工具搜索和读取便签。需要它追加内容或安排提醒时，再打开写入权限。</p><a href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md#本地-mcp">连接方法 ↗</a></article>
+<article><h3>共享屏幕时藏起来</h3><p>共享屏幕时可以隐藏便签窗口。平时用自己的颜色区分便签，也可以跟随系统深色外观、减少窗口动画。</p></article>
+<article><h3>回看这半年的记录</h3><p>在记录概览里看最近编辑过多少便签、本月完成多少待办。半年热力图和连续记录天数都在本机统计。</p></article></div></section>
+<section class="faq"><h2>下载之前</h2>
+<details><summary>便签会同步到其他电脑吗？</summary><p>便签保存在当前电脑。可以从「设置 → 数据与更新」打开数据目录、恢复备份或导出全部 Markdown 文件。</p></details>
+<details><summary>关掉便签中心，还会收到提醒吗？</summary><p>关闭中心后 PinNote 仍可在托盘运行，到点会尝试发送系统通知。完全退出期间错过的提醒会在下次启动时处理。</p></details>
+<details><summary>安装之后怎么更新？</summary><p>在托盘菜单选择「检查更新」。应用也会每 24 小时自动检查一次，有新版本时提醒。</p></details></section>
+<section id="install"><div><h2>安装 PinNote</h2><p>macOS 用户可以在终端运行</p><pre><code>brew install --cask zhong0118/tap/pinnote</code></pre></div><div class="packages"><h3>下载安装包</h3><p>macOS 选择 universal DMG，支持 Apple Silicon 和 Intel。Windows x64 选择 EXE 或 MSI。</p><a class="button" href="https://github.com/Zhong0118/PinNote/releases/latest">打开最新 Release ↗</a></div></section>
+</main><footer><b>PinNote</b><a href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md">使用手册</a><a href="https://github.com/Zhong0118/PinNote/issues">反馈问题</a></footer>
 </body></html>
