@@ -3,6 +3,7 @@
 <p align="center">随手写下，收在屏幕边缘，需要时再展开</p>
 <p align="center">macOS 与 Windows 上的轻量 Markdown 桌面便签</p>
 <p align="center">
+  <a href="https://zhong0118.github.io/PinNote/">产品首页</a> ·
   <a href="https://github.com/Zhong0118/PinNote/releases/latest"><strong>下载安装</strong></a> ·
   <a href="docs/usage.md">使用手册</a> ·
   <a href="docs/usage.md#本地-mcp">连接 AI 工具</a> ·
@@ -44,6 +45,12 @@
 </details>
 
 ## 下载与开始使用
+
+macOS 也可以用 Homebrew 安装：
+
+```sh
+brew install --cask zhong0118/tap/pinnote
+```
 
 从 [最新 Release](https://github.com/Zhong0118/PinNote/releases/latest) 下载安装包：
 
