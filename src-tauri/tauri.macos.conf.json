@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "PinNote",
+        "url": "center",
+        "width": 960,
+        "height": 660,
+        "minWidth": 560,
+        "minHeight": 380,
+        "alwaysOnTop": false,
+        "decorations": true,
+        "resizable": true,
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "shadow": false,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 20
+        }
+      }
+    ]
+  }
+}

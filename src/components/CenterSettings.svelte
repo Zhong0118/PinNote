@@ -200,6 +200,8 @@
         <div class="segmented" role="radiogroup" aria-label="中心窗口阴影">{#each shadows as [value, text]}<button role="radio" aria-checked={settings.appearance.centerShadow === value} class:on={settings.appearance.centerShadow === value} onclick={() => patchAppearance({ centerShadow: value })}>{text}</button>{/each}</div></div>
       <div class="row"><div><b>便签与胶囊阴影</b><small>标准：系统阴影加细线；细边：更清楚的描边，无阴影；关：极淡的边。贴边标签始终保持扁平。</small></div>
         <div class="segmented" role="radiogroup" aria-label="便签与胶囊阴影">{#each shadows as [value, text]}<button role="radio" aria-checked={settings.appearance.noteShadow === value} class:on={settings.appearance.noteShadow === value} onclick={() => patchAppearance({ noteShadow: value })}>{text}</button>{/each}</div></div>
+      {#if isMacPlatform()}<label class="row"><div><b>毛玻璃</b><small>中心窗口的列表和标题栏透出桌面，像访达的侧栏。系统开启“降低透明度”时自动变为不透明。</small></div>
+        <input type="checkbox" role="switch" checked={settings.appearance.glass} onchange={e => patchAppearance({ glass: e.currentTarget.checked })} /></label>{/if}
       <label class="row"><div><b>减少动态</b><small>关闭窗口滑动与淡入；系统开启“减弱动态效果”时也会生效。</small></div>
         <input type="checkbox" role="switch" checked={settings.appearance.reduceMotion} onchange={e => patchAppearance({ reduceMotion: e.currentTarget.checked })} /></label>
     {:else if category === 'window'}
@@ -272,10 +274,10 @@
 </section>
 
 <style>
-  .settings { position: absolute; inset: 0; z-index: 40; display: grid; grid-template-columns: 200px minmax(0, 1fr); background: var(--surface); color: var(--text); animation: settings-in var(--motion) var(--ease-out); }
+  .settings { --nav-w: 200px; position: absolute; inset: 0; z-index: 40; display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); background: var(--surface); color: var(--text); animation: settings-in var(--motion) var(--ease-out); }
   @keyframes settings-in { from { opacity: 0; transform: translateY(4px); } }
   nav { display: flex; flex-direction: column; gap: 2px; padding: 44px 10px 10px; background: var(--surface-muted); border-right: 1px solid var(--hairline); }
-  nav button { display: flex; align-items: center; gap: 9px; justify-content: flex-start; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; transition: background var(--motion-fast); }
+  nav button { display: flex; align-items: center; gap: 9px; justify-content: flex-start; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; transition: background var(--motion-fast); }
   nav button:hover { background: var(--hover); }
   nav .current { background: var(--accent-soft); color: var(--accent); }
   nav .back { color: var(--muted); margin-bottom: 10px; }
@@ -334,5 +336,8 @@
   .save-error { color: var(--danger); background: var(--danger-soft); }
   .save-error button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border: 0; border-radius: var(--radius-sm); padding: 3px 8px; font: inherit; font-size: 12px; color: var(--danger); background: transparent; cursor: pointer; }
   .save-note { color: var(--muted); }
-  @media (max-width: 640px) { .settings { grid-template-columns: 150px minmax(0, 1fr); } .content { padding: 44px 18px 24px; } .row { flex-wrap: wrap; } }
+  /* macOS glass: the category list sits on the window material; the page beside it stays solid. */
+  :global(:root[data-glass]) .settings { background: linear-gradient(var(--surface), var(--surface)) no-repeat var(--nav-w) 0 / 100% 100%; }
+  :global(:root[data-glass]) .settings > nav { background: transparent; }
+  @media (max-width: 640px) { .settings { --nav-w: 150px; } .content { padding: 44px 18px 24px; } .row { flex-wrap: wrap; } }
 </style>

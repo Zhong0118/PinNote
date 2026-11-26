@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, emit, emitTo } from '@tauri-apps/api/event';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { getCurrentWindow, Effect, EffectState } from '@tauri-apps/api/window';
   import { PanelLeft, Plus, X, MoreHorizontal, Monitor, Archive, Trash2, Settings, Search, Pin, Minimize2, ChevronsLeft, ChevronsRight, PenLine, ClockArrowDown, Sun, Moon, Star, ListFilter, History, ChartColumn, Hash, Check, Bell, ListTodo, CheckCheck, MonitorDown, ArchiveRestore, CopyPlus, RefreshCw } from 'lucide-svelte';
   import { answerRelease } from '$lib/editorHandoff';
   import { fitBounds } from '$lib/windowGeometry';
@@ -322,6 +322,18 @@
   const mac=isMacPlatform();
   let width=$state(960);
   let dark=$state(false);
+  // macOS frosted glass: the window is transparent (tauri.macos.conf.json) and the system's
+  // sidebar material sits behind the list and title bar; the writing area stays solid.
+  let glassOn=$state(true);
+  const glass=$derived(mac&&glassOn);
+  $effect(()=>{document.documentElement.toggleAttribute('data-glass',glass);});
+  let glassApplied:boolean|undefined;
+  /** Each setEffects call adds a native view, so apply only on change and clear first. */
+  async function applyGlass(on:boolean){
+    if(!mac||on===glassApplied) return; glassApplied=on;
+    const win=getCurrentWindow();
+    try{await win.clearEffects();if(on)await win.setEffects({effects:[Effect.Sidebar],state:EffectState.FollowsWindowActiveState});}catch{/* plain window */}
+  }
   let appSettings:AppSettings=structuredClone(defaultSettings);
   let trashDays=$state<number>(defaultSettings.trashDays);
   let settingsOpen=$state(false);
@@ -499,7 +511,7 @@
       shortcutStatus=registered.ok||registered.cancelled?'':`全局快捷键注册失败（可能被其他应用占用）：${registered.message}`;
     });
     // Center shadow: "standard" is the native window shadow, "light" keeps only a hairline.
-    const stopAppearance=onAppearance((a,isDark)=>{dark=isDark;void getCurrentWindow().setShadow(a.centerShadow==='standard').catch(()=>undefined);});
+    const stopAppearance=onAppearance((a,isDark)=>{dark=isDark;glassOn=a.glass;void applyGlass(a.glass);void getCurrentWindow().setShadow(a.centerShadow==='standard').catch(()=>undefined);});
     const close=getCurrentWindow().onCloseRequested(e=>{e.preventDefault(); void run(async()=>{await persist(); await getCurrentWindow().hide();});});
     async function saveForQuit(attempt:number) {
       if(!quitGuard.begin(attempt)) return;
@@ -517,15 +529,15 @@
 
 <svelte:window bind:innerWidth={width} onkeydown={e=>{if((e.metaKey||e.ctrlKey)&&e.key===','&&!e.isComposing){e.preventDefault();void openSettings();}}}/>
 {#if form.snapHint}<div class="snap-hint side-{form.snapHint}" role="status"><span>松手收起到{form.snapHint==='left'?'左':'右'}侧边缘</span></div>{/if}
-<main bind:this={mainEl} class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:settings-open={settingsOpen} class:resizing style:--list-w="{shownListWidth}px">
+<main bind:this={mainEl} class:folded={!sidebar||narrow} class:narrow class:drawer={narrow&&sidebar} class:mac class:glass class:settings-open={settingsOpen} class:resizing style:--list-w="{shownListWidth}px">
   {#if settingsOpen}<CenterSettings onClose={()=>settingsOpen=false} {shortcutStatus} onExportCurrent={draft?()=>void exportCurrent():undefined}/>{/if}
   {#if statsOpen&&!settingsOpen}<CenterStats {notes} {openTodos} onClose={()=>statsOpen=false} onTag={showTag} onOpen={id=>{statsOpen=false;void run(()=>select(id));}}/>{/if}
   {#if narrow}<button class="scrim" tabindex="-1" aria-label="关闭列表" onclick={()=>sidebar=false}></button>{/if}
   <aside inert={!sidebar||settingsOpen||statsOpen} aria-hidden={!sidebar||settingsOpen||statsOpen}>
     <div class="side-inner">
       {#if mac}<div class="titlebar-space" data-tauri-drag-region></div>{/if}
-      <div class="search"><Search size={15}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={16}/></button></div>
-      <nav><button class:active={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button class:active={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button>{#if order.length}<button class="sort-reset" aria-label="恢复按编辑时间排序" title="恢复按编辑时间排序" onclick={()=>order=[]}><ClockArrowDown size={14}/></button>{/if}
+      <div class="search"><label class="search-field"><Search size={14}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/></label><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={16}/></button></div>
+      <nav><div class="seg" role="radiogroup" aria-label="便签范围"><button role="radio" aria-checked={filter==='active'} class:current={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button role="radio" aria-checked={filter==='desktop'} class:current={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button></div>{#if order.length}<button class="sort-reset" aria-label="恢复按编辑时间排序" title="恢复按编辑时间排序" onclick={()=>order=[]}><ClockArrowDown size={14}/></button>{/if}
         <button class="filter-toggle" class:on={quickFilterCount(quick)>0||filterMenu} aria-label="筛选" title="筛选：收藏、提醒、待办、标签" aria-expanded={filterMenu} onclick={()=>filterMenu=!filterMenu}><ListFilter size={14}/>{#if quickFilterCount(quick)}<span class="count">{quickFilterCount(quick)}</span>{/if}</button>
         {#if filterMenu}<div class="menu filter-menu" use:popup={()=>filterMenu=false} transition:reveal role="menu" tabindex="-1">
           <button role="menuitemcheckbox" aria-checked={quick.starred} onclick={()=>quick={...quick,starred:!quick.starred}}><Star size={14}/>已收藏{#if quick.starred}<Check size={13}/>{/if}</button>
@@ -635,6 +647,17 @@
 <style>
  :global(*){box-sizing:border-box}
  :global(body){margin:0;font:13px/1.55 var(--font);color:var(--text);background:var(--surface);-webkit-font-smoothing:antialiased}
+ /* macOS glass: the page is clear where the system material should show (list, title bar). */
+ :global(:root[data-glass] body){background:transparent}
+ main.glass{--accent-soft:color-mix(in srgb,var(--accent) 14%,transparent);--accent-soft-strong:color-mix(in srgb,var(--accent) 22%,transparent)}
+ main.glass aside{background:transparent}
+ /* Title bar and list share one sheet of material, as in Finder; the page under the tabs stays solid. */
+ main.glass .tabs{background:transparent}
+ main.glass .work{background:linear-gradient(var(--pin-bg),var(--pin-bg)) no-repeat 0 44px/100% 100%}
+ /* The list as a drawer floats over the page: frost the page behind it instead. */
+ main.glass.narrow aside{background:var(--material);-webkit-backdrop-filter:var(--material-blur);backdrop-filter:var(--material-blur)}
+ /* Settings has a clear sidebar of its own: hide what it would otherwise show through. */
+ main.glass.settings-open>aside,main.glass.settings-open>.work{visibility:hidden}
  /* Layout: list | work area. The list folds with a short, continuous slide. */
  main{position:relative;--pin-text:var(--text);--pin-heading:var(--text-strong);--pin-muted:var(--muted);--pin-accent:var(--accent);--pin-accent-strong:var(--accent-strong);--pin-border:var(--border);--pin-active:var(--accent-soft);--pin-bg:var(--surface);
    display:grid;grid-template-columns:var(--list-w,230px) minmax(0,1fr);height:100vh;overflow:hidden;transition:grid-template-columns var(--motion) var(--ease-out)}
@@ -649,21 +672,30 @@
  aside{grid-column:1;grid-row:1;min-width:0;min-height:0;overflow:hidden;display:block;background:var(--surface-muted);border-right:1px solid var(--hairline)}
  .side-inner{width:var(--list-w,230px);height:100%;display:flex;flex-direction:column}
  .titlebar-space{height:36px;flex:0 0 auto}
- .search{display:flex;align-items:center;gap:8px;padding:14px 10px;color:var(--muted)}main.mac .search{padding-top:4px}
- .search input{min-width:0;width:100%;background:transparent;color:var(--text)}
+ /* Search: a rounded field on a quiet fill, as in macOS sidebars. */
+ .search{display:flex;align-items:center;gap:6px;padding:12px 10px 8px;color:var(--muted)}main.mac .search{padding-top:2px}
+ .search-field{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:var(--radius);background:var(--fill);cursor:text;transition:box-shadow var(--motion-fast)}
+ .search-field:focus-within{box-shadow:0 0 0 3px var(--focus-ring)}
+ .search input{min-width:0;width:100%;background:transparent;color:var(--text)}.search input:focus{box-shadow:none}
+ .search input::placeholder{color:var(--subtle)}
  input{font:inherit;border:0;outline:0;color:inherit}input:focus{box-shadow:0 1px var(--accent)}
  button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:var(--radius-sm);background:transparent;color:inherit;padding:6px 8px;font:inherit;cursor:pointer;transition:background var(--motion-fast),color var(--motion-fast),transform var(--motion-fast)}
  button:hover{background:var(--hover)}button:active{transform:scale(.97)}button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}button:disabled{opacity:.5;cursor:wait}
  .active,.chosen{color:var(--accent)!important;background:var(--accent-soft)!important}
- nav{display:flex;padding:0 8px 10px;gap:5px}nav button{font-size:12px;flex:1}
+ nav{display:flex;padding:0 10px 10px;gap:6px}nav button{font-size:12px;flex:1}
+ /* Scope: a segmented control whose chosen half is a raised pill. */
+ .seg{flex:1;display:flex;min-width:0;padding:2px;gap:2px;border-radius:var(--radius);background:var(--fill)}
+ .seg button{flex:1;min-width:0;height:24px;padding:0 6px;border-radius:var(--radius-sm);color:var(--muted);white-space:nowrap}
+ .seg button:hover{background:transparent;color:var(--text)}.seg button:active{transform:none}
+ .seg button.current{background:var(--tab-current);color:var(--text);box-shadow:var(--tab-current-shadow)}
  /* Shown once the list has a manual order: one click returns to newest edit first. */
- nav .sort-reset{flex:0 0 28px;padding:0;color:var(--muted)}nav .sort-reset:hover{color:var(--text);background:var(--hover-strong)}
+ nav .sort-reset{flex:0 0 28px;padding:0;border-radius:var(--radius);color:var(--muted)}nav .sort-reset:hover{color:var(--text);background:var(--hover-strong)}
  nav{position:relative}
  /* Quick filters: a compact toggle with a count, a menu, and removable chips for what is on. */
- nav .filter-toggle{position:relative;flex:0 0 28px;padding:0;color:var(--muted)}nav .filter-toggle:hover{color:var(--text);background:var(--hover-strong)}
+ nav .filter-toggle{position:relative;flex:0 0 28px;padding:0;border-radius:var(--radius);color:var(--muted)}nav .filter-toggle:hover{color:var(--text);background:var(--hover-strong)}
  nav .filter-toggle.on{color:var(--accent);background:var(--accent-soft)}
  .filter-toggle .count{position:absolute;top:1px;right:1px;min-width:13px;height:13px;padding:0 3px;border-radius:7px;background:var(--accent);color:var(--on-accent);font-size:9px;line-height:13px;font-weight:600}
- .filter-menu{top:34px;left:8px;right:auto;width:min(220px,calc(var(--list-w,230px) - 16px));max-height:min(360px,60vh);overflow:auto}
+ .filter-menu{top:36px;left:10px;right:auto;width:min(220px,calc(var(--list-w,230px) - 16px));max-height:min(360px,60vh);overflow:auto}
  .menu.filter-menu button{display:flex;align-items:center;gap:8px;justify-content:flex-start}
  .menu.filter-menu button :global(svg:last-child:not(:first-child)){margin-left:auto;color:var(--accent)}
  .menu.filter-menu .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -674,8 +706,8 @@
  .chips{display:flex;flex-wrap:wrap;gap:4px;padding:0 10px 8px}
  .chips button{gap:3px;padding:2px 6px 2px 8px;border-radius:999px;font-size:11px;color:var(--accent);background:var(--accent-soft)}
  .chips button:hover{background:var(--accent-soft-strong)}
- .list{flex:1;overflow:auto;padding:0 7px}
- .note-row{display:block;width:100%;text-align:left;padding:10px;margin:2px 0}
+ .list{flex:1;overflow:auto;padding:0 10px}
+ .note-row{display:block;width:100%;text-align:left;padding:8px 10px;margin:0 0 2px;border-radius:var(--radius)}
  .note-row span{display:flex;align-items:center;justify-content:space-between;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
  .note-row .row-heading{justify-content:flex-start}.row-heading b{flex:1;overflow:hidden;text-overflow:ellipsis;font-weight:500}
  .note-row small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--muted);margin-top:3px;font-size:12px}
@@ -698,10 +730,10 @@
  :global(:root[data-sorting]),:global(:root[data-sorting] *){cursor:grabbing!important;user-select:none!important}
  .desktop.drop-target{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
  .note-dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 .5px var(--hairline)}
- .due{display:flex;flex-wrap:wrap;font-size:11px;background:var(--accent-soft);border-radius:var(--radius-sm);margin:4px}.due button{font-size:11px}
- footer{display:flex;padding:8px;gap:5px}footer button{font-size:12px;color:var(--muted)}footer button:last-child{margin-left:auto}
+ .due{display:flex;flex-wrap:wrap;font-size:11px;background:var(--accent-soft);border-radius:var(--radius);margin:0 0 6px;padding:2px}.due button{font-size:11px}
+ footer{display:flex;padding:8px 10px;gap:4px;border-top:1px solid var(--hairline)}footer button{font-size:12px;color:var(--muted)}footer button:last-child{margin-left:auto}
  .empty,.empty-work{color:var(--muted);padding:16px}
- .trash-hint{margin:0 7px 6px;padding:6px 10px;border-radius:var(--radius-sm);background:var(--surface-sunken);color:var(--muted);font-size:11.5px;line-height:1.5}
+ .trash-hint{margin:0 10px 8px;padding:6px 10px;border-radius:var(--radius);background:var(--fill);color:var(--muted);font-size:11.5px;line-height:1.5}
  .trash-hint button{margin-left:4px;padding:0;border:0;background:none;color:var(--accent);font:inherit;cursor:pointer}
  /* Work area: tabs, title, editor, status. */
  .work{grid-column:2;grid-row:1;display:grid;grid-template-rows:44px auto minmax(0,1fr) 30px;min-width:0;min-height:0;background:var(--pin-bg);color:var(--pin-text);transition:background var(--motion-fast),color var(--motion-fast)}
@@ -730,8 +762,9 @@
  .tab .tab-close:hover{background:var(--hover-strong);color:var(--text)}
  .tabs select{max-width:110px;border:0;background:var(--hover);color:var(--text);border-radius:var(--radius-sm)}
  .window-tools{position:relative;display:flex;align-items:center;gap:2px;margin-left:auto;padding-left:6px;border-left:1px solid var(--hairline)}
- .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--surface-raised);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--menu-shadow)}
- .menu button{display:flex;justify-content:flex-start;gap:9px;text-align:left;width:100%;font-size:12px}
+ .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--material);-webkit-backdrop-filter:var(--material-blur);backdrop-filter:var(--material-blur);color:var(--text);border:0;border-radius:var(--radius-lg);box-shadow:var(--menu-shadow)}
+ .menu button{display:flex;justify-content:flex-start;gap:9px;text-align:left;width:100%;height:28px;padding:0 9px;font-size:12px;border-radius:var(--radius-sm)}
+ .menu button:hover{background:var(--fill-strong)}
  .menu button :global(svg){flex:0 0 auto;color:var(--muted)}
  .menu button.danger :global(svg){color:currentColor}
  /* Light/dark switch: a small track whose knob carries the sun or moon. */

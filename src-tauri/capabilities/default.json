@@ -42,6 +42,7 @@
     "core:window:allow-internal-toggle-maximize",
     "core:window:allow-set-title-bar-style",
     "core:window:allow-set-theme",
-    "core:window:allow-set-shadow"
+    "core:window:allow-set-shadow",
+    "core:window:allow-set-effects"
   ]
 }

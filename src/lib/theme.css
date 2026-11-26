@@ -36,6 +36,12 @@
   --radius-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
+  /* Frosted material for menus and popovers: translucent surface over a blurred backdrop. */
+  --material: color-mix(in srgb, var(--surface-raised) 74%, transparent);
+  --material-blur: saturate(180%) blur(28px);
+  /* Quiet fills for search fields and segmented tracks, readable on solid or frosted ground. */
+  --fill: color-mix(in srgb, var(--text) 6%, transparent);
+  --fill-strong: color-mix(in srgb, var(--text) 10%, transparent);
   --motion-fast: 140ms;
   --motion: 220ms;
   --ease-out: cubic-bezier(.2, .85, .25, 1);
@@ -75,6 +81,8 @@
   --scrollbar: #ffffff2e;
   --scrollbar-hover: #ffffff5c;
 }
+/* "Reduce transparency" in the system: menus and popovers go solid. */
+@media (prefers-reduced-transparency: reduce) { :root { --material: var(--surface-raised); --material-blur: none; } }
 /* Scrollbars: a slim rounded thumb on a clear track, in every window. The 10px gutter is the
    hit area; transparent borders keep the visible thumb at 4px, widening to 6px under the pointer.
    Only the -webkit- pseudo-elements are used: in Chromium (WebView2) setting the standard
