@@ -7,6 +7,7 @@
   import type { PinNote } from '$lib/notesStore';
   import { dailyActivity, streaks, heatmap, recent, tagCounts, dayKey, notesOnDay, heatTotals, type Activity, type HeatCell } from '$lib/library';
   import { plainExcerpt } from '$lib/excerpt';
+  import { confetti } from '$lib/celebrate';
   let { notes, openTodos, onClose, onTag, onOpen }:
     { notes: PinNote[]; openTodos: (n: PinNote) => number; onClose: () => void; onTag: (tag: string) => void; onOpen: (id: string) => void } = $props();
   let activity = $state<Activity>({});
@@ -20,6 +21,16 @@
   const activeNotes = $derived(notes.filter(n => n.lifecycle === 'active'));
   const days = $derived(dailyActivity(activity, live));
   const run = $derived(streaks(days, now));
+  // Reaching a 7- or 30-day streak gets one small burst, once per streak and milestone.
+  let lead = $state<HTMLElement>();
+  $effect(() => {
+    const milestone = run.current >= 30 ? 30 : run.current >= 7 ? 7 : 0;
+    if (!milestone || !lead) return;
+    const key = `${milestone}:${dayKey(now - (run.current - 1) * 86_400_000)}`;
+    try { if (localStorage.getItem('pinnote.streak-celebrated') === key) return; localStorage.setItem('pinnote.streak-celebrated', key); } catch { return; }
+    const r = lead.getBoundingClientRect();
+    setTimeout(() => confetti(r.left + 90, r.top + 8, { count: milestone === 30 ? 80 : 48 }), 300);
+  });
   const WEEKS = 26, GAP = 3, LABELS = 24;
   const grid = $derived(heatmap(days, now, WEEKS));
   const today = $derived(days.get(dayKey(now)));
@@ -80,7 +91,7 @@
   <div class="content">
     <button class="back" onclick={onClose}><ArrowLeft size={15} />返回便签</button>
     <h2>记录概览</h2>
-    <p class="lead">{run.current ? `已连续记录 ${run.current} 天，继续保持。` : today ? '今天已经开始记录了。' : '今天还没有记录，写下第一件事吧。'}</p>
+    <p class="lead" bind:this={lead}>{run.current ? `已连续记录 ${run.current} 天，继续保持。` : today ? '今天已经开始记录了。' : '今天还没有记录，写下第一件事吧。'}</p>
 
     <div class="cards">
       <div class="card"><span class="icon"><StickyNote size={15} /></span><b>{activeNotes.length}</b><span>张便签</span>
@@ -203,7 +214,9 @@
   .l3 { background: color-mix(in srgb, var(--accent) 74%, var(--surface-muted)); }
   .l4 { background: var(--accent); }
   .future { opacity: .35; }
-  .today:not(.chosen) { box-shadow: inset 0 0 0 1.5px var(--text-strong); }
+  .today:not(.chosen) { box-shadow: inset 0 0 0 1.5px var(--text-strong); animation: today 1.6s ease-in-out 3; }
+  /* Today breathes a few times when the overview opens, then rests. */
+  @keyframes today { 50% { box-shadow: inset 0 0 0 1.5px var(--text-strong), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); } }
   .note { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
   .tags { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
   .tags li { display: grid; grid-template-columns: 140px 1fr 32px; align-items: center; gap: 10px; }

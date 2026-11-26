@@ -118,7 +118,7 @@
     background: var(--material);
     -webkit-backdrop-filter: var(--material-blur);
     backdrop-filter: var(--material-blur);
-    box-shadow: var(--menu-shadow);
+    box-shadow: var(--material-shadow);
   }
 
   header,

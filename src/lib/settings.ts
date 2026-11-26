@@ -10,8 +10,8 @@ export type ShortcutConfig = {
 
 export type ThemeMode = "system" | "light" | "dark";
 export type ShadowLevel = "off" | "light" | "standard";
-/** `glass`: on macOS the center window shows the system's frosted sidebar material behind its list and title bar. */
-export type AppearanceSettings = { theme: ThemeMode; centerShadow: ShadowLevel; noteShadow: ShadowLevel; reduceMotion: boolean; glass: boolean };
+/** `glass`: how see-through the center window is on macOS, 0 (solid) to 100; the desktop shows through blurred. */
+export type AppearanceSettings = { theme: ThemeMode; centerShadow: ShadowLevel; noteShadow: ShadowLevel; reduceMotion: boolean; glass: number };
 /** `hideFromCapture`: ask the system to keep PinNote windows out of screenshots and screen sharing. */
 export type BehaviorSettings = { edgeSnap: boolean; hoverPreview: boolean; restoreSession: boolean; hideFromCapture: boolean };
 
@@ -48,7 +48,7 @@ export const macDefaultShortcuts: ShortcutConfig = {
 
 export const defaultShortcuts: ShortcutConfig = windowsDefaultShortcuts;
 
-export const defaultAppearance: AppearanceSettings = { theme: "system", centerShadow: "standard", noteShadow: "standard", reduceMotion: false, glass: true };
+export const defaultAppearance: AppearanceSettings = { theme: "system", centerShadow: "standard", noteShadow: "standard", reduceMotion: false, glass: 60 };
 export const defaultBehavior: BehaviorSettings = { edgeSnap: true, hoverPreview: true, restoreSession: true, hideFromCapture: false };
 
 export const defaultSettings: AppSettings = {
@@ -145,7 +145,8 @@ export function normalizeAppearance(value: unknown): AppearanceSettings {
     centerShadow: shadow(a.centerShadow, defaultAppearance.centerShadow),
     noteShadow: shadow(a.noteShadow, defaultAppearance.noteShadow),
     reduceMotion: typeof a.reduceMotion === "boolean" ? a.reduceMotion : defaultAppearance.reduceMotion,
-    glass: typeof a.glass === "boolean" ? a.glass : defaultAppearance.glass,
+    // 1.3.9 stored an on/off switch.
+    glass: typeof a.glass === "number" && Number.isFinite(a.glass) ? Math.round(Math.min(100, Math.max(0, a.glass))) : a.glass === false ? 0 : defaultAppearance.glass,
   };
 }
 

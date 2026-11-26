@@ -20,7 +20,9 @@
   import { defaultSettings, type AppSettings } from '$lib/settings';
   import { save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { defaultMarkdownFilename } from '$lib/filename';
-  import { reveal, popup, shift } from '$lib/motion';
+  import { reveal, popup, shift, motionReduced } from '$lib/motion';
+  import { confetti, sparkle, centerOf } from '$lib/celebrate';
+  import { tick as settled } from 'svelte';
   import { createQuitGuard } from '$lib/quitGuard';
   import ReminderDialog from '../../components/ReminderDialog.svelte';
   import { checklistProgress } from '$lib/checklist';
@@ -162,11 +164,13 @@
     await flushNoteSave(draft.id); saveError=''; status='已保存';
     await refresh();
   }
+  let freshId=$state(''), leavingId=$state(''), trashWobble=$state(false);
   async function create() {
     await persist();
     // New notes take the configured defaults; existing notes keep their own colours.
     const d=appSettings.defaultNote;
     const note=createNote({title:'未命名便签',content:'',placement:'center',theme:d.theme,customColor:d.customColor,opacity:d.opacity,alwaysOnTop:d.alwaysOnTop});
+    freshId=note.id; setTimeout(()=>{if(freshId===note.id)freshId='';},700);
     await saveNoteNow(note); await select(note.id);
     await getCurrentWindow().show(); await getCurrentWindow().setFocus();
   }
@@ -243,13 +247,18 @@
     if(!draft) return; menu=false;
     if(op==='purge' && !window.confirm('永久删除这张便签？此操作无法撤销。')) return;
     await persist(); const id=draft.id;
-    const win=await findNoteWindow(id); if(win) await requestWindowVisibility(win.label,false);
-    const note=(await loadNotes()).notes[id]; await noteOperation(note,op);
-    if(win && ['archive','trash','restore','purge'].includes(op)) await win.destroy().catch(()=>{});
-    const file=await loadNotes();
-    if(op==='trash'||op==='archive') { const h=file.history?.filter(h=>h.note.id===id).at(-1); if(h) undo={id,at:h.at}; }
-    await refresh();
-    if(op==='purge') await closeTab(id); else await select(id,true);
+    // Archive and trash: the row slides out first, then the list closes the gap.
+    if(op==='archive'||op==='trash'){leavingId=id;if(!motionReduced())await new Promise(r=>setTimeout(r,240));}
+    if(op==='trash'){trashWobble=true;setTimeout(()=>trashWobble=false,700);}
+    try {
+      const win=await findNoteWindow(id); if(win) await requestWindowVisibility(win.label,false);
+      const note=(await loadNotes()).notes[id]; await noteOperation(note,op);
+      if(win && ['archive','trash','restore','purge'].includes(op)) await win.destroy().catch(()=>{});
+      const file=await loadNotes();
+      if(op==='trash'||op==='archive') { const h=file.history?.filter(h=>h.note.id===id).at(-1); if(h) undo={id,at:h.at}; }
+      await refresh();
+      if(op==='purge') await closeTab(id); else await select(id,true);
+    } finally { leavingId=''; }
     status=op==='trash'?'已移到回收站':op==='archive'?'已归档':'已恢复到中心';
   }
   async function undoLast() {
@@ -258,10 +267,18 @@
     await select(note.id,true); undo=null; status='已撤销';
   }
   /** The title-bar switch picks light or dark outright; "follow the system" stays in settings. */
-  async function toggleTheme() {
+  async function toggleTheme(event?:MouseEvent) {
     const current=await loadSettings();
     const next={...current,appearance:{...current.appearance,theme:dark?'light' as const:'dark' as const}};
-    applyAppearance(next.appearance);
+    // The new theme spreads out in a circle from the switch (View Transitions where WebKit has them).
+    const start=(document as Document&{startViewTransition?:(update:()=>Promise<void>)=>{ready:Promise<void>}}).startViewTransition;
+    if(start&&!motionReduced()){
+      const from=event?.currentTarget instanceof Element?centerOf(event.currentTarget):{x:innerWidth-60,y:22};
+      const radius=Math.hypot(Math.max(from.x,innerWidth-from.x),Math.max(from.y,innerHeight-from.y));
+      const transition=start.call(document,async()=>{applyAppearance(next.appearance);await settled();});
+      void transition.ready.then(()=>document.documentElement.animate({clipPath:[`circle(0px at ${from.x}px ${from.y}px)`,`circle(${radius}px at ${from.x}px ${from.y}px)`]},
+        {duration:450,easing:'cubic-bezier(.2,.85,.25,1)',pseudoElement:'::view-transition-new(root)'})).catch(()=>undefined);
+    } else applyAppearance(next.appearance);
     try{if(await saveSettings(next)==='saved')await emit('settings-changed',next);}
     catch(e){status=`主题未保存：${errorText(e)}`;}
   }
@@ -322,17 +339,17 @@
   const mac=isMacPlatform();
   let width=$state(960);
   let dark=$state(false);
-  // macOS frosted glass: the window is transparent (tauri.macos.conf.json) and the system's
-  // sidebar material sits behind the list and title bar; the writing area stays solid.
-  let glassOn=$state(true);
-  const glass=$derived(mac&&glassOn);
+  // macOS frosted glass: the window is transparent (tauri.macos.conf.json) and a system
+  // material blurs the desktop behind it; the surfaces on top are tinted to the chosen level.
+  let glassLevel=$state(60);
+  const glass=$derived(mac&&glassLevel>0);
   $effect(()=>{document.documentElement.toggleAttribute('data-glass',glass);});
   let glassApplied:boolean|undefined;
   /** Each setEffects call adds a native view, so apply only on change and clear first. */
   async function applyGlass(on:boolean){
     if(!mac||on===glassApplied) return; glassApplied=on;
     const win=getCurrentWindow();
-    try{await win.clearEffects();if(on)await win.setEffects({effects:[Effect.Sidebar],state:EffectState.FollowsWindowActiveState});}catch{/* plain window */}
+    try{await win.clearEffects();if(on)await win.setEffects({effects:[Effect.UnderWindowBackground],state:EffectState.Active});}catch{/* plain window */}
   }
   let appSettings:AppSettings=structuredClone(defaultSettings);
   let trashDays=$state<number>(defaultSettings.trashDays);
@@ -511,7 +528,7 @@
       shortcutStatus=registered.ok||registered.cancelled?'':`全局快捷键注册失败（可能被其他应用占用）：${registered.message}`;
     });
     // Center shadow: "standard" is the native window shadow, "light" keeps only a hairline.
-    const stopAppearance=onAppearance((a,isDark)=>{dark=isDark;glassOn=a.glass;void applyGlass(a.glass);void getCurrentWindow().setShadow(a.centerShadow==='standard').catch(()=>undefined);});
+    const stopAppearance=onAppearance((a,isDark)=>{dark=isDark;glassLevel=a.glass;void applyGlass(a.glass>0);void getCurrentWindow().setShadow(a.centerShadow==='standard').catch(()=>undefined);});
     const close=getCurrentWindow().onCloseRequested(e=>{e.preventDefault(); void run(async()=>{await persist(); await getCurrentWindow().hide();});});
     async function saveForQuit(attempt:number) {
       if(!quitGuard.begin(attempt)) return;
@@ -537,7 +554,7 @@
     <div class="side-inner">
       {#if mac}<div class="titlebar-space" data-tauri-drag-region></div>{/if}
       <div class="search"><label class="search-field"><Search size={14}/><input aria-label="搜索标题和正文" placeholder="搜索便签" bind:value={query}/></label><button aria-label="新建便签" title="新建便签" onclick={()=>run(create)}><Plus size={16}/></button></div>
-      <nav><div class="seg" role="radiogroup" aria-label="便签范围"><button role="radio" aria-checked={filter==='active'} class:current={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button role="radio" aria-checked={filter==='desktop'} class:current={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button></div>{#if order.length}<button class="sort-reset" aria-label="恢复按编辑时间排序" title="恢复按编辑时间排序" onclick={()=>order=[]}><ClockArrowDown size={14}/></button>{/if}
+      <nav><div class="seg" role="radiogroup" aria-label="便签范围"><i class="seg-pill" class:right={filter==='desktop'} class:hidden={filter!=='active'&&filter!=='desktop'} aria-hidden="true"></i><button role="radio" aria-checked={filter==='active'} class:current={filter==='active'} onclick={()=>filter='active'}>全部便签</button><button role="radio" aria-checked={filter==='desktop'} class:current={filter==='desktop'} onclick={()=>filter='desktop'}>桌面便签</button></div>{#if order.length}<button class="sort-reset" aria-label="恢复按编辑时间排序" title="恢复按编辑时间排序" onclick={()=>order=[]}><ClockArrowDown size={14}/></button>{/if}
         <button class="filter-toggle" class:on={quickFilterCount(quick)>0||filterMenu} aria-label="筛选" title="筛选：收藏、提醒、待办、标签" aria-expanded={filterMenu} onclick={()=>filterMenu=!filterMenu}><ListFilter size={14}/>{#if quickFilterCount(quick)}<span class="count">{quickFilterCount(quick)}</span>{/if}</button>
         {#if filterMenu}<div class="menu filter-menu" use:popup={()=>filterMenu=false} transition:reveal role="menu" tabindex="-1">
           <button role="menuitemcheckbox" aria-checked={quick.starred} onclick={()=>quick={...quick,starred:!quick.starred}}><Star size={14}/>已收藏{#if quick.starred}<Check size={13}/>{/if}</button>
@@ -557,17 +574,17 @@
       </div>{/if}
       {#if filter==='trash'}<p class="trash-hint">{trashDays?`便签在回收站中保留 ${trashDays} 天，之后自动永久删除。`:'回收站中的便签不会自动删除。'}<button onclick={()=>void openSettings()}>更改</button></p>{/if}
       <div class="list" use:sortable={{axis:'y',onDrag:d=>rowDrag=d,onDrop:dropRow}}>
-        {#each due as item}<div class="due"><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={13}/></button></div>{/each}
+        {#each due as item}<div class="due"><span class="due-bell" aria-hidden="true"><Bell size={13}/></span><button onclick={()=>run(()=>select(item.id))}>提醒 · {item.title}</button><button onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:Date.now()+10*60000});await refresh();})}>10 分钟后</button><button aria-label="关闭提醒" onclick={()=>run(async()=>{const n=(await loadNotes()).notes[item.id];await noteOperation(n,'reminder',{at:null});await refresh();})}><X size={13}/></button></div>{/each}
         {#each visible as note,i(note.id)}
           {@const info=summary(note)}{@const tasks=info.tasks}
-          <button animate:shift class="note-row" data-sort-id={note.id} class:chosen={selected===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})}>
+          <button animate:shift class="note-row" data-sort-id={note.id} class:chosen={selected===note.id} class:fresh={freshId===note.id} class:leaving={leavingId===note.id} onclick={()=>run(async()=>{await select(note.id);if(narrow)sidebar=false;})}>
              <span class="row-heading"><i class="note-dot" style:background={noteDot(note.theme,note.customColor)}></i><b>{#each highlightParts(note.title||'未命名便签',query) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</b>{#if note.starredAt}<Star size={12} class="starred" aria-label="已收藏"/>{/if}{#if note.placement==='desktop'}<Monitor size={13}/>{/if}<time datetime={new Date(editedAt(note)).toISOString()} title="编辑于 {shortTime(editedAt(note),clock)}">{listTime(editedAt(note),clock)}</time></span>
              <small>{#if query.trim()}{#each highlightParts(matchSnippet(info.plain,query,100),query) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}{:else}{info.excerpt||(note.content.trim() ? '打开查看内容' : '暂无正文')}{/if}</small>
              {#if tasks.total||note.tags?.length}<span class="row-meta">{#if tasks.total}<small class="list-progress">{tasks.total-tasks.done ? `${tasks.total-tasks.done} 项待办`:'待办已完成'}</small>{/if}{#each (note.tags??[]).slice(0,3) as tag}<small class="row-tag">#{tag}</small>{/each}</span>{/if}
           </button>
         {:else}<p class="empty">{query?'没有匹配的便签':'这里还没有便签'}</p>{/each}
       </div>
-      <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={13}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><Trash2 size={13}/>回收站</button><button class="stats-open" aria-label="记录概览" title="记录概览" onclick={()=>{settingsOpen=false;statsOpen=true;}}><ChartColumn size={15}/></button><button aria-label="设置" title="设置（{mac?'⌘':'Ctrl+'},）" onclick={()=>void openSettings()}><Settings size={15}/></button></footer>
+      <footer><button class:active={filter==='archived'} onclick={()=>filter='archived'}><Archive size={13}/>归档</button><button class:active={filter==='trash'} onclick={()=>filter='trash'}><span class="trash-icon" class:wobble={trashWobble}><Trash2 size={13}/></span>回收站</button><button class="stats-open" aria-label="记录概览" title="记录概览" onclick={()=>{settingsOpen=false;statsOpen=true;}}><ChartColumn size={15}/></button><button aria-label="设置" title="设置（{mac?'⌘':'Ctrl+'},）" onclick={()=>void openSettings()}><Settings size={15}/></button></footer>
     </div>
   </aside>
   {#if !narrow}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -583,7 +600,7 @@
       </div>
       {#if tabsOverflow}<select aria-label="更多工作便签" value={selected} onchange={e=>run(()=>select(e.currentTarget.value))}>{#each tabs as id}<option value={id}>{notes.find(n=>n.id===id)?.title||'未命名便签'}</option>{/each}</select>{/if}
       <div class="window-tools">
-        <button class="theme-switch" class:dark role="switch" aria-checked={dark} aria-label="深色模式" title={dark?'切换到浅色':'切换到深色'} onclick={()=>void toggleTheme()}><span class="knob">{#if dark}<Moon size={11}/>{:else}<Sun size={11}/>{/if}</span></button>
+        <button class="theme-switch" class:dark role="switch" aria-checked={dark} aria-label="深色模式" title={dark?'切换到浅色':'切换到深色'} onclick={e=>void toggleTheme(e)}><span class="knob">{#if dark}<Moon size={11}/>{:else}<Sun size={11}/>{/if}</span></button>
         <button class="pin" class:on={form.pinned} aria-pressed={form.pinned} aria-label={form.pinned?'取消置顶便签中心':'置顶便签中心'} title={form.pinned?'取消置顶便签中心':'置顶便签中心'} onclick={()=>form.setPinned(!form.pinned)}><Pin size={16}/></button>
         <button aria-label="收起到左侧边缘" title="收起到左侧边缘 · 也可以把窗口拖到屏幕左边缘" onclick={()=>form.collapse('left')}><ChevronsLeft size={16}/></button>
         <button aria-label="收起到右侧边缘" title="收起到右侧边缘 · 也可以把窗口拖到屏幕右边缘" onclick={()=>form.collapse('right')}><ChevronsRight size={16}/></button>
@@ -593,7 +610,7 @@
     {#if draft}
       <div class="title-row">
         <input aria-label="便签标题" value={draft.title} readonly={!editable} oninput={e=>update({title:e.currentTarget.value})}/>
-        {#if draft.lifecycle==='active'}<button class="star" class:on={Boolean(draft.starredAt)} aria-pressed={Boolean(draft.starredAt)} aria-label={draft.starredAt?'取消收藏':'收藏'} title={draft.starredAt?'取消收藏':'收藏：固定在列表顶部'} onclick={()=>run(()=>toggleStar(draft!.id))}><Star size={16}/></button>{/if}
+        {#if draft.lifecycle==='active'}<button class="star" class:on={Boolean(draft.starredAt)} aria-pressed={Boolean(draft.starredAt)} aria-label={draft.starredAt?'取消收藏':'收藏'} title={draft.starredAt?'取消收藏':'收藏：固定在列表顶部'} onclick={e=>{const el=e.currentTarget;if(!draft?.starredAt){const c=centerOf(el);sparkle(c.x,c.y,'#e9a23b');el.classList.remove('pop');void el.offsetWidth;el.classList.add('pop');}void run(()=>toggleStar(draft!.id));}}><Star size={16}/></button>{/if}
         {#if draft.lifecycle==='active'}<NoteColorPicker theme={draft.theme} customColor={draft.customColor} onChange={changeColor}/>{/if}
         {#if draft.reminder}<button class="time" onclick={()=>reminderOpen=true}>{shortTime(draft.reminder.at)}</button>{/if}
         {#if draft.lifecycle==='active'}
@@ -650,10 +667,12 @@
  /* macOS glass: the page is clear where the system material should show (list, title bar). */
  :global(:root[data-glass] body){background:transparent}
  main.glass{--accent-soft:color-mix(in srgb,var(--accent) 14%,transparent);--accent-soft-strong:color-mix(in srgb,var(--accent) 22%,transparent)}
- main.glass aside{background:transparent}
- /* Title bar and list share one sheet of material, as in Finder; the page under the tabs stays solid. */
- main.glass .tabs{background:transparent}
- main.glass .work{background:linear-gradient(var(--pin-bg),var(--pin-bg)) no-repeat 0 44px/100% 100%}
+ /* Each surface keeps only part of its colour over the blurred desktop (levels set in theme.ts):
+    list and title bar the least, the writing area enough to stay easy to read. A bright hairline
+    along the top and inner edges catches the light like the rim of a pane of glass. */
+ main.glass aside{background:color-mix(in srgb,var(--surface-muted) var(--glass-chrome,56%),transparent);box-shadow:inset 0 1px 0 var(--glass-edge)}
+ main.glass .tabs{background:color-mix(in srgb,var(--surface-sunken) var(--glass-chrome,56%),transparent);box-shadow:inset 0 1px 0 var(--glass-edge)}
+ main.glass .work{--glass-fill:color-mix(in srgb,var(--pin-bg) var(--glass-page,85%),transparent);background:linear-gradient(var(--glass-fill),var(--glass-fill)) no-repeat 0 44px/100% 100%}
  /* The list as a drawer floats over the page: frost the page behind it instead. */
  main.glass.narrow aside{background:var(--material);-webkit-backdrop-filter:var(--material-blur);backdrop-filter:var(--material-blur)}
  /* Settings has a clear sidebar of its own: hide what it would otherwise show through. */
@@ -679,15 +698,20 @@
  .search input{min-width:0;width:100%;background:transparent;color:var(--text)}.search input:focus{box-shadow:none}
  .search input::placeholder{color:var(--subtle)}
  input{font:inherit;border:0;outline:0;color:inherit}input:focus{box-shadow:0 1px var(--accent)}
- button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:var(--radius-sm);background:transparent;color:inherit;padding:6px 8px;font:inherit;cursor:pointer;transition:background var(--motion-fast),color var(--motion-fast),transform var(--motion-fast)}
- button:hover{background:var(--hover)}button:active{transform:scale(.97)}button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}button:disabled{opacity:.5;cursor:wait}
+ button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:var(--radius-sm);background:transparent;color:inherit;padding:6px 8px;font:inherit;cursor:pointer;transition:background var(--motion-fast),color var(--motion-fast),transform 260ms var(--ease-spring)}
+ button:hover{background:var(--hover)}
+ /* Presses sink quickly and spring back on release. */
+ button:active{transform:scale(.95);transition-duration:var(--motion-fast),var(--motion-fast),80ms}button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}button:disabled{opacity:.5;cursor:wait}
  .active,.chosen{color:var(--accent)!important;background:var(--accent-soft)!important}
  nav{display:flex;padding:0 10px 10px;gap:6px}nav button{font-size:12px;flex:1}
  /* Scope: a segmented control whose chosen half is a raised pill. */
- .seg{flex:1;display:flex;min-width:0;padding:2px;gap:2px;border-radius:var(--radius);background:var(--fill)}
- .seg button{flex:1;min-width:0;height:24px;padding:0 6px;border-radius:var(--radius-sm);color:var(--muted);white-space:nowrap}
+ .seg{position:relative;flex:1;display:flex;min-width:0;padding:2px;gap:2px;border-radius:var(--radius);background:var(--fill)}
+ .seg button{position:relative;z-index:1;flex:1;min-width:0;height:24px;padding:0 6px;border-radius:var(--radius-sm);color:var(--muted);white-space:nowrap;transition:color var(--motion-fast)}
  .seg button:hover{background:transparent;color:var(--text)}.seg button:active{transform:none}
- .seg button.current{background:var(--tab-current);color:var(--text);box-shadow:var(--tab-current-shadow)}
+ .seg button.current{color:var(--text)}
+ /* One pill slides between the two halves instead of each half lighting up on its own. */
+ .seg-pill{position:absolute;top:2px;bottom:2px;left:2px;width:calc(50% - 3px);border-radius:var(--radius-sm);background:var(--tab-current);box-shadow:var(--tab-current-shadow);transition:transform 320ms var(--ease-spring),opacity var(--motion-fast)}
+ .seg-pill.right{transform:translateX(calc(100% + 2px))}.seg-pill.hidden{opacity:0}
  /* Shown once the list has a manual order: one click returns to newest edit first. */
  nav .sort-reset{flex:0 0 28px;padding:0;border-radius:var(--radius);color:var(--muted)}nav .sort-reset:hover{color:var(--text);background:var(--hover-strong)}
  nav{position:relative}
@@ -708,6 +732,13 @@
  .chips button:hover{background:var(--accent-soft-strong)}
  .list{flex:1;overflow:auto;padding:0 10px}
  .note-row{display:block;width:100%;text-align:left;padding:8px 10px;margin:0 0 2px;border-radius:var(--radius)}
+ /* A new note drops into the top of the list; archived or trashed ones slide away first. */
+ .note-row.fresh{animation:row-in var(--motion-celebrate) var(--ease-spring)}
+ .note-row.leaving{animation:row-out 240ms var(--ease-out) forwards;pointer-events:none}
+ @keyframes row-in{from{opacity:0;transform:translateY(-12px) scale(.96)}}
+ @keyframes row-out{to{opacity:0;transform:translateX(-28px)}}
+ .trash-icon{display:inline-grid;transform-origin:50% 0}.trash-icon.wobble{animation:wobble 600ms var(--ease-out)}
+ @keyframes wobble{20%{transform:rotate(-14deg)}45%{transform:rotate(10deg)}70%{transform:rotate(-5deg)}}
  .note-row span{display:flex;align-items:center;justify-content:space-between;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
  .note-row .row-heading{justify-content:flex-start}.row-heading b{flex:1;overflow:hidden;text-overflow:ellipsis;font-weight:500}
  .note-row small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--muted);margin-top:3px;font-size:12px}
@@ -730,7 +761,7 @@
  :global(:root[data-sorting]),:global(:root[data-sorting] *){cursor:grabbing!important;user-select:none!important}
  .desktop.drop-target{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
  .note-dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 .5px var(--hairline)}
- .due{display:flex;flex-wrap:wrap;font-size:11px;background:var(--accent-soft);border-radius:var(--radius);margin:0 0 6px;padding:2px}.due button{font-size:11px}
+ .due{display:flex;flex-wrap:wrap;align-items:center;font-size:11px;background:var(--accent-soft);border-radius:var(--radius);margin:0 0 6px;padding:2px}.due button{font-size:11px}
  footer{display:flex;padding:8px 10px;gap:4px;border-top:1px solid var(--hairline)}footer button{font-size:12px;color:var(--muted)}footer button:last-child{margin-left:auto}
  .empty,.empty-work{color:var(--muted);padding:16px}
  .trash-hint{margin:0 10px 8px;padding:6px 10px;border-radius:var(--radius);background:var(--fill);color:var(--muted);font-size:11.5px;line-height:1.5}
@@ -762,7 +793,7 @@
  .tab .tab-close:hover{background:var(--hover-strong);color:var(--text)}
  .tabs select{max-width:110px;border:0;background:var(--hover);color:var(--text);border-radius:var(--radius-sm)}
  .window-tools{position:relative;display:flex;align-items:center;gap:2px;margin-left:auto;padding-left:6px;border-left:1px solid var(--hairline)}
- .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--material);-webkit-backdrop-filter:var(--material-blur);backdrop-filter:var(--material-blur);color:var(--text);border:0;border-radius:var(--radius-lg);box-shadow:var(--menu-shadow)}
+ .menu{position:absolute;right:12px;top:53px;z-index:10;width:210px;padding:5px;background:var(--material);-webkit-backdrop-filter:var(--material-blur);backdrop-filter:var(--material-blur);color:var(--text);border:0;border-radius:var(--radius-lg);box-shadow:var(--material-shadow)}
  .menu button{display:flex;justify-content:flex-start;gap:9px;text-align:left;width:100%;height:28px;padding:0 9px;font-size:12px;border-radius:var(--radius-sm)}
  .menu button:hover{background:var(--fill-strong)}
  .menu button :global(svg){flex:0 0 auto;color:var(--muted)}
@@ -783,6 +814,8 @@
  .star{width:28px;height:28px;padding:0;border-radius:50%;color:var(--pin-muted)}
  .star:hover{color:var(--pin-text)}
  .star.on{color:#e9a23b}.star.on :global(svg){fill:currentColor}
+ .star:global(.pop) :global(svg){animation:star-pop var(--motion-celebrate) var(--ease-spring)}
+ @keyframes star-pop{from{transform:scale(.5) rotate(-30deg)}}
  /* Tags sit under the title as small chips; adding one opens an inline field with suggestions. */
  .tag-row{flex:0 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:24px;margin-top:2px}
  .tag{display:inline-flex;align-items:center;height:22px;border-radius:999px;background:color-mix(in srgb,var(--pin-text),transparent 93%);color:var(--pin-text);font-size:11.5px}
@@ -821,5 +854,10 @@
  main.narrow .side-inner{width:100%}
  main.narrow .title-row{padding:12px 14px}main.narrow .tab{min-width:84px}main.narrow .desktop{padding:6px}
  @media(max-width:700px){.title-row{padding:12px}.desktop{font-size:11px}}
- @media(prefers-reduced-motion:reduce){.theme-switch .knob,main,main.narrow aside,.scrim,.tabs,.tab,.tab .tab-close,button,.work,.snap-hint,.list-resizer::after{transition:none;animation:none}}
+ /* Theme switch: the new theme is revealed by a growing circle (see toggleTheme). */
+ :global(::view-transition-old(root)),:global(::view-transition-new(root)){animation:none;mix-blend-mode:normal}
+ /* A reminder that just went off swings its bell. */
+ .due-bell{display:inline-grid;margin-left:6px;color:var(--accent);transform-origin:50% 2px;animation:bell 900ms var(--ease-out) 2}
+ @keyframes bell{15%{transform:rotate(16deg)}30%{transform:rotate(-14deg)}45%{transform:rotate(9deg)}60%{transform:rotate(-6deg)}75%{transform:rotate(2deg)}}
+ @media(prefers-reduced-motion:reduce){.seg-pill,.note-row,.trash-icon,.due-bell,.star :global(svg){transition:none;animation:none}.theme-switch .knob,main,main.narrow aside,.scrim,.tabs,.tab,.tab .tab-close,button,.work,.snap-hint,.list-resizer::after{transition:none;animation:none}}
 </style>
