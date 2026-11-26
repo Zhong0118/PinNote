@@ -111,11 +111,13 @@
     max-height: min(390px, calc(100vh - 51px));
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: var(--radius-lg);
     overflow: hidden;
     color: var(--text);
-    background: var(--surface-raised);
+    background: var(--material);
+    -webkit-backdrop-filter: var(--material-blur);
+    backdrop-filter: var(--material-blur);
     box-shadow: var(--menu-shadow);
   }
 
