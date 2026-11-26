@@ -5,6 +5,7 @@
   import { ListTodo, Plus, Bell, CheckCheck, X } from 'lucide-svelte';
   import { checklistProgress } from '$lib/checklist';
   import { perfCount, perfTime } from '$lib/perf';
+  import { confetti, tick } from '$lib/celebrate';
 
   type Props = {
     value: string;
@@ -60,12 +61,22 @@
       if(tr.docChanged)view.dispatch(tr); // One transaction, native editor undo restores it.
     });
   }
+  /** After a to-do is ticked: a pop and a pen stroke; confetti when it was the last one open. */
+  function celebrateTick(view:any, pos:number) {
+    const li=view.nodeDOM(pos) as HTMLElement|null;
+    if(!(li instanceof HTMLElement)) return;
+    const accent=getComputedStyle(li).getPropertyValue('--pin-accent').trim()||'#2563eb';
+    tick(li,accent);
+    let total=0,done=0;
+    view.state.doc.descendants((node:any)=>{if(node.type.name==='list_item'&&node.attrs.checked!=null){total++;if(node.attrs.checked)done++;}});
+    if(total>0&&done===total){const r=li.getBoundingClientRect();confetti(r.left+8,r.top+10,{colors:[accent,'#f5c542','#ff7a6b','#4cc9f0','#7bd389']});}
+  }
   function taskKey(event: KeyboardEvent) {
     if(readonly || event.isComposing || !(event.metaKey||event.ctrlKey) || !event.shiftKey || event.key!=='Enter' || !editorInstance) return;
     editorInstance.action((ctx:any)=>{
       const view=ctx.get(editorViewCtxRef); const from=view.state.selection.$from;
       for(let depth=from.depth;depth>0;depth--){const node=from.node(depth);
-        if(node.type.name==='list_item'&&node.attrs.checked!=null){event.preventDefault();view.dispatch(view.state.tr.setNodeMarkup(from.before(depth),undefined,{...node.attrs,checked:!node.attrs.checked}));return;}
+        if(node.type.name==='list_item'&&node.attrs.checked!=null){event.preventDefault();const pos=from.before(depth);view.dispatch(view.state.tr.setNodeMarkup(pos,undefined,{...node.attrs,checked:!node.attrs.checked}));if(!node.attrs.checked)celebrateTick(view,pos);return;}
       }
     });
   }
@@ -130,6 +141,7 @@
             checked: !node.attrs.checked,
           });
           view.dispatch(tr);
+          if (!node.attrs.checked) celebrateTick(view, pos);
           found = true;
           return false;
         }

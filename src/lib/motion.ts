@@ -11,8 +11,10 @@ export function motionReduced() {
 /** Shared durations (ms), mirrored by --motion-fast / --motion in theme.css. */
 export const MOTION_FAST = 140, MOTION = 220;
 
+/** Menus and popovers settle in like a pane of glass: a short drop and grow, then rest. */
 export function reveal(_node: Element): TransitionConfig {
-  return { duration: motionReduced() ? 0 : MOTION_FAST, easing: cubicOut, css: (t) => `opacity: ${t}; transform: scale(${0.97 + t * 0.03})` };
+  return { duration: motionReduced() ? 0 : 200, easing: cubicOut,
+    css: (t) => `opacity: ${Math.min(1, t * 1.6)}; transform: translateY(${(1 - t) * -4}px) scale(${0.96 + t * 0.04})` };
 }
 
 /** List and tab reordering: one duration and curve everywhere, none when motion is reduced.

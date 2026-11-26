@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { CircleAlert, Maximize2, Minimize2, GripVertical, Pin } from "lucide-svelte";
   import type { Window } from "@tauri-apps/api/window";
   type ResizeDirection = Parameters<Window["startResizeDragging"]>[0];
@@ -117,9 +118,12 @@
     if (!dragged && !transitioning) onToggleCollapsed();
     origin = null;
   }
+  // Only the first paint pops: expanding a capsule later has its own native frame animation.
+  let born = $state(true);
+  onMount(() => { const t = setTimeout(() => born = false, 400); return () => clearTimeout(t); });
 </script>
 
-<main inert={disabled} class="window-shell theme-{settings.theme} dock-{dockedSide ?? 'none'}" class:collapsed class:tab class:transitioning
+<main inert={disabled} class="window-shell theme-{settings.theme} dock-{dockedSide ?? 'none'}" class:collapsed class:tab class:transitioning class:born
   class:frozen={Boolean(freeze)} class:opening style:--freeze-w={freeze ? `${freeze.width}px` : undefined} style:--freeze-h={freeze ? `${freeze.height}px` : undefined}
   style:--pin-opacity={settings.opacity} style:--pin-custom={settings.customColor}>
   <section class="note-window" class:locating class:edge-ready={!!edgeHint} aria-label="PinNote 便签">
@@ -206,6 +210,10 @@
   :global(body) { overflow: hidden; color: var(--text); background: transparent; font-family: var(--font); font-size: 14px; line-height: 1.55; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 
   /* ---- Note palette: the note's own colour (a note property) plus shared UI tokens ---- */
+  /* A note that opens as a full window pops out with a light blur; docked tabs and capsules stay put. */
+  .window-shell.born.dock-none:not(.collapsed) { animation: note-in 340ms var(--ease-spring); }
+  @keyframes note-in { from { opacity: 0; transform: scale(.96); filter: blur(3px); } 60% { filter: none; } }
+  @media (prefers-reduced-motion: reduce) { .window-shell.born { animation: none; } }
   .window-shell { --pin-dot: #a1a1aa; --pin-bg: #fff; --pin-header: var(--pin-bg); --pin-text: #171717; --pin-heading: #111; --pin-muted: #737373;
     --pin-border: #00000014; --pin-accent: var(--accent); --pin-accent-strong: var(--accent-strong); --pin-hover: #0000000a; --pin-active: var(--accent-soft);
     width: 100vw; height: 100vh; background: transparent; }

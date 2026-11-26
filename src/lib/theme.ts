@@ -27,6 +27,11 @@ export function applyAppearance(next: AppearanceSettings, persist = true) {
   root.dataset.motion = motionReduced() ? 'reduce' : '';
   root.dataset.centerShadow = next.centerShadow;
   root.dataset.noteShadow = next.noteShadow;
+  // Glass: how much of the surface colour stays over the blurred desktop (center window, macOS).
+  const solid = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-transparency: reduce)').matches;
+  const glass = solid ? 0 : next.glass / 100;
+  root.style.setProperty('--glass-chrome', `${Math.round((0.92 - 0.6 * glass) * 100)}%`);
+  root.style.setProperty('--glass-page', `${Math.round((1 - 0.25 * glass) * 100)}%`);
   // Native chrome (title bar, menus, color panel) follows the same theme.
   if (isNativeApp()) void getCurrentWindow().setTheme(next.theme === 'system' ? null : next.theme).catch(() => undefined);
   subscribers.forEach(fn => fn(next, dark));

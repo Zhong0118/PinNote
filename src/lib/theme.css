@@ -37,14 +37,20 @@
   --radius: 8px;
   --radius-lg: 12px;
   /* Frosted material for menus and popovers: translucent surface over a blurred backdrop. */
-  --material: color-mix(in srgb, var(--surface-raised) 74%, transparent);
-  --material-blur: saturate(180%) blur(28px);
+  --material: color-mix(in srgb, var(--surface-raised) 62%, transparent);
+  --material-blur: saturate(190%) blur(36px);
+  /* The bright rim along the top of a glass surface. */
+  --glass-edge: #ffffffa6;
+  --material-shadow: var(--menu-shadow), inset 0 1px 0 var(--glass-edge), inset 0 0 0 .5px #ffffff4d;
   /* Quiet fills for search fields and segmented tracks, readable on solid or frosted ground. */
   --fill: color-mix(in srgb, var(--text) 6%, transparent);
   --fill-strong: color-mix(in srgb, var(--text) 10%, transparent);
   --motion-fast: 140ms;
   --motion: 220ms;
   --ease-out: cubic-bezier(.2, .85, .25, 1);
+  /* Celebrations and presses: a slight overshoot. Everything else uses --ease-out. */
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --motion-celebrate: 400ms;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 :root[data-theme="dark"] {
@@ -80,9 +86,11 @@
   --tab-current-shadow: 0 0 0 .5px #ffffff1a, 0 1px 2px #00000040;
   --scrollbar: #ffffff2e;
   --scrollbar-hover: #ffffff5c;
+  --glass-edge: #ffffff24;
+  --material-shadow: var(--menu-shadow), inset 0 1px 0 var(--glass-edge), inset 0 0 0 .5px #ffffff14;
 }
 /* "Reduce transparency" in the system: menus and popovers go solid. */
-@media (prefers-reduced-transparency: reduce) { :root { --material: var(--surface-raised); --material-blur: none; } }
+@media (prefers-reduced-transparency: reduce) { :root, :root[data-theme="dark"] { --material: var(--surface-raised); --material-blur: none; --glass-edge: transparent; } }
 /* Scrollbars: a slim rounded thumb on a clear track, in every window. The 10px gutter is the
    hit area; transparent borders keep the visible thumb at 4px, widening to 6px under the pointer.
    Only the -webkit- pseudo-elements are used: in Chromium (WebView2) setting the standard

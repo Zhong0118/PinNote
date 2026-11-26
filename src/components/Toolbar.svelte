@@ -74,7 +74,7 @@
   .menu-trigger { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; color: var(--pin-muted, var(--muted)); background: transparent; }
   .menu-trigger:hover { color: var(--pin-text, var(--text)); background: var(--pin-hover, var(--hover)); }
   .menu-trigger[aria-expanded="true"] { color: var(--pin-accent, var(--accent)); background: var(--pin-active, var(--accent-soft)); }
-  .menu { position: fixed; z-index: 120; right: 8px; top: 43px; width: min(206px, calc(100vw - 16px)); max-height: calc(100vh - 51px); overflow: auto; padding: 5px; border: 0; border-radius: var(--radius-lg); color: var(--pin-text, var(--text)); background: color-mix(in srgb, var(--pin-bg, var(--surface-raised)) 80%, transparent); -webkit-backdrop-filter: var(--material-blur); backdrop-filter: var(--material-blur); box-shadow: var(--menu-shadow); transform-origin: top right; }
+  .menu { position: fixed; z-index: 120; right: 8px; top: 43px; width: min(206px, calc(100vw - 16px)); max-height: calc(100vh - 51px); overflow: auto; padding: 5px; border: 0; border-radius: var(--radius-lg); color: var(--pin-text, var(--text)); background: color-mix(in srgb, var(--pin-bg, var(--surface-raised)) 80%, transparent); -webkit-backdrop-filter: var(--material-blur); backdrop-filter: var(--material-blur); box-shadow: var(--material-shadow); transform-origin: top right; }
   .menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 31px; padding: 6px 9px; border-radius: var(--radius-sm); text-align: left; font-size: 12px; color: inherit; background: transparent; }
   .menu button:hover { background: var(--pin-hover, var(--hover)); }
   .menu button.active { color: var(--pin-accent, var(--accent)); }

@@ -200,8 +200,10 @@
         <div class="segmented" role="radiogroup" aria-label="中心窗口阴影">{#each shadows as [value, text]}<button role="radio" aria-checked={settings.appearance.centerShadow === value} class:on={settings.appearance.centerShadow === value} onclick={() => patchAppearance({ centerShadow: value })}>{text}</button>{/each}</div></div>
       <div class="row"><div><b>便签与胶囊阴影</b><small>标准：系统阴影加细线；细边：更清楚的描边，无阴影；关：极淡的边。贴边标签始终保持扁平。</small></div>
         <div class="segmented" role="radiogroup" aria-label="便签与胶囊阴影">{#each shadows as [value, text]}<button role="radio" aria-checked={settings.appearance.noteShadow === value} class:on={settings.appearance.noteShadow === value} onclick={() => patchAppearance({ noteShadow: value })}>{text}</button>{/each}</div></div>
-      {#if isMacPlatform()}<label class="row"><div><b>毛玻璃</b><small>中心窗口的列表和标题栏透出桌面，像访达的侧栏。系统开启“降低透明度”时自动变为不透明。</small></div>
-        <input type="checkbox" role="switch" checked={settings.appearance.glass} onchange={e => patchAppearance({ glass: e.currentTarget.checked })} /></label>{/if}
+      {#if isMacPlatform()}<label class="row"><div><b>毛玻璃</b><small>中心窗口透出身后的桌面，模糊成一层磨砂玻璃；列表和标题栏更通透，正文区保持易读。拖到最左为不透明。系统开启“降低透明度”时自动变为不透明。</small></div>
+        <span class="glass-range"><small>不透明</small><input type="range" min="0" max="100" step="5" value={settings.appearance.glass} aria-label="毛玻璃透明度"
+          oninput={e => applyAppearance({ ...settings!.appearance, glass: Number(e.currentTarget.value) }, false)}
+          onchange={e => patchAppearance({ glass: Number(e.currentTarget.value) })} /><small>通透</small></span></label>{/if}
       <label class="row"><div><b>减少动态</b><small>关闭窗口滑动与淡入；系统开启“减弱动态效果”时也会生效。</small></div>
         <input type="checkbox" role="switch" checked={settings.appearance.reduceMotion} onchange={e => patchAppearance({ reduceMotion: e.currentTarget.checked })} /></label>
     {:else if category === 'window'}
@@ -300,6 +302,8 @@
   input[type="checkbox"][role="switch"]:checked::after { transform: translateX(13px); }
   input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   input[type="range"] { width: 180px; accent-color: var(--accent); }
+  .glass-range { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+  .glass-range input[type="range"] { width: 150px; }
   .swatches { display: flex; gap: 7px; }
   .swatches button { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--hairline); cursor: pointer; }
   .swatches button.on { outline: 2px solid var(--accent); outline-offset: 2px; }
