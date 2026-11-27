@@ -38,25 +38,52 @@ fn text_of(note: &Value) -> (&str, &str) {
     )
 }
 
-/// Checklist items marked done (`- [x]`, `* [X]`, `1. [x]` …).
+/// Checklist items marked done (`- [x]`, `* [X]`, `1. [x]` …), ignoring fenced code blocks.
 pub fn ticked(content: &str) -> u64 {
-    content
-        .lines()
-        .filter(|line| {
-            let line = line.trim_start();
-            let rest = line
-                .strip_prefix("- ")
-                .or_else(|| line.strip_prefix("* "))
-                .or_else(|| line.strip_prefix("+ "))
-                .or_else(|| {
-                    let digits = line.chars().take_while(char::is_ascii_digit).count();
-                    (digits > 0)
-                        .then(|| line[digits..].strip_prefix(". "))
-                        .flatten()
-                });
-            rest.is_some_and(|r| r.starts_with("[x]") || r.starts_with("[X]"))
-        })
-        .count() as u64
+    let mut fence: Option<(char, usize)> = None;
+    let mut done = 0u64;
+    for raw in content.lines() {
+        let trimmed = raw.trim_start_matches(' ');
+        let indent = raw.len() - trimmed.len();
+        if indent <= 3 {
+            let marker = trimmed
+                .chars()
+                .next()
+                .filter(|&c| c == '`' || c == '~')
+                .map(|c| (c, trimmed.chars().take_while(|&ch| ch == c).count()))
+                .filter(|&(_, len)| len >= 3);
+            if let Some((ch, len)) = marker {
+                match fence {
+                    None => fence = Some((ch, len)),
+                    Some((open_ch, open_len)) if open_ch == ch && len >= open_len => fence = None,
+                    _ => {}
+                }
+                continue;
+            }
+        }
+        if fence.is_some() {
+            continue;
+        }
+        let line = raw.trim_start();
+        let rest = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .or_else(|| line.strip_prefix("+ "))
+            .or_else(|| {
+                let digits = line.chars().take_while(char::is_ascii_digit).count();
+                (digits > 0)
+                    .then(|| {
+                        line[digits..]
+                            .strip_prefix(". ")
+                            .or_else(|| line[digits..].strip_prefix(") "))
+                    })
+                    .flatten()
+            });
+        if rest.is_some_and(|r| r.starts_with("[x] ") || r.starts_with("[X] ") || r == "[x]" || r == "[X]") {
+            done += 1;
+        }
+    }
+    done
 }
 
 /// Whether the text a save replaces should be kept as a version.
@@ -201,7 +228,10 @@ mod tests {
     use super::*;
     #[test]
     fn ticked_items_are_counted_in_any_list_style() {
-        assert_eq!(ticked("- [x] a\n- [ ] b\n  * [X] c\n1. [x] d\n[x] not a list\n-[x] no space"), 3);
+        assert_eq!(
+            ticked("- [x] a\n- [ ] b\n  * [X] c\n1. [x] d\n[x] not a list\n-[x] no space\n```md\n- [x] inside backticks\n```\n~~~\n- [X] inside tildes\n~~~"),
+            3
+        );
     }
     #[test]
     fn a_version_is_kept_after_a_pause_and_never_twice() {

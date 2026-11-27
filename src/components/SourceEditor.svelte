@@ -1,12 +1,66 @@
 <script lang="ts">
+  import FindBar from "./FindBar.svelte";
+
   type Props = {
     value: string;
     onChange: (value: string) => void;
+    autoFocus?: boolean;
   };
+  type HistoryEntry = { text: string; start: number; end: number };
 
-  let { value, onChange }: Props = $props();
+  let { value, onChange, autoFocus = false }: Props = $props();
   let textarea = $state<HTMLTextAreaElement>();
-  let history: string[] = [];
+  let findBar = $state<FindBar>();
+  let findOpen = $state(false);
+  let findQuery = $state('');
+  let findIndex = $state(0);
+  let findOffsets = $state<number[]>([]);
+
+  function computeMatches(text: string, q: string) {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return [];
+    const lower = text.toLowerCase();
+    const hits: number[] = [];
+    let at = lower.indexOf(needle);
+    while (at >= 0) {
+      hits.push(at);
+      at = lower.indexOf(needle, at + needle.length);
+    }
+    return hits;
+  }
+  function selectMatch(idx: number) {
+    if (!textarea || !findOffsets.length) return;
+    const pos = findOffsets[idx] ?? 0;
+    const len = findQuery.trim().length;
+    textarea.setSelectionRange(pos, pos + len);
+    const before = value.slice(0, pos);
+    const lineNo = before.split('\n').length - 1;
+    const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 21;
+    textarea.scrollTop = Math.max(0, lineNo * lineHeight - textarea.clientHeight * 0.35);
+  }
+  function runFind(q: string, keep = false) {
+    findQuery = q;
+    findOffsets = computeMatches(value, q);
+    findIndex = findOffsets.length ? (keep ? Math.min(findIndex, findOffsets.length - 1) : 0) : 0;
+    if (findOffsets.length) selectMatch(findIndex);
+  }
+  function stepFind(delta: number) {
+    if (!findOffsets.length) return;
+    findIndex = (findIndex + delta + findOffsets.length) % findOffsets.length;
+    selectMatch(findIndex);
+  }
+  export function openFind() {
+    findOpen = true;
+    requestAnimationFrame(() => {
+      findBar?.focus();
+      if (findQuery) runFind(findQuery, true);
+    });
+  }
+  export function closeFind() {
+    findOpen = false;
+    textarea?.focus();
+  }
+  let history: HistoryEntry[] = [];
   let historyIndex = 0;
   let lastKnownValue = "";
   let lastInputAt = 0;
@@ -15,6 +69,14 @@
   let canMergeInput = false;
   let initializedHistory = false;
   let lastExternalValue = "";
+
+  export function focus() {
+    textarea?.focus();
+  }
+
+  $effect(() => {
+    if (autoFocus && textarea) textarea.focus();
+  });
 
   $effect(() => {
     const current = value;
@@ -81,7 +143,7 @@
     const end = textarea.selectionEnd;
     const selected = value.slice(start, end);
     const next = `${value.slice(0, start)}${mark}${selected}${mark}${value.slice(end)}`;
-    commit(next, { merge: false, inputChange: false });
+    commit(next, { merge: false, inputChange: false, selection: [start + mark.length, end + mark.length] });
     queueSelection(start + mark.length, end + mark.length);
   }
 
@@ -89,26 +151,30 @@
     if (!textarea) return;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
+    const caret = start + text.length;
     commit(`${value.slice(0, start)}${text}${value.slice(end)}`, {
       merge: false,
       inputChange: false,
+      selection: [caret, caret],
     });
-    queueSelection(start + text.length, start + text.length);
+    queueSelection(caret, caret);
   }
 
   function updateSelection(result: EditResult) {
-    commit(result.value, { merge: false, inputChange: false });
+    commit(result.value, { merge: false, inputChange: false, selection: [result.start, result.end] });
     queueSelection(result.start, result.end);
   }
 
-  function commit(next: string, options: { merge: boolean; inputChange: boolean }) {
+  function commit(next: string, options: { merge: boolean; inputChange: boolean; selection?: [number, number] }) {
     lastKnownValue = next;
-    if (next === history[historyIndex]) return;
+    if (next === history[historyIndex]?.text) return;
+    const [start, end] = options.selection ?? [textarea?.selectionStart ?? next.length, textarea?.selectionEnd ?? next.length];
+    const entry: HistoryEntry = { text: next, start, end };
 
     if (options.merge && canMergeInput && history.length > 1) {
-      history = [...history.slice(0, historyIndex), next, ...history.slice(historyIndex + 1)];
+      history = [...history.slice(0, historyIndex), entry, ...history.slice(historyIndex + 1)];
     } else {
-      history = [...history.slice(0, historyIndex + 1), next].slice(-100);
+      history = [...history.slice(0, historyIndex + 1), entry].slice(-100);
       historyIndex = history.length - 1;
     }
 
@@ -118,7 +184,7 @@
   }
 
   function resetHistory(next: string) {
-    history = [next];
+    history = [{ text: next, start: next.length, end: next.length }];
     historyIndex = 0;
     lastKnownValue = next;
     lastExternalValue = next;
@@ -160,13 +226,14 @@
     applyHistoryValue(history[historyIndex]);
   }
 
-  function applyHistoryValue(next: string) {
-    lastKnownValue = next;
-    lastExternalValue = next;
+  function applyHistoryValue(entry: HistoryEntry) {
+    lastKnownValue = entry.text;
+    lastExternalValue = entry.text;
     lastInputAt = 0;
     canMergeInput = false;
-    onChange(next);
-    queueSelection(next.length, next.length);
+    onChange(entry.text);
+    const len = entry.text.length;
+    queueSelection(Math.min(entry.start, len), Math.min(entry.end, len));
   }
 
   function queueSelection(start: number, end: number) {
@@ -238,16 +305,27 @@
   }
 </script>
 
-<textarea
-  bind:this={textarea}
-  class="source-editor"
-  aria-label="Markdown 源码编辑"
-  value={value}
-  oninput={handleInput}
-  onkeydown={handleKeydown}
-></textarea>
+<div class="source-wrap">
+  {#if findOpen}
+    <FindBar bind:this={findBar} query={findQuery} matchIndex={findIndex} matchCount={findOffsets.length} onQuery={q => runFind(q)} onNext={() => stepFind(1)} onPrev={() => stepFind(-1)} onClose={closeFind} />
+  {/if}
+  <textarea
+    bind:this={textarea}
+    class="source-editor"
+    aria-label="Markdown 源码编辑"
+    value={value}
+    oninput={handleInput}
+    onkeydown={handleKeydown}
+  ></textarea>
+</div>
 
 <style>
+  .source-wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
   .source-editor {
     width: 100%;
     height: 100%;
@@ -257,9 +335,9 @@
     outline: 0;
     padding: 8px 16px 18px;
     color: var(--pin-text);
-    background: transparent;
+    background: transparent var(--paper-grid) 8px 0;
     font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-    font-size: 13px;
+    font-size: calc(var(--editor-font-size, 14px) - 0.5px);
     line-height: 1.68;
   }
 </style>

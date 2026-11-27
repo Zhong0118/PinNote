@@ -253,7 +253,7 @@ pub fn mutate(file: &mut Value, request: &Value) -> Result<Value, String> {
         if let Some(theme) = patch.get("theme") {
             if !matches!(
                 theme.as_str(),
-                Some("paper" | "mint" | "rose" | "sky" | "grape" | "ink" | "custom")
+                Some("paper" | "cream" | "mint" | "rose" | "sky" | "grape" | "ink" | "custom")
             ) {
                 return Err("Invalid theme".into());
             }
@@ -595,6 +595,9 @@ pub fn operation(app: &AppHandle, mut request: Value) -> Result<Value, String> {
         json!({"id":request["id"],"note":note,"op":request["op"],"layout":layout,
                "source":request["source"],"by":request["owner"]}),
     );
+    if !matches!(request["op"].as_str(), Some("focus" | "window")) {
+        crate::refresh_tray_with(app, &file);
+    }
     Ok(note)
 }
 

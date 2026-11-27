@@ -5,7 +5,7 @@ import test from 'node:test';
 import ts from 'typescript';
 const exports = {};
 runInNewContext(ts.transpileModule(readFileSync('src/lib/windowGeometry.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports });
-const { fitBounds, switchBounds, rememberBounds, restoreBounds, normalizeBounds, normalizeDisplays } = exports;
+const { fitBounds, switchBounds, rememberBounds, restoreBounds, normalizeBounds, normalizeDisplays, arrangeDesktopBounds } = exports;
 const displays = [
   { scaleFactor: 2, workArea: { position: {x:0,y:50}, size: {width:3024,height:1800} } },
   { scaleFactor: 1, workArea: { position: {x:-1920,y:0}, size: {width:1920,height:1040} } },
@@ -132,4 +132,22 @@ test('switching uses the target display scale while keeping the existing right e
   assert.equal(expanded.scaleFactor, 1);
   assert.equal(expanded.x, 1140);
   assert.equal(expanded.x + expanded.width * expanded.scaleFactor, 1560);
+});
+
+test('arrangeDesktopBounds packs notes from top-right and wraps into a second column cleanly', () => {
+  const display = { scaleFactor: 1, workArea: { position: { x: 0, y: 25 }, size: { width: 1440, height: 700 } } };
+  const notes = [
+    { id: 'n1', window: { width: 320, height: 300 } },
+    { id: 'n2', window: { width: 320, height: 300 } },
+    { id: 'n3', window: { width: 320, height: 300 } },
+  ];
+  const plan = arrangeDesktopBounds(notes, display, 12);
+  const b1 = plan.get('n1'), b2 = plan.get('n2'), b3 = plan.get('n3');
+  assert.equal(b1.x, 1440 - 12 - 320);
+  assert.equal(b1.y, 25 + 12);
+  assert.equal(b2.x, b1.x);
+  assert.equal(b2.y, b1.y + 300 + 12);
+  // Third note exceeds vertical workArea, so it wraps to the next column left.
+  assert.equal(b3.x, b1.x - 320 - 12);
+  assert.equal(b3.y, 25 + 12);
 });

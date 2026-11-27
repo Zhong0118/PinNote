@@ -13,8 +13,19 @@ export const MOTION_FAST = 140, MOTION = 220;
 
 /** Menus and popovers settle in like a pane of glass: a short drop and grow, then rest. */
 export function reveal(_node: Element): TransitionConfig {
-  return { duration: motionReduced() ? 0 : 200, easing: cubicOut,
+  return { duration: motionReduced() ? 0 : 180, easing: cubicOut,
     css: (t) => `opacity: ${Math.min(1, t * 1.6)}; transform: translateY(${(1 - t) * -4}px) scale(${0.96 + t * 0.04})` };
+}
+
+/** Full-pane overlays (Settings, Stats): symmetric in and out scale + fade. */
+export function overlay(_node: Element): TransitionConfig {
+  return { duration: motionReduced() ? 0 : 200, easing: cubicOut,
+    css: (t) => `opacity: ${t}; transform: translateY(${(1 - t) * 5}px) scale(${0.988 + t * 0.012})` };
+}
+
+/** Symmetric backdrop fade for modal scrims. */
+export function backdropFade(_node: Element): TransitionConfig {
+  return { duration: motionReduced() ? 0 : MOTION_FAST, easing: cubicOut, css: (t) => `opacity: ${t}` };
 }
 
 /** List and tab reordering: one duration and curve everywhere, none when motion is reduced.
@@ -24,12 +35,17 @@ export function shift(node: Element, rects: { from: DOMRect; to: DOMRect }, para
   return flip(node, rects, { duration: motionReduced() || settled ? 0 : MOTION, easing: cubicOut, ...params });
 }
 
-/** Keep compact popovers keyboard accessible without adding a UI dependency. */
-export function popup(node: HTMLElement, close: () => void) {
+export type PopupOptions = (() => void) | { close: () => void; trigger?: HTMLElement | null };
+
+/** Keep compact popovers and menus keyboard accessible without adding a UI dependency. */
+export function popup(node: HTMLElement, options: PopupOptions) {
+  let close = typeof options === "function" ? options : options.close;
+  let explicitTrigger = typeof options === "function" ? undefined : options.trigger;
   const previous = document.activeElement as HTMLElement | null;
-  const returnTarget = previous?.closest('[role="menu"]')
-    ? document.querySelector<HTMLElement>("[data-menu-trigger]")
-    : previous;
+  const returnTarget = explicitTrigger
+    ?? (previous?.closest('[role="menu"]')
+      ? document.querySelector<HTMLElement>("[data-menu-trigger]")
+      : previous);
   let returnFocus = true;
   const focusable = () => Array.from(node.querySelectorAll<HTMLElement>(
     'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
@@ -56,18 +72,28 @@ export function popup(node: HTMLElement, close: () => void) {
     }
   }
   function outside(event: PointerEvent) {
-    const trigger = node.getAttribute("role") === "menu" && (event.target as Element).closest("[data-menu-trigger]");
-    if (!node.contains(event.target as Node) && !trigger) {
+    const target = event.target instanceof Node ? event.target : null;
+    if (!target) return;
+    const hitTrigger = explicitTrigger
+      ? explicitTrigger.contains(target)
+      : (node.getAttribute("role") === "menu" && target instanceof Element && Boolean(target.closest("[data-menu-trigger]")));
+    if (!node.contains(target) && !hitTrigger) {
       returnFocus = false;
       close();
     }
   }
   node.addEventListener("keydown", keydown);
   document.addEventListener("pointerdown", outside, true);
-  return { destroy() {
-    cancelAnimationFrame(frame);
-    node.removeEventListener("keydown", keydown);
-    document.removeEventListener("pointerdown", outside, true);
-    if (returnFocus && (node.contains(document.activeElement) || document.activeElement === document.body)) returnTarget?.focus();
-  } };
+  return {
+    update(next: PopupOptions) {
+      close = typeof next === "function" ? next : next.close;
+      explicitTrigger = typeof next === "function" ? undefined : next.trigger;
+    },
+    destroy() {
+      cancelAnimationFrame(frame);
+      node.removeEventListener("keydown", keydown);
+      document.removeEventListener("pointerdown", outside, true);
+      if (returnFocus && (node.contains(document.activeElement) || document.activeElement === document.body)) returnTarget?.focus();
+    },
+  };
 }

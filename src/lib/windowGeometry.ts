@@ -91,3 +91,50 @@ export function restoreBounds(state: NoteWindowState, current: Bounds, displays:
   const size = state.collapsed ? (state.edge ? EDGE_TAB : CAPSULE) : { width: Math.max(EDITOR_MIN.width, state.width), height: Math.max(EDITOR_MIN.height, state.height) };
   return fitBounds({ ...current, ...position, ...size }, displays);
 }
+
+/**
+ * Arrange desktop notes cleanly in columns starting from the top-right of `display.workArea`,
+ * wrapping left when a column runs out of vertical space and never overflowing the work area.
+ */
+export function arrangeDesktopBounds(
+  notes: Array<{ id: string; window: Pick<NoteWindowState, 'width' | 'height'> }>,
+  display: Display,
+  gap = 12,
+): Map<string, Bounds> {
+  const result = new Map<string, Bounds>();
+  if (!notes.length) return result;
+  const { position: p, size: s } = display.workArea;
+  const scale = display.scaleFactor;
+  const maxW = Math.max(EDITOR_MIN.width, Math.floor(s.width / scale - gap * 2));
+  const maxH = Math.max(EDITOR_MIN.height, Math.floor(s.height / scale - gap * 2));
+  const stepGap = gap * scale;
+
+  let colRight = p.x + s.width - stepGap;
+  let colY = p.y + stepGap;
+  let colWidth = 0;
+
+  for (const item of notes) {
+    const width = Math.min(maxW, Math.max(EDITOR_MIN.width, item.window.width || 340));
+    const height = Math.min(maxH, Math.max(EDITOR_MIN.height, item.window.height || 300));
+    const wPx = width * scale;
+    const hPx = height * scale;
+
+    if (colWidth > 0 && colY + hPx > p.y + s.height - stepGap) {
+      colRight -= colWidth + stepGap;
+      colY = p.y + stepGap;
+      colWidth = 0;
+    }
+
+    const raw: Bounds = {
+      x: Math.round(colRight - wPx),
+      y: Math.round(colY),
+      width,
+      height,
+      scaleFactor: scale,
+    };
+    result.set(item.id, fitBounds(raw, [display]));
+    colY += hPx + stepGap;
+    colWidth = Math.max(colWidth, wPx);
+  }
+  return result;
+}

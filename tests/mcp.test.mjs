@@ -16,6 +16,8 @@ test('MCP stdio initializes, lists tools and reports offline app clearly',async(
   const replies=await request('/missing/pinnote-connection.json',[{method:'initialize'},{method:'tools/list'},{method:'tools/call',params:{name:'search_notes',arguments:{query:'test'}}}]);
   assert.equal(replies[0].result.serverInfo.name,'pinnote');
   assert.equal(replies[1].result.tools.length,11);
+  const createTool = replies[1].result.tools.find(t => t.name === 'create_note');
+  assert.ok(createTool.inputSchema.properties.tags && createTool.inputSchema.properties.theme && createTool.inputSchema.properties.placement);
   assert.equal(replies[2].result.isError,true);
   assert.match(replies[2].result.content[0].text,/PINNOTE_UNAVAILABLE/);
 });

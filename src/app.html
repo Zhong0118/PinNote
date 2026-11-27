@@ -2,9 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PinNote</title>
+    <title>驻墨 InkPin</title>
     <script>
       // Apply the cached theme before first paint so no window flashes the wrong theme.
       try {
@@ -14,6 +13,13 @@
         r.dataset.theme = dark ? "dark" : "light"; r.style.colorScheme = dark ? "dark" : "light";
         if (a.reduceMotion || matchMedia("(prefers-reduced-motion: reduce)").matches) r.dataset.motion = "reduce";
         r.dataset.centerShadow = a.centerShadow || "standard"; r.dataset.noteShadow = a.noteShadow || "standard";
+        r.dataset.paperGrid = a.paperGrid === false ? "off" : "on";
+        var solid = matchMedia("(prefers-reduced-transparency: reduce)").matches;
+        var g = solid ? 0 : (typeof a.glass === "number" ? Math.max(0, Math.min(100, a.glass)) : a.glass === false ? 0 : 60);
+        r.style.setProperty("--glass-chrome", g === 0 ? "100%" : Math.round((0.82 - 0.64 * g / 100) * 100) + "%");
+        r.style.setProperty("--glass-page", g === 0 ? "100%" : Math.round((0.92 - 0.44 * g / 100) * 100) + "%");
+        r.style.setProperty("--glass-note", g === 0 ? "100%" : Math.round((0.90 - 0.46 * g / 100) * 100) + "%");
+        if (typeof a.editorFontSize === "number") r.style.setProperty("--editor-font-size", Math.round(Math.min(20, Math.max(12, a.editorFontSize))) + "px");
       } catch (e) {}
     </script>
     %sveltekit.head%

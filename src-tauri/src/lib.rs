@@ -14,8 +14,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
+#[cfg(not(target_os = "macos"))]
+use tauri::image::Image;
 use tauri::{
-    image::Image,
     menu::MenuBuilder,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, WindowEvent,
@@ -24,6 +25,7 @@ use tauri::{
 struct NotesFileLock(Mutex<()>);
 struct TemplatesFileLock(Mutex<()>);
 struct MainNoteId(Mutex<Option<String>>);
+struct GhostWindows(Mutex<HashSet<String>>);
 
 #[derive(Default)]
 struct QuitState {
@@ -179,20 +181,171 @@ fn note_id(note: &Value) -> Result<String, String> {
         .ok_or_else(|| "Note id is missing".to_string())
 }
 
+fn recent_tray_label(note: &Value) -> String {
+    let raw_title = note["title"].as_str().unwrap_or("").trim();
+    let base = if !raw_title.is_empty() {
+        raw_title.to_string()
+    } else {
+        let content = note["content"].as_str().unwrap_or("");
+        let mut derived = String::new();
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("```")
+                || trimmed.starts_with("~~~")
+                || trimmed.chars().all(|c| matches!(c, '-' | '*' | '_' | ' '))
+            {
+                continue;
+            }
+            let stripped = trimmed
+                .trim_start_matches('#')
+                .trim_start()
+                .trim_start_matches('>')
+                .trim_start();
+            let stripped = stripped
+                .strip_prefix("- [ ] ")
+                .or_else(|| stripped.strip_prefix("- [x] "))
+                .or_else(|| stripped.strip_prefix("- [X] "))
+                .or_else(|| stripped.strip_prefix("* [ ] "))
+                .or_else(|| stripped.strip_prefix("* [x] "))
+                .or_else(|| stripped.strip_prefix("* [X] "))
+                .or_else(|| stripped.strip_prefix("- "))
+                .or_else(|| stripped.strip_prefix("* "))
+                .unwrap_or(stripped)
+                .trim();
+            if !stripped.is_empty() {
+                derived = stripped.to_string();
+                break;
+            }
+        }
+        if derived.is_empty() {
+            "未命名便签".to_string()
+        } else {
+            derived
+        }
+    };
+    let mut chars = base.chars();
+    let short: String = chars.by_ref().take(16).collect();
+    let label = if chars.next().is_some() {
+        format!("{short}…")
+    } else {
+        short
+    };
+    if note["placement"] == "desktop" {
+        format!("{label} · 桌面")
+    } else {
+        label
+    }
+}
+
+fn recent_notes_for_tray(file: &Value) -> Vec<(String, String)> {
+    let Some(map) = file["notes"].as_object() else {
+        return Vec::new();
+    };
+    let mut active: Vec<(&String, &Value)> = map
+        .iter()
+        .filter(|(_, n)| n["lifecycle"] == "active")
+        .collect();
+    active.sort_by_key(|(_, n)| {
+        std::cmp::Reverse(
+            n["editedAt"]
+                .as_u64()
+                .or_else(|| n["updatedAt"].as_u64())
+                .unwrap_or(0),
+        )
+    });
+    active
+        .into_iter()
+        .take(3)
+        .map(|(id, n)| (id.clone(), recent_tray_label(n)))
+        .collect()
+}
+
+fn build_tray_menu(
+    app: &AppHandle,
+    updates: &tauri::menu::MenuItem<tauri::Wry>,
+    recent: &[(String, String)],
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    let mut builder = MenuBuilder::new(app)
+        .text("center", "便签中心")
+        .text("quick_capture", "快速速记")
+        .text("new_note", "新建便签")
+        .text("new_note_clipboard", "从剪贴板新建便签");
+    if !recent.is_empty() {
+        builder = builder.separator();
+        for (id, label) in recent {
+            builder = builder.text(format!("recent:{id}"), label);
+        }
+    }
+    let ghost_count = app
+        .try_state::<GhostWindows>()
+        .and_then(|g| g.0.lock().ok().map(|set| set.len()))
+        .unwrap_or(0);
+    let privacy_label = if backup::is_capture_protected() {
+        "关闭隐私防截屏模式"
+    } else {
+        "开启隐私防截屏模式"
+    };
+    builder = builder.separator().text("show", "显示/隐藏全部便签");
+    if ghost_count > 0 {
+        builder = builder.text("exit_all_ghost", format!("退出穿透参考模式（{ghost_count}）"));
+    }
+    builder
+        .text("dock_all_notes", "全部收纳到侧边")
+        .text("arrange_desktop_notes", "整齐排列桌面便签")
+        .text("privacy_mode", privacy_label)
+        .separator()
+        .text("settings", "设置")
+        .item(updates)
+        .separator()
+        .text("quit", "退出")
+        .build()
+}
+
+pub fn refresh_tray_with(app: &AppHandle, file: &Value) {
+    let Some(tray) = app.tray_by_id("main-tray") else {
+        return;
+    };
+    let updates = app.state::<updater::UpdateMenu>().0.clone();
+    let recent = recent_notes_for_tray(file);
+    if let Ok(menu) = build_tray_menu(app, &updates, &recent) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+pub fn refresh_tray_now(app: &AppHandle) {
+    let recent = {
+        let state = app.state::<NotesFileLock>();
+        let _guard = state.0.lock().ok();
+        notes::load(app)
+            .map(|file| recent_notes_for_tray(&file))
+            .unwrap_or_default()
+    };
+    let Some(tray) = app.tray_by_id("main-tray") else {
+        return;
+    };
+    let updates = app.state::<updater::UpdateMenu>().0.clone();
+    if let Ok(menu) = build_tray_menu(app, &updates, &recent) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let updates =
         tauri::menu::MenuItem::with_id(app, "check_updates", "检查更新", true, None::<&str>)?;
     app.manage(updater::UpdateMenu(updates.clone()));
-    let menu = MenuBuilder::new(app)
-        .text("center", "便签中心")
-        .text("show", "显示/隐藏全部便签")
-        .text("new_note", "新建便签")
-        .text("settings", "设置")
-        .item(&updates)
-        .separator()
-        .text("quit", "退出")
-        .build()?;
+    let recent = {
+        let state = app.state::<NotesFileLock>();
+        let _guard = state.0.lock().ok();
+        notes::load(app.handle())
+            .map(|file| recent_notes_for_tray(&file))
+            .unwrap_or_default()
+    };
+    let menu = build_tray_menu(app.handle(), &updates, &recent)?;
 
+    #[cfg(target_os = "macos")]
+    let icon = tauri::include_image!("icons/tray-template.png").to_owned();
+    #[cfg(not(target_os = "macos"))]
     let icon = app
         .default_window_icon()
         .cloned()
@@ -201,7 +354,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     TrayIconBuilder::with_id("main-tray")
         .icon(icon)
         .icon_as_template(cfg!(target_os = "macos"))
-        .tooltip("PinNote")
+        .tooltip("驻墨 InkPin")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
@@ -230,18 +383,41 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             if app.state::<QuitLock>().0.lock().unwrap().updating {
                 return;
             }
-            match event.id().as_ref() {
+            let id = event.id().as_ref();
+            if let Some(note_id) = id.strip_prefix("recent:") {
+                let _ = app.emit("open-note-requested", json!({ "id": note_id }));
+                return;
+            }
+            match id {
                 "center" => {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
                 }
+                "quick_capture" => {
+                    let _ = app.emit("quick-capture-requested", ());
+                }
                 "show" => {
                     let _ = app.emit("toggle-notes-visibility-requested", ());
                 }
+                "exit_all_ghost" => {
+                    let _ = clear_all_ghost(app.clone());
+                }
                 "new_note" => {
                     let _ = app.emit("new-note-requested", ());
+                }
+                "new_note_clipboard" => {
+                    let _ = app.emit("new-note-from-clipboard-requested", ());
+                }
+                "dock_all_notes" => {
+                    let _ = app.emit("dock-all-notes-requested", ());
+                }
+                "arrange_desktop_notes" => {
+                    let _ = app.emit("arrange-desktop-notes-requested", ());
+                }
+                "privacy_mode" => {
+                    let _ = app.emit("toggle-privacy-mode-requested", ());
                 }
                 "settings" => {
                     let _ = app.emit("open-settings-requested", ());
@@ -364,9 +540,74 @@ fn load_settings(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn write_markdown_file(path: String, content: String) -> Result<String, String> {
-    fs::write(&path, content).map_err(|error| format!("Cannot export note: {error}"))?;
+fn write_markdown_file(app: AppHandle, path: String, content: String) -> Result<String, String> {
+    fs::write(&path, &content).map_err(|error| format!("Cannot export note: {error}"))?;
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        backup::copy_referenced_assets(&app, &content, parent);
+    }
     Ok(path)
+}
+
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(ext.as_str(), "md" | "markdown" | "txt") {
+        return Err("仅支持导入 .md / .markdown / .txt 文件".into());
+    }
+    let meta = fs::metadata(&p).map_err(|e| format!("无法读取文件信息：{e}"))?;
+    if meta.len() > 2 * 1024 * 1024 {
+        return Err("文件超过 2 MB，已取消导入".into());
+    }
+    fs::read_to_string(&p).map_err(|e| format!("无法读取文件内容：{e}"))
+}
+
+#[tauri::command]
+fn read_clipboard_text() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("pbpaste")
+            .output()
+            .map_err(|e| format!("无法读取剪贴板：{e}"))?;
+        if !out.status.success() {
+            return Err("无法读取剪贴板".into());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let out = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-Clipboard -Raw"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("无法读取剪贴板：{e}"))?;
+        if !out.status.success() {
+            return Err("无法读取剪贴板".into());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let out = std::process::Command::new("wl-paste")
+            .arg("--no-newline")
+            .output()
+            .or_else(|_| {
+                std::process::Command::new("xclip")
+                    .args(["-selection", "clipboard", "-o"])
+                    .output()
+            })
+            .map_err(|e| format!("无法读取剪贴板：{e}"))?;
+        if !out.status.success() {
+            return Err("无法读取剪贴板".into());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
 }
 
 #[tauri::command]
@@ -691,6 +932,88 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+fn note_id_for_label(app: &AppHandle, label: &str) -> String {
+    if let Some(id) = label.strip_prefix("note-") {
+        return id.to_string();
+    }
+    if label == "main" {
+        return app
+            .state::<MainNoteId>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_default();
+    }
+    String::new()
+}
+
+#[tauri::command]
+fn set_window_ghost(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    enabled: bool,
+) -> Result<(), String> {
+    window
+        .set_ignore_cursor_events(enabled)
+        .map_err(|e| format!("无法切换穿透模式：{e}"))?;
+    let label = window.label().to_string();
+    let note_id = note_id_for_label(&app, &label);
+    if let Ok(mut ghosts) = app.state::<GhostWindows>().0.lock() {
+        if enabled {
+            ghosts.insert(label);
+        } else {
+            ghosts.remove(&label);
+        }
+    }
+    refresh_tray_now(&app);
+    let _ = app.emit("ghost-changed", json!({ "id": note_id, "ghost": enabled }));
+    Ok(())
+}
+
+#[tauri::command]
+fn exit_note_ghost(app: AppHandle, id: String) -> Result<(), String> {
+    let label = format!("note-{id}");
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.set_ignore_cursor_events(false);
+    }
+    if let Ok(mut ghosts) = app.state::<GhostWindows>().0.lock() {
+        ghosts.remove(&label);
+    }
+    refresh_tray_now(&app);
+    let _ = app.emit("ghost-changed", json!({ "id": id, "ghost": false }));
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_all_ghost(app: AppHandle) -> Result<(), String> {
+    let labels: Vec<String> = app
+        .state::<GhostWindows>()
+        .0
+        .lock()
+        .map_err(|_| "Cannot lock ghost state")?
+        .drain()
+        .collect();
+    for label in &labels {
+        if let Some(win) = app.get_webview_window(label) {
+            let _ = win.set_ignore_cursor_events(false);
+        }
+    }
+    refresh_tray_now(&app);
+    let _ = app.emit("ghost-changed", json!({ "id": "*", "ghost": false }));
+    Ok(())
+}
+
+#[tauri::command]
+fn list_ghost_notes(app: AppHandle) -> Result<Vec<String>, String> {
+    let state = app.state::<GhostWindows>();
+    let ghosts = state.0.lock().map_err(|_| "Cannot lock ghost state")?;
+    Ok(ghosts
+        .iter()
+        .filter_map(|label| label.strip_prefix("note-").map(ToString::to_string))
+        .collect())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "macos")]
@@ -718,6 +1041,7 @@ pub fn run() {
         .manage(notes::Drafts::default())
         .manage(TemplatesFileLock(Mutex::new(())))
         .manage(MainNoteId(Mutex::new(None)))
+        .manage(GhostWindows(Mutex::new(HashSet::new())))
         .manage(QuitLock(Mutex::new(QuitState::default())))
         .plugin(autostart.build())
         .plugin(tauri_plugin_dialog::init())
@@ -725,11 +1049,41 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .register_uri_scheme_protocol("inkpin-asset", |ctx, request| {
+            let name = request.uri().path().trim_start_matches('/');
+            if let Some((path, mime)) = backup::resolve_asset_file(ctx.app_handle(), name) {
+                if let Ok(bytes) = fs::read(&path) {
+                    return tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", mime)
+                        .header("Cache-Control", "public, max-age=31536000, immutable")
+                        .body(bytes)
+                        .unwrap();
+                }
+            }
+            tauri::http::Response::builder()
+                .status(404)
+                .body(Vec::new())
+                .unwrap()
+        })
         .on_page_load(|webview, _| backup::protect_new(webview))
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::Destroyed) {
                 if let Ok(mut drafts) = window.state::<notes::Drafts>().0.lock() {
                     drafts.retain(|_, label| label != window.label());
+                }
+                let removed_ghost = window
+                    .state::<GhostWindows>()
+                    .0
+                    .lock()
+                    .ok()
+                    .is_some_and(|mut ghosts| ghosts.remove(window.label()));
+                if removed_ghost {
+                    refresh_tray_now(window.app_handle());
+                    let id = note_id_for_label(window.app_handle(), window.label());
+                    let _ = window
+                        .app_handle()
+                        .emit("ghost-changed", json!({ "id": id, "ghost": false }));
                 }
                 let state = window.state::<QuitLock>();
                 let mut quit = state.0.lock().expect("quit state poisoned");
@@ -781,6 +1135,8 @@ pub fn run() {
             backup::list_backups,
             backup::restore_backup,
             backup::export_notes,
+            backup::save_note_image,
+            backup::import_image_file,
             backup::set_capture_protection,
             reminders::reminder_permission,
             integration::integration_status,
@@ -791,8 +1147,14 @@ pub fn run() {
             save_settings,
             load_settings,
             write_markdown_file,
+            read_text_file,
+            read_clipboard_text,
             check_updates,
             quit_app,
+            set_window_ghost,
+            exit_note_ghost,
+            clear_all_ghost,
+            list_ghost_notes,
             main_note_id,
             set_main_note_id,
             quit_save_complete,
@@ -949,5 +1311,24 @@ mod tests {
         assert!(results.iter().all(Result::is_ok), "{results:?}");
         let value: Value = serde_json::from_str(&content).unwrap();
         assert_eq!(value["text"].as_str().unwrap().len(), 1000);
+    }
+
+    #[test]
+    fn recent_tray_notes_sorts_active_and_derives_labels() {
+        let file = json!({
+            "notes": {
+                "a": {"id": "a", "title": "", "content": "- [ ] 先把文档写完\n第二行", "lifecycle": "active", "placement": "center", "editedAt": 300},
+                "b": {"id": "b", "title": "桌面待办", "content": "", "lifecycle": "active", "placement": "desktop", "editedAt": 500},
+                "c": {"id": "c", "title": "已归档", "content": "", "lifecycle": "archived", "placement": "center", "editedAt": 900},
+                "d": {"id": "d", "title": "最早的记录", "content": "", "lifecycle": "active", "placement": "center", "updatedAt": 100},
+                "e": {"id": "e", "title": "一个特别长特别长特别长超过十六个字符的标题", "content": "", "lifecycle": "active", "placement": "center", "editedAt": 400}
+            }
+        });
+        let recent = recent_notes_for_tray(&file);
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0], ("b".into(), "桌面待办 · 桌面".into()));
+        assert_eq!(recent[1].0, "e");
+        assert!(recent[1].1.ends_with('…'));
+        assert_eq!(recent[2], ("a".into(), "先把文档写完".into()));
     }
 }

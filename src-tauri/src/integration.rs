@@ -27,8 +27,45 @@ pub fn tool(app: &AppHandle, request: &Value, settings: &Value) -> Result<Value,
     let allowed = |n: &Value| settings["scope"] == "all" || n["lifecycle"] == "active";
     if name == "search_notes" {
         let query = args["query"].as_str().unwrap_or("").to_lowercase();
-        let results:Vec<_>=file["notes"].as_object().unwrap().values().filter(|n|allowed(n)&&format!("{}\n{}",n["title"].as_str().unwrap_or(""),n["content"].as_str().unwrap_or("")).to_lowercase().contains(&query))
-            .take(100).map(|n|json!({"id":n["id"],"title":n["title"],"revision":n["revision"],"lifecycle":n["lifecycle"],"placement":n["placement"]})).collect();
+        let results: Vec<_> = file["notes"]
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|n| {
+                if !allowed(n) {
+                    return false;
+                }
+                let tags = n["tags"]
+                    .as_array()
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "{}\n{}\n{}",
+                    n["title"].as_str().unwrap_or(""),
+                    n["content"].as_str().unwrap_or(""),
+                    tags
+                )
+                .to_lowercase()
+                .contains(&query)
+            })
+            .take(100)
+            .map(|n| {
+                json!({
+                    "id": n["id"],
+                    "title": n["title"],
+                    "revision": n["revision"],
+                    "lifecycle": n["lifecycle"],
+                    "placement": n["placement"],
+                    "tags": n["tags"],
+                    "starredAt": n["starredAt"]
+                })
+            })
+            .collect();
         return Ok(json!(results));
     }
     if name == "create_note" {
@@ -37,14 +74,64 @@ pub fn tool(app: &AppHandle, request: &Value, settings: &Value) -> Result<Value,
             return Err("READ_ONLY: 未启用写入权限".into());
         }
         let id = uuid::Uuid::new_v4().to_string();
-        return notes::operation(
+        let placement = match args.get("placement").and_then(Value::as_str) {
+            Some("desktop") => "desktop",
+            Some("center") | None => "center",
+            Some(_) => return Err("placement must be 'center' or 'desktop'".into()),
+        };
+        let theme = match args.get("theme").and_then(Value::as_str) {
+            Some(t)
+                if matches!(
+                    t,
+                    "paper" | "cream" | "mint" | "rose" | "sky" | "grape" | "ink" | "custom"
+                ) =>
+            {
+                t
+            }
+            None => "paper",
+            Some(_) => return Err("Unsupported theme".into()),
+        };
+        let tags: Vec<String> = args
+            .get("tags")
+            .and_then(Value::as_array)
+            .map(|list| {
+                let mut seen = Vec::<String>::new();
+                for item in list {
+                    if let Some(raw) = item.as_str() {
+                        let cleaned: String = raw.trim().trim_start_matches('#').trim().chars().take(20).collect();
+                        if !cleaned.is_empty() && !seen.iter().any(|s| s.eq_ignore_ascii_case(&cleaned)) {
+                            seen.push(cleaned);
+                            if seen.len() >= 8 {
+                                break;
+                            }
+                        }
+                    }
+                }
+                seen
+            })
+            .unwrap_or_default();
+        let mut note_payload = json!({
+            "title": args["title"].as_str().unwrap_or(""),
+            "content": args["content"].as_str().unwrap_or(""),
+            "placement": placement,
+            "theme": theme,
+            "customColor": "#2563eb",
+            "opacity": 0.96,
+            "alwaysOnTop": true,
+            "window": {"width": 420, "height": 560},
+            "lastFocusedAt": 0
+        });
+        if !tags.is_empty() {
+            note_payload["tags"] = json!(tags);
+        }
+        let created = notes::operation(
             app,
-            json!({"id":id,"op":"create","source":"agent","note":{
-                "title":args["title"].as_str().unwrap_or("未命名便签"),"content":args["content"].as_str().unwrap_or(""),
-                "placement":"center","theme":"paper","customColor":"#2563eb","opacity":1,"alwaysOnTop":true,
-                "window":{"width":420,"height":560},"lastFocusedAt":0
-            }}),
-        );
+            json!({"id": id, "op": "create", "source": "agent", "note": note_payload}),
+        )?;
+        if placement == "desktop" {
+            let _ = app.emit("agent-open-note", json!({"id": id}));
+        }
+        return Ok(created);
     }
     let id = args["id"].as_str().ok_or("Missing note id")?;
     let note = file["notes"]

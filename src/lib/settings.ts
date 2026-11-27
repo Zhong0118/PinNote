@@ -1,19 +1,20 @@
 import { browser } from "$app/environment";
 import { invoke } from "@tauri-apps/api/core";
 
-export type NoteTheme = "paper" | "mint" | "rose" | "sky" | "grape" | "ink" | "custom";
+export type NoteTheme = "paper" | "cream" | "mint" | "rose" | "sky" | "grape" | "ink" | "custom";
 
 export type ShortcutConfig = {
   toggleWindow: string;
   newNote: string;
+  quickCapture: string;
 };
 
 export type ThemeMode = "system" | "light" | "dark";
 export type ShadowLevel = "off" | "light" | "standard";
-/** `glass`: how see-through the center window is on macOS, 0 (solid) to 100; the desktop shows through blurred. */
-export type AppearanceSettings = { theme: ThemeMode; centerShadow: ShadowLevel; noteShadow: ShadowLevel; reduceMotion: boolean; glass: number };
+/** `glass`: how see-through windows are on macOS, 0 (solid) to 100; the desktop shows through blurred. */
+export type AppearanceSettings = { theme: ThemeMode; centerShadow: ShadowLevel; noteShadow: ShadowLevel; reduceMotion: boolean; glass: number; celebrate: boolean; editorFontSize: number; paperGrid: boolean };
 /** `hideFromCapture`: ask the system to keep PinNote windows out of screenshots and screen sharing. */
-export type BehaviorSettings = { edgeSnap: boolean; hoverPreview: boolean; restoreSession: boolean; hideFromCapture: boolean };
+export type BehaviorSettings = { edgeSnap: boolean; hoverPreview: boolean; restoreSession: boolean; hideFromCapture: boolean; fadeOnBlur: boolean };
 
 export type TrashDays = 0 | 30 | 60 | 90;
 export const trashDayOptions: TrashDays[] = [30, 60, 90, 0];
@@ -39,17 +40,19 @@ const settingsKey = "pinnote.settings.v1";
 export const windowsDefaultShortcuts: ShortcutConfig = {
   toggleWindow: "Alt+N",
   newNote: "Alt+Shift+N",
+  quickCapture: "Alt+Shift+Space",
 };
 
 export const macDefaultShortcuts: ShortcutConfig = {
   toggleWindow: "CmdOrCtrl+Option+N",
   newNote: "CmdOrCtrl+Option+Shift+N",
+  quickCapture: "CmdOrCtrl+Option+Space",
 };
 
 export const defaultShortcuts: ShortcutConfig = windowsDefaultShortcuts;
 
-export const defaultAppearance: AppearanceSettings = { theme: "system", centerShadow: "standard", noteShadow: "standard", reduceMotion: false, glass: 60 };
-export const defaultBehavior: BehaviorSettings = { edgeSnap: true, hoverPreview: true, restoreSession: true, hideFromCapture: false };
+export const defaultAppearance: AppearanceSettings = { theme: "system", centerShadow: "standard", noteShadow: "standard", reduceMotion: false, glass: 60, celebrate: true, editorFontSize: 14, paperGrid: true };
+export const defaultBehavior: BehaviorSettings = { edgeSnap: true, hoverPreview: true, restoreSession: true, hideFromCapture: false, fadeOnBlur: false };
 
 export const defaultSettings: AppSettings = {
   autoStart: false,
@@ -145,8 +148,11 @@ export function normalizeAppearance(value: unknown): AppearanceSettings {
     centerShadow: shadow(a.centerShadow, defaultAppearance.centerShadow),
     noteShadow: shadow(a.noteShadow, defaultAppearance.noteShadow),
     reduceMotion: typeof a.reduceMotion === "boolean" ? a.reduceMotion : defaultAppearance.reduceMotion,
-    // 1.3.9 stored an on/off switch.
+    // Early glass builds stored an on/off switch.
     glass: typeof a.glass === "number" && Number.isFinite(a.glass) ? Math.round(Math.min(100, Math.max(0, a.glass))) : a.glass === false ? 0 : defaultAppearance.glass,
+    celebrate: typeof a.celebrate === "boolean" ? a.celebrate : defaultAppearance.celebrate,
+    editorFontSize: typeof a.editorFontSize === "number" && Number.isFinite(a.editorFontSize) ? Math.round(Math.min(20, Math.max(12, a.editorFontSize))) : defaultAppearance.editorFontSize,
+    paperGrid: typeof a.paperGrid === "boolean" ? a.paperGrid : defaultAppearance.paperGrid,
   };
 }
 
@@ -221,6 +227,7 @@ function normalizeShortcuts(shortcuts?: Partial<ShortcutConfig>) {
   const loaded = {
     toggleWindow: shortcuts?.toggleWindow ?? defaults.toggleWindow,
     newNote: shortcuts?.newNote ?? defaults.newNote,
+    quickCapture: shortcuts?.quickCapture ?? defaults.quickCapture,
   };
 
   if (isMacPlatform()) {
@@ -230,11 +237,15 @@ function normalizeShortcuts(shortcuts?: Partial<ShortcutConfig>) {
     if (loaded.newNote === windowsDefaultShortcuts.newNote) {
       loaded.newNote = defaults.newNote;
     }
+    if (loaded.quickCapture === windowsDefaultShortcuts.quickCapture) {
+      loaded.quickCapture = defaults.quickCapture;
+    }
   }
 
   return {
     toggleWindow: normalizeShortcut(loaded.toggleWindow),
     newNote: normalizeShortcut(loaded.newNote),
+    quickCapture: normalizeShortcut(loaded.quickCapture),
   };
 }
 

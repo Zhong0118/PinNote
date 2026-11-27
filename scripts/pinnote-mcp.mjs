@@ -12,7 +12,7 @@ const str={type:'string'}, num={type:'integer'};
 const tools=[
   ['search_notes','Search note titles and content',{query:str},[]],
   ['read_note','Read a note including its revision',{id:str},['id']],
-  ['create_note','Create in the center; does not open a window',{title:str,content:str},['content']],
+  ['create_note','Create a note in center or on desktop; supports optional tags and theme',{title:str,content:str,tags:{type:'array',items:str},theme:str,placement:{type:'string',enum:['center','desktop']}},['content']],
   ['append_note','Append text with optimistic version check',{id:str,content:str,expectedRevision:num},['id','content','expectedRevision']],
   ['update_note','Update title or content, preserving a recoverable version',{id:str,title:str,content:str,expectedRevision:num},['id','expectedRevision']],
   ...['archive','trash','restore'].map(op=>[`${op}_note`,`${op} a note with version check`,{id:str,expectedRevision:num},['id','expectedRevision']]),

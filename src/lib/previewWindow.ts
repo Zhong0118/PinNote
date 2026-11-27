@@ -3,15 +3,28 @@ import { emitTo } from '@tauri-apps/api/event';
 import { getCurrentWindow, availableMonitors, LogicalPosition, PhysicalPosition } from '@tauri-apps/api/window';
 import { isMacPlatform } from './settings';
 import { perfCount } from './perf';
-import { checklistProgress } from './checklist';
+import { checklistProgress, extractCodeBlocks, listTasks, type ChecklistItem, type CodeBlock } from './checklist';
 import { plainExcerpt } from './excerpt';
+import { displayTitle, noteDot } from './noteAppearance';
 import { fitBounds, normalizeBounds, normalizeDisplays } from './windowGeometry';
 import type { PinNote } from './notesStore';
 
 /** One hover preview window is shared by every capsule and tab and reused. */
 export const PREVIEW_LABEL = 'preview-shared';
-export const PREVIEW_SIZE = { width: 320, height: 240 };
-export type PreviewSummary = { id: string; title: string; excerpt: string; done: number; total: number; reminderAt?: number; side: 'left' | 'right' | 'none'; seq: number };
+export const PREVIEW_SIZE = { width: 326, height: 276 };
+export type PreviewSummary = {
+  id: string;
+  title: string;
+  excerpt: string;
+  done: number;
+  total: number;
+  tasks: ChecklistItem[];
+  codeBlocks: CodeBlock[];
+  accent: string;
+  reminderAt?: number;
+  side: 'left' | 'right' | 'none';
+  seq: number;
+};
 
 let creating: Promise<WebviewWindow> | undefined;
 async function previewWindow() {
@@ -43,8 +56,22 @@ export async function showPreview(note: PinNote) {
   const win = await previewWindow();
   if (id !== seq) return; // a newer hover took over while the window was being created
   const tasks = checklistProgress(note.content);
-  const summary: PreviewSummary = { id: note.id, title: note.title, excerpt: plainExcerpt(note.content, 600, { title: note.title, code: false }).replace(/\n{2,}/g, '\n'), done: tasks.done, total: tasks.total,
-    reminderAt: note.reminder?.at, side: note.window.edge?.side ?? 'none', seq: id };
+  const allTasks = listTasks(note.content);
+  const orderedTasks = [...allTasks.filter(t => !t.checked), ...allTasks.filter(t => t.checked)].slice(0, 5);
+  const codeBlocks = extractCodeBlocks(note.content).slice(0, 2);
+  const summary: PreviewSummary = {
+    id: note.id,
+    title: displayTitle(note.title, note.content),
+    excerpt: plainExcerpt(note.content, 600, { title: note.title, code: false }).replace(/\n{2,}/g, '\n'),
+    done: tasks.done,
+    total: tasks.total,
+    tasks: orderedTasks,
+    codeBlocks,
+    accent: noteDot(note.theme, note.customColor),
+    reminderAt: note.reminder?.at,
+    side: note.window.edge?.side ?? 'none',
+    seq: id,
+  };
   await emitTo(PREVIEW_LABEL, 'preview-show', summary);
   await win.setPosition(isMacPlatform() ? new LogicalPosition(target.x,target.y) : new PhysicalPosition(target.x,target.y));
   await win.show(); // Deliberately never setFocus or use openNoteWindow here.

@@ -49,13 +49,19 @@ function loadPlatform(platform, savedSettings = null, native = {}) {
 }
 
 for (const [platform, alt, modifier, defaults] of [
-  ['Win32', 'Alt', 'CTRL', ['Alt+N', 'Alt+Shift+N']],
-  ['MacIntel', 'Option', 'CMD', ['CmdOrCtrl+Option+N', 'CmdOrCtrl+Option+Shift+N']],
+  ['Win32', 'Alt', 'CTRL', ['Alt+N', 'Alt+Shift+N', 'Alt+Shift+Space']],
+  ['MacIntel', 'Option', 'CMD', ['CmdOrCtrl+Option+N', 'CmdOrCtrl+Option+Shift+N', 'CmdOrCtrl+Option+Space']],
 ]) {
   test(`${platform}: fresh settings use platform defaults and independent objects`, async () => {
     const { settings } = loadPlatform(platform);
     const fresh = await settings.loadSettings();
     assert.deepEqual(Object.values(fresh.shortcuts), defaults);
+    assert.equal(fresh.appearance.celebrate, true);
+    assert.equal(fresh.appearance.glass, 60);
+    assert.equal(fresh.appearance.paperGrid, true);
+    assert.equal(settings.normalizeAppearance({ glass: false, celebrate: false, paperGrid: false }).glass, 0);
+    assert.equal(settings.normalizeAppearance({ glass: false, celebrate: false, paperGrid: false }).celebrate, false);
+    assert.equal(settings.normalizeAppearance({ glass: false, celebrate: false, paperGrid: false }).paperGrid, false);
     fresh.shortcuts.toggleWindow = 'Ctrl+X';
     fresh.defaultNote.opacity = 0.5;
     const next = settings.createDefaultSettings();

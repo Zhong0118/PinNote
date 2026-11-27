@@ -47,15 +47,44 @@
    }catch(e){status=`未恢复：${e}`;}
    finally{busy=false;}
  }
+  async function copyMcpConfig() {
+    const snippet = JSON.stringify({
+      mcpServers: {
+        pinnote: {
+          command: 'node',
+          args: ['scripts/pinnote-mcp.mjs', settings.connectionFile],
+        },
+      },
+    }, null, 2);
+    try {
+      await navigator.clipboard.writeText(snippet);
+      status = '已复制 MCP 配置 JSON（将 scripts/pinnote-mcp.mjs 替换为实际脚本路径即可使用）';
+    } catch {
+      status = '复制失败，请手动复制下方连接文件路径';
+    }
+  }
+  async function copyConnectionPath() {
+    try {
+      await navigator.clipboard.writeText(settings.connectionFile);
+      status = '已复制连接文件路径';
+    } catch {
+      status = '复制失败，请手动选中路径';
+    }
+  }
 </script>
 <section>
  <label class="row"><span>启用本地 MCP</span><input type="checkbox" role="switch" bind:checked={settings.enabled} onchange={save}/></label>
- <label class="row"><span>允许 agent 修改便签</span><input type="checkbox" role="switch" bind:checked={settings.write} onchange={save}/></label>
+ <label class="row"><span>允许客户端修改便签</span><input type="checkbox" role="switch" bind:checked={settings.write} onchange={save}/></label>
  <label class="row"><span>读写范围</span><select bind:value={settings.scope} onchange={save}><option value="active">普通便签</option><option value="all">全部（含归档与回收站）</option></select></label>
  <p class="state" class:on={settings.enabled&&settings.listening}><i></i>{settings.enabled&&settings.listening?'本机连接已就绪':'集成已关闭'}{settings.lastConnectedAt?` · 最近连接 ${new Date(settings.lastConnectedAt).toLocaleString()}`:''}</p>
- <p>应用必须保持运行（可在托盘）。客户端使用 Node.js 启动 scripts/pinnote-mcp.mjs，连接文件：</p><code>{settings.connectionFile}</code>
- <p>新建内容默认留在中心；修改需要当前版本，未保存草稿会阻止 agent 写入。最多保留最近 100 次可恢复操作。</p>
- <h3>agent 修改记录</h3>
+ <p>连接时请保持驻墨运行，可收进托盘。客户端通过 Node.js 运行脚本 <code>scripts/pinnote-mcp.mjs</code></p>
+ <code>{settings.connectionFile}</code>
+ <div class="copy-actions">
+   <button type="button" class="copy-button" onclick={() => void copyMcpConfig()}>复制 MCP 配置</button>
+   <button type="button" class="copy-button secondary" onclick={() => void copyConnectionPath()}>复制连接文件路径</button>
+ </div>
+ <p>客户端可用标签和颜色新建便签，也可直接放到桌面。修改需要当前版本，便签有未保存的草稿时不能写入。最多保留 100 条可恢复记录。</p>
+ <h3>客户端修改记录</h3>
  {#each history as item(item.at)}
    {@const latest=isLatest(item)}
    <div class="change"><span>{item.note.title||'未命名便签'}<small>{new Date(item.at).toLocaleString()} · {item.source==='agent'?'agent ':''}{opLabel[item.op]??item.op}</small></span>
@@ -67,12 +96,14 @@
  h3{font-size:13px;font-weight:600;margin:24px 0 6px;color:var(--text-strong)}
  .row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--hairline);font-size:13px}
  p,small{font-size:12px;color:var(--muted)}code{font-size:11px;overflow-wrap:anywhere;color:var(--text)}
- .state{display:flex;align-items:center;gap:6px}.state i{width:7px;height:7px;border-radius:50%;background:var(--subtle)}.state.on i{background:#22c55e}
- select{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 6px;background:var(--surface-raised);color:var(--text)}
+ .state{display:flex;align-items:center;gap:6px}.state i{width:7px;height:7px;background:var(--subtle)}.state.on i{background:var(--accent)}
+ select{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:var(--px-radius);padding:4px 6px;background:var(--surface-raised);color:var(--text)}
  button{font:inherit;font-size:12px;border:0;border-radius:var(--radius-sm);padding:5px 9px;background:transparent;color:var(--accent);cursor:pointer;transition:background var(--motion-fast),transform var(--motion-fast);flex:0 0 auto}
  button:hover{background:var(--accent-soft)}button:active{transform:scale(.97)}button:disabled{opacity:.5;cursor:wait}
  .change{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--hairline);font-size:13px}small{display:block}
- input[type="checkbox"][role="switch"]{appearance:none;flex:0 0 auto;width:32px;height:19px;border-radius:999px;background:var(--hover-strong);position:relative;cursor:pointer;transition:background var(--motion-fast);margin:0}
- input[type="checkbox"][role="switch"]::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0000003d;transition:transform var(--motion-fast)}
- input[type="checkbox"][role="switch"]:checked{background:var(--accent)}input[type="checkbox"][role="switch"]:checked::after{transform:translateX(13px)}
+ .copy-actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+ .copy-button{background:var(--px-selected);color:var(--accent);border-radius:var(--px-radius);padding:6px 11px;font-weight:500;box-shadow:inset 0 0 0 1px var(--border),var(--px-shadow)}
+ .copy-button:hover{background:var(--accent-soft-strong)}
+ .copy-button.secondary{background:var(--surface-raised);color:var(--text)}
+ .copy-button.secondary:hover{background:var(--hover-strong)}
 </style>

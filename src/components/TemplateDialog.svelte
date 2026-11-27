@@ -205,17 +205,20 @@
     position: fixed;
     top: 43px;
     right: 10px;
-    z-index: 100;
-    width: min(220px, calc(100vw - 16px));
+    z-index: 140;
+    width: min(236px, calc(100vw - 16px));
     max-height: min(380px, calc(100vh - 51px));
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: var(--radius-lg);
     overflow: hidden;
     color: var(--text);
-    background: var(--surface-raised);
-    box-shadow: var(--menu-shadow);
+    background: var(--material);
+    -webkit-backdrop-filter: var(--material-blur);
+    backdrop-filter: var(--material-blur);
+    box-shadow: var(--material-shadow);
+    transform-origin: top right;
   }
 
   header,
@@ -223,8 +226,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px;
-    background: var(--surface-raised);
+    padding: 7px 10px;
+    background: transparent;
     flex: 0 0 auto;
   }
 
@@ -276,8 +279,8 @@
     place-items: center;
     width: 26px;
     height: 26px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    border: 0;
+    border-radius: 50%;
     padding: 0;
     color: var(--muted);
     background: transparent;
@@ -285,9 +288,8 @@
 
   .icon-btn:hover,
   .delete-btn:hover {
-    border-color: var(--border);
     color: var(--text);
-    background: var(--hover);
+    background: var(--hover-strong);
   }
 
   .template-list {

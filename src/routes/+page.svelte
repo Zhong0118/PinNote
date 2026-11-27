@@ -7,9 +7,10 @@
   import { releaseCenterEditor } from '$lib/editorHandoff';
   import { animateWindow, prefersReducedMotion, type Curve } from '$lib/nativeMotion';
   import { showPreview } from '$lib/previewWindow';
+  import { openQuickCapture } from '$lib/quickWindow';
   import { openCenter } from '$lib/centerWindow';
   import ReminderDialog from '../components/ReminderDialog.svelte';
-  import { checklistProgress } from '$lib/checklist';
+  import { checklistProgress, extractOpenTasks, moveCompletedToBottom } from '$lib/checklist';
   let reminderOpen = $state(false);
   import { invoke } from "@tauri-apps/api/core";
   import { save } from "@tauri-apps/plugin-dialog";
@@ -19,24 +20,24 @@
   import { onMount, tick } from "svelte";
   import MilkdownEditor from "../components/MilkdownEditor.svelte";
   import SourceEditor from "../components/SourceEditor.svelte";
-  import NoteListPopover, { type NoteListItem } from "../components/NoteListPopover.svelte";
   import TemplateDialog from "../components/TemplateDialog.svelte";
   import WindowChrome from "../components/WindowChrome.svelte";
   import { defaultMarkdownFilename } from "$lib/filename";
   import {
     defaultSettings,
     loadSettings,
+    saveSettings,
     normalizeShortcut,
     isMacPlatform,
     type AppSettings,
   } from "$lib/settings";
   import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "$lib/shortcuts";
   import { openColorMenu } from "$lib/colorMenu";
-  import { onAppearance } from "$lib/theme";
+  import { applyAppearance, applyWindowGlass, effectiveGlass, onAppearance } from "$lib/theme";
+  import { displayTitle } from "$lib/noteAppearance";
   import type { NoteTemplate } from "$lib/templates";
   import {
     createNote,
-    deleteNoteNow,
     flushNoteSave,
     getRecentNote,
     loadNotes,
@@ -76,7 +77,6 @@
   let overflowHidden = false;
   let locating=$state(false);
   let locateTimer:ReturnType<typeof setTimeout>;
-  let undoId = $state('');
   let geometryRevision = 0;
   let note = $state<PinNote>(createNote());
   const progress = $derived(checklistProgress(note.content));
@@ -84,18 +84,25 @@
   let globalSettings = $state<AppSettings>({ ...defaultSettings });
   let status = $state("正在加载…");
   let ready = $state(false);
+  let revealed = $state(false);
   let settingsReady = $state(false);
   let editorRevision = $state(0);
   let requestedShortcuts = "";
   let visibilityChange = Promise.resolve();
-  let notesOpen = $state(false);
-  let noteListItems = $state<NoteListItem[]>([]);
   let templatesOpen = $state(false);
   let isMainWindow = false;
   let isDeleting = false;
   let windowStateTimer: ReturnType<typeof setTimeout>;
   let initialization: Promise<void>;
   let editor = $state<MilkdownEditor>();
+  let sourceEditor = $state<SourceEditor>();
+  let glassLevel = $state(0);
+  let windowFocused = $state(true);
+  let pointerInside = $state(false);
+  let ghost = $state(false);
+  const mac = isMacPlatform();
+  const glass = $derived(mac && glassLevel > 0);
+  const faded = $derived(Boolean(!ghost && globalSettings.behavior.fadeOnBlur && !note.window.collapsed && !windowFocused && !pointerInside && !reminderOpen && !templatesOpen));
   // Draft safety: a version conflict with a change made elsewhere, or the last failed save.
   let conflict = $state(false);
   let saveError = $state("");
@@ -142,11 +149,15 @@
       ready = true;
       // Place a docked tab in its slot before the first paint instead of jumping after it.
       await layoutEdges(false);
-      if ((!isMainWindow || !(await invoke<boolean>("startup_hidden"))) && !overflowHidden) await win.show();
+      if ((!isMainWindow || !(await invoke<boolean>("startup_hidden"))) && !overflowHidden) {
+        await win.show();
+        revealed = true;
+      }
     });
     void initialization.catch(async (error) => {
       status = `加载失败，原数据已保留：${String(error)}`;
       await win.show();
+      revealed = true;
     });
 
     loadSettings().then((next) => {
@@ -199,6 +210,7 @@
     const scalePromise = win.onScaleChanged(scheduleWindowCapture);
     const resizedPromise = win.onResized(scheduleWindowCapture);
     const focusPromise = win.onFocusChanged(({ payload }) => {
+      windowFocused = payload;
       if (payload && ready && !isDeleting) void markNoteActive(note).catch(() => { status = "保存失败，请重试"; });
     });
     const closePromise = win.onCloseRequested(async (event) => {
@@ -238,7 +250,6 @@
           }
         }
       }
-      if(notesOpen) await refreshNoteList();
       if(payload.layout) await layoutEdges();
     });
     // One poller in the center reports display changes to every note window.
@@ -258,12 +269,37 @@
     const locate=listen<{id:string}>('locate-note-requested',async({payload})=>{
       if(payload.id!==note.id||!ready)return;
       try{
+        if(ghost) await toggleGhost(false);
         await modeChange;
         if(note.window.collapsed)await changeWindowMode();
         await getCurrentWindow().show();await getCurrentWindow().setFocus();
         locating=true;clearTimeout(locateTimer);locateTimer=setTimeout(()=>locating=false,2200);
       }catch(error){status=`定位失败：${error}`;}
     });
+    const ghostChanged = listen<{ id: string; ghost: boolean }>('ghost-changed', ({ payload }) => {
+      if (payload.id === '*' || payload.id === note.id) {
+        ghost = payload.ghost;
+        if (!payload.ghost) status = '已退出穿透参考模式';
+      }
+    });
+    const reminderDueListener = listen<{ note: PinNote }>('reminder-due', async ({ payload }) => {
+      if (payload.note.id !== note.id || !ready) return;
+      note = { ...note, reminder: payload.note.reminder };
+      if (!note.window.collapsed) {
+        locating = true;
+        clearTimeout(locateTimer);
+        locateTimer = setTimeout(() => (locating = false), 2200);
+      }
+      status = '提醒到期';
+    });
+    const dockRequest = listen<{ id: string; side: 'left' | 'right' }>('dock-note-requested', ({ payload }) => {
+      if (payload.id !== note.id || !ready || isDeleting) return;
+      void dockToEdge(payload.side);
+    }, { target: win.label });
+    const arrangeRequest = listen<{ id: string; bounds: Bounds }>('arrange-note-requested', ({ payload }) => {
+      if (payload.id !== note.id || !ready || isDeleting) return;
+      void arrangeTo(payload.bounds);
+    }, { target: win.label });
     async function prepareToQuit(attempt: number) {
       if (!quitGuard.begin(attempt)) return;
       document.body.inert = true;
@@ -303,6 +339,7 @@
       clearTimeout(windowStateTimer);
       clearTimeout(previewTimer); changes.then(f=>f()); expand.then(f=>f()); collapseRequest.then(f=>f()); perfHover.then(f=>f());
       clearTimeout(locateTimer);locate.then(f=>f());
+      reminderDueListener.then(f => f()); dockRequest.then(f => f()); arrangeRequest.then(f => f()); ghostChanged.then(f => f());
       clearTimeout(releaseTimer); displaysChanged.then(f=>f());
       if (isMainWindow) void unregisterGlobalShortcuts();
       quitPromise.then((fn) => fn());
@@ -328,10 +365,18 @@
   });
   // Native shadow for "standard"; edge tabs sit flush on the screen edge and keep none.
   let noteShadow = $state<"off" | "light" | "standard">("standard");
-  $effect(() => onAppearance(a => { noteShadow = a.noteShadow; }));
+  $effect(() => onAppearance(a => { noteShadow = a.noteShadow; glassLevel = effectiveGlass(a); }));
   $effect(() => {
     const native = noteShadow === "standard" && !(note.window.collapsed && note.window.edge);
     if (ready) void getCurrentWindow().setShadow(native).catch(() => undefined);
+  });
+  // macOS frosted glass behind expanded notes (12px radius) and free capsules (20px pill);
+  // asymmetric edge-flush tabs stay without symmetric native corner clipping.
+  $effect(() => {
+    if (!ready || transitioning) return;
+    const isEdgeTab = Boolean(note.window.collapsed && note.window.edge);
+    const on = glass && !isEdgeTab;
+    void applyWindowGlass(on, note.window.collapsed ? 20 : 12);
   });
 
   async function registerShortcuts() {
@@ -345,6 +390,9 @@
       },
       newNote: () => {
         void createNewNoteWindow();
+      },
+      quickCapture: () => {
+        void openQuickCapture();
       },
     });
     if (result.cancelled) return;
@@ -428,6 +476,7 @@
       if(target)await setWindowBounds(target.bounds,true);
     }
     await getCurrentWindow().show();
+    revealed = true;
   }
 
   async function showAllNotes(file: Awaited<ReturnType<typeof loadNotes>>) {
@@ -480,71 +529,6 @@
   async function openNoteList() {
     await saveBeforeWindowAction();
     await openCenter();
-  }
-
-  async function refreshNoteList() {
-    const file = await loadNotes();
-    const visibleIds = new Set((await getVisibleNoteWindows(file)).map((item) => item.id));
-    noteListItems = Object.values(file.notes)
-      .sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)
-      .map((item) => ({
-        id: item.id,
-        title: item.title,
-        content: item.content,
-        lifecycle: item.lifecycle,
-        visible: visibleIds.has(item.id),
-        current: item.id === note.id,
-        updatedAt: item.updatedAt,
-      }));
-  }
-
-  async function showNoteById(id: string) {
-    const file = await loadNotes();
-    const target = file.notes[id];
-    if (!target) {
-      await refreshNoteList();
-      return;
-    }
-
-    if (target.id === note.id && getCurrentWindow().label === (isMainWindow ? "main" : noteWindowLabel(note.id))) {
-      await showCurrentNote();
-      await getCurrentWindow().setFocus();
-    } else {
-      await openNoteWindow(target);
-    }
-
-    await refreshNoteList();
-  }
-
-  async function hideNoteById(id: string) {
-    if (id === note.id) {
-      await closeCurrentNote();
-    } else {
-      const win = await findNoteWindow(id);
-      if (win) await requestWindowVisibility(win.label, false);
-    }
-    await refreshNoteList();
-  }
-
-  async function deleteNoteById(id: string) {
-    const target = noteListItems.find((item) => item.id === id);
-    const title = target?.title?.trim() || "未命名便签";
-    undoId = id;
-
-    if (id === note.id) {
-      await deleteCurrentNote(false);
-      return;
-    }
-
-    const win = await findNoteWindow(id);
-    if (win) {
-      await emit("delete-note-requested", { id });
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    } else {
-      await deleteNoteNow(id);
-    }
-
-    await refreshNoteList();
   }
 
   // A collapsed note is only an entry point: it writes geometry, never the body.
@@ -620,6 +604,86 @@
     if (note.alwaysOnTop === next) status = next ? "已置顶" : "已取消置顶";
   }
 
+  async function toggleGhost(next = !ghost) {
+    if (!ready || isDeleting || note.window.collapsed) return;
+    try {
+      if (next && !note.alwaysOnTop) {
+        await changeAppearance({ alwaysOnTop: true });
+      }
+      await invoke("set_window_ghost", { enabled: next });
+      ghost = next;
+      status = next ? "已进入穿透参考模式 · 可从托盘或便签中心恢复" : "已退出穿透参考模式";
+    } catch (error) {
+      status = `穿透模式切换失败：${errorText(error)}`;
+    }
+  }
+
+  async function copyContent() {
+    editor?.flush();
+    try {
+      await navigator.clipboard.writeText(note.content);
+      status = "已复制正文";
+    } catch {
+      status = "复制失败，请检查剪贴板权限";
+    }
+  }
+
+  function tomorrowMorning() {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(9, 0, 0, 0);
+    return d.getTime();
+  }
+
+  async function snoozeReminder(at: number | null) {
+    try {
+      await saveBeforeWindowAction();
+      const current = (await loadNotes()).notes[note.id];
+      if (!current) return;
+      const updated = await noteOperation(current, 'reminder', { at });
+      note = { ...note, reminder: updated?.reminder ?? null };
+      status = at == null ? "已关闭提醒" : `已推迟到 ${shortTime(at)}`;
+    } catch (error) {
+      status = `提醒更新失败：${errorText(error)}`;
+    }
+  }
+
+  async function arrangeTo(bounds: Bounds) {
+    try {
+      await modeChange;
+      if (!ready || isDeleting) return;
+      transitioning = true;
+      hoverPreview(false);
+      geometryRevision += 1;
+      clearTimeout(windowStateTimer);
+      editor?.flush();
+      const wasCollapsed = Boolean(note.window.collapsed);
+      if (wasCollapsed) {
+        await releaseCenterEditor(note.id);
+        const fresh = (await loadNotes()).notes[note.id];
+        if (fresh && (fresh.content !== note.content || fresh.title !== note.title || fresh.revision > note.revision)) {
+          const contentChanged = fresh.content !== note.content;
+          note = { ...fresh, window: note.window };
+          if (contentChanged) editorRevision++;
+        }
+        keepEditor();
+      }
+      edgeOverflow = 0;
+      overflowHidden = false;
+      const nextWin = { ...rememberBounds({ ...note.window, collapsed: false, edge: null }, bounds), collapsed: false, edge: null };
+      note = { ...note, window: nextWin };
+      await tick();
+      await getCurrentWindow().show();
+      revealed = true;
+      await setWindowBounds(bounds, false, !reducedMotion(), "inOut", 240);
+      transitioning = false;
+      await saveNoteNow(note, "window");
+    } catch (error) {
+      transitioning = false;
+      status = `排列失败：${errorText(error)}`;
+    }
+  }
+
   async function exportMarkdown() {
     editor?.flush();
     await flushNoteSave(note.id).catch(() => {
@@ -655,6 +719,7 @@
     let frozen = false;
     try {
       if (isDeleting || !ready || document.body.inert) return false;
+      if (ghost) await toggleGhost(false);
       document.body.inert = true; frozen = true;
       await saveBeforeWindowAction();
       await markNoteClosed(note);
@@ -711,6 +776,7 @@
   /** Dragging off the edge is the only way to leave a slot; a tab becomes a free capsule. */
   async function undock(bounds: Bounds, displays: Display[]) {
     let target = bounds;
+    edgeOverflow = 0;
     if (note.window.collapsed && note.window.edge) {
       const fromRight = note.window.edge.side === 'right';
       target = fitBounds({ ...bounds, ...CAPSULE, x: fromRight ? bounds.x + bounds.width * bounds.scaleFactor - CAPSULE.width * bounds.scaleFactor : bounds.x }, displays, bounds);
@@ -769,21 +835,93 @@
     sourceMode = !sourceMode;
   }
 
+  function handleMoveCompletedBottom() {
+    if (sourceMode) {
+      const next = moveCompletedToBottom(note.content);
+      if (next !== note.content) {
+        updateContent(next);
+        status = "已完成项已移至底部";
+      }
+      return;
+    }
+    editor?.moveCompletedBottom();
+    status = "已完成项已移至底部 · 可撤销";
+  }
+
+  async function rolloverOpenTasks() {
+    editor?.flush();
+    const { openMarkdown, count } = extractOpenTasks(note.content);
+    if (!count) { status = "没有未完成待办"; return; }
+    await saveBeforeWindowAction();
+    const next = createNote({
+      title: `${displayTitle(note.title, note.content)} · 续`,
+      content: openMarkdown,
+      placement: 'desktop',
+      theme: note.theme,
+      customColor: note.customColor,
+      opacity: note.opacity,
+      alwaysOnTop: note.alwaysOnTop,
+      window: {
+        ...note.window,
+        collapsed: false,
+        edge: null,
+        capsulePosition: undefined,
+        position: note.window.position ? { x: note.window.position.x + 24, y: note.window.position.y + 24 } : undefined,
+        x: note.window.x == null ? undefined : note.window.x + 24,
+        y: note.window.y == null ? undefined : note.window.y + 24,
+      },
+    });
+    await saveNoteNow(next);
+    if (!document.body.inert) await openNoteWindow(next);
+    status = `已将 ${count} 条未完成待办转到新便签`;
+  }
+
+  async function adjustFontSize(delta: number | 'reset') {
+    const current = globalSettings.appearance.editorFontSize ?? 14;
+    const nextSize = delta === 'reset' ? 14 : Math.min(20, Math.max(12, current + delta));
+    if (nextSize === current) { status = `字号 ${nextSize}px`; return; }
+    const nextSettings: AppSettings = { ...globalSettings, appearance: { ...globalSettings.appearance, editorFontSize: nextSize } };
+    globalSettings = nextSettings;
+    applyAppearance(nextSettings.appearance);
+    status = `字号 ${nextSize}px`;
+    try {
+      await emit('appearance-preview', nextSettings.appearance);
+      if (await saveSettings(nextSettings) === 'saved') await emit('settings-changed', nextSettings);
+    } catch { /* keep local preview */ }
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if (!ready || document.body.inert) return;
     if (event.isComposing || event.keyCode === 229 || event.repeat) return;
     const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
 
-    if (mod && event.key === "s") {
+    if (mod && key === "f") {
+      event.preventDefault();
+      if (sourceMode) sourceEditor?.openFind();
+      else editor?.openFind();
+    } else if (mod && (key === "=" || key === "+")) {
+      event.preventDefault();
+      void adjustFontSize(1);
+    } else if (mod && key === "-") {
+      event.preventDefault();
+      void adjustFontSize(-1);
+    } else if (mod && key === "0") {
+      event.preventDefault();
+      void adjustFontSize('reset');
+    } else if (mod && key === "s") {
       event.preventDefault();
       exportMarkdown();
-    } else if (mod && event.key === "t") {
+    } else if (mod && key === "t") {
       event.preventDefault();
       togglePin();
-    } else if (mod && event.key === ",") {
+    } else if (mod && event.shiftKey && key === "g") {
+      event.preventDefault();
+      void toggleGhost();
+    } else if (mod && key === ",") {
       event.preventDefault();
       openCurrentSettings();
-    } else if (mod && event.key === "/") {
+    } else if (mod && key === "/") {
       event.preventDefault();
       toggleSource();
     }
@@ -844,7 +982,6 @@
     hoverPreview(false);
     geometryRevision += 1;
     clearTimeout(windowStateTimer);
-    notesOpen = false;
     templatesOpen = false;
     editor?.flush();
     const previous = note.window;
@@ -919,12 +1056,18 @@
 
   let colorInput = $state<HTMLInputElement>();
   /** Appearance is a note property: optimistic locally, rolled back if the save fails. */
-  async function changeAppearance(patch: Partial<Pick<PinNote, "theme" | "customColor" | "alwaysOnTop">>) {
-    const previous = { theme: note.theme, customColor: note.customColor, alwaysOnTop: note.alwaysOnTop };
+  async function changeAppearance(patch: Partial<Pick<PinNote, "theme" | "customColor" | "alwaysOnTop" | "opacity">>) {
+    const previous = { theme: note.theme, customColor: note.customColor, alwaysOnTop: note.alwaysOnTop, opacity: note.opacity };
     const base = { ...note };
     note = { ...note, ...patch };
     try { await noteOperation(base, "appearance", { patch }); }
     catch (error) { note = { ...note, ...previous }; status = `保存失败：${error}`; }
+  }
+  function updateOpacity(value: number, commit: boolean) {
+    const clamped = Math.round(Math.min(1, Math.max(0.6, value)) * 100) / 100;
+    note = { ...note, opacity: clamped };
+    status = `不透明度 ${Math.round(clamped * 100)}%`;
+    if (commit) void changeAppearance({ opacity: clamped });
   }
   function pickColor() {
     void openColorMenu(note.theme, note.customColor, (theme) => {
@@ -934,8 +1077,7 @@
   }
 
   function scheduleWindowCapture() {
-    if (!ready || isDeleting || transitioning || layingOut) return;
-    if(dragging) { void readWindowBounds().then(async b => { edgeHint = globalSettings.behavior.edgeSnap && edgeTarget(b, normalizeDisplays(await availableMonitors(), isMacPlatform())) ? '松手贴边' : ''; }); return; }
+    if (!ready || isDeleting || transitioning || layingOut || dragging) return;
     clearTimeout(windowStateTimer);
     windowStateTimer = setTimeout(() => void captureWindowState().catch(() => { status = "窗口位置保存失败，请重试"; }), 150);
   }
@@ -962,7 +1104,7 @@
   }
 
   function shortcutSignature(shortcuts: AppSettings["shortcuts"]) {
-    return `${normalizeShortcut(shortcuts.toggleWindow)}\n${normalizeShortcut(shortcuts.newNote)}`;
+    return `${normalizeShortcut(shortcuts.toggleWindow)}\n${normalizeShortcut(shortcuts.newNote)}\n${normalizeShortcut(shortcuts.quickCapture)}`;
   }
   async function layoutEdges(animate = true) {
     if (!ready || dragging || transitioning || !note.window.collapsed || !note.window.edge) return;
@@ -1005,13 +1147,11 @@
         await openCenter();
         if(id === note.id) { isDeleting = true; await getCurrentWindow().destroy().catch(()=>{}); }
       }
-      if(op === 'trash' || op === 'archive') undoId = id;
-      await refreshNoteList();
     } catch(error) { status = String(error); }
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} onpointerenter={() => (pointerInside = true)} onpointerleave={() => (pointerInside = false)} />
 
 <svelte:head>
   <meta name="description" content="PinNote Markdown sticky note" />
@@ -1019,6 +1159,10 @@
 
 <WindowChrome
   disabled={!ready}
+  {revealed}
+  {glass}
+  {faded}
+  {ghost}
   collapsed={Boolean(note.window.collapsed)}
   dockedSide={note.window.edge?.side}
   {freeze}
@@ -1027,27 +1171,34 @@
   onToggleCollapsed={toggleCollapsed}
   {edgeHint}
   {edgeOverflow}
+  taskProgress={progress}
+  reminderDue={note.reminder?.state === 'delivered'}
   {locating}
   onDock={side=>void dockToEdge(side)}
+  onGhost={!note.window.collapsed ? () => void toggleGhost() : undefined}
   onHover={hoverPreview}
   onArchive={() => lifecycle(note.id,'archive')}
   onReturn={() => lifecycle(note.id,'center')}
   onReminder={() => reminderOpen=true}
+  onMoveCompletedBottom={progress.done > 0 && progress.done < progress.total ? handleMoveCompletedBottom : undefined}
+  onRolloverTasks={progress.total - progress.done > 0 ? () => void rolloverOpenTasks() : undefined}
   onClearCompleted={!sourceMode && progress.done>0 ? () => editor?.clearCompleted() : undefined}
   onNewNote={createNewNoteWindow}
   title={note.title}
+  displayHeading={displayTitle(note.title, note.content)}
   {status}
   {sourceMode}
   settings={noteSettings}
   onTitleChange={updateTitle}
+  onOpacityChange={updateOpacity}
   onTogglePin={togglePin}
   onToggleSource={toggleSource}
   onOpenNotes={openNoteList}
   onOpenTemplates={() => {
     editor?.flush();
-    notesOpen = false;
     templatesOpen = true;
   }}
+  onCopy={copyContent}
   onExport={exportMarkdown}
   onPickColor={pickColor}
   onDelete={deleteCurrentNote}
@@ -1057,31 +1208,31 @@
 >
   {#if ready && editorAlive}
     {#if !note.window.collapsed}<DraftBanner compact {conflict} error={saveError} busy={resolving} onKeepMine={() => void keepMine()} onTakeTheirs={() => void takeTheirs()} onRetry={() => void retrySave()} />{/if}
-    {#if note.reminder}<button class="reminder-tag" onclick={()=>reminderOpen=true}>{note.reminder.state==='delivered'?'已提醒 · ':''}{shortTime(note.reminder.at)}</button>{/if}
+    {#if note.reminder?.state === 'delivered'}
+      <div class="reminder-due-bar" role="status">
+        <button class="due-label" onclick={() => (reminderOpen = true)}>提醒到期 · {shortTime(note.reminder.at)}</button>
+        <div class="due-actions">
+          <button onclick={() => void snoozeReminder(Date.now() + 10 * 60000)}>+10分</button>
+          <button onclick={() => void snoozeReminder(Date.now() + 3600000)}>+1时</button>
+          <button onclick={() => void snoozeReminder(tomorrowMorning())}>明天</button>
+          <button class="dismiss" onclick={() => void snoozeReminder(null)}>知道了</button>
+        </div>
+      </div>
+    {:else if note.reminder}
+      <button class="reminder-tag" onclick={()=>reminderOpen=true}>{shortTime(note.reminder.at)}</button>
+    {/if}
     {#key `${note.id}-${editorRevision}`}
       {#if sourceMode}
-        <SourceEditor value={note.content} onChange={updateContent} />
+        <SourceEditor bind:this={sourceEditor} value={note.content} onChange={updateContent} />
       {:else}
-        <MilkdownEditor bind:this={editor} value={note.content} onChange={updateContent} onEdit={()=>markEdited(note.id)} onSettled={()=>markSettled(note.id)} onReminder={()=>reminderOpen=true}/>
+        <MilkdownEditor bind:this={editor} value={note.content} onChange={updateContent} onEdit={()=>markEdited(note.id)} onSettled={()=>markSettled(note.id)} onReminder={()=>reminderOpen=true} onArchive={()=>lifecycle(note.id,'archive')}/>
       {/if}
     {/key}
   {/if}
 </WindowChrome>
-{#if reminderOpen}<ReminderDialog currentAt={note.reminder?.at} onClose={()=>reminderOpen=false} onSet={async at=>{await saveBeforeWindowAction();const current=(await loadNotes()).notes[note.id];await noteOperation(current,'reminder',{at});note=current;}}/>{/if}
+{#if reminderOpen}<ReminderDialog currentAt={note.reminder?.at} onClose={()=>reminderOpen=false} onSet={async at=>{await saveBeforeWindowAction();const current=(await loadNotes()).notes[note.id];const updated=await noteOperation(current,'reminder',{at});note={...note,reminder:updated?.reminder??null};}}/>{/if}
 <input class="color-input" type="color" tabindex="-1" aria-hidden="true" bind:this={colorInput} value={note.customColor} onchange={e=>void changeAppearance({theme:'custom',customColor:e.currentTarget.value})}/>
-<style>.color-input{position:fixed;left:8px;top:8px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}.reminder-tag{align-self:flex-start;border:0;border-radius:999px;background:var(--pin-active);color:var(--pin-accent);font:inherit;font-size:11px;padding:2px 9px;margin:8px 14px 0;cursor:pointer;transition:background var(--motion-fast)}.reminder-tag:hover{background:color-mix(in srgb,var(--pin-accent) 18%,transparent)}.reminder-tag:focus-visible{outline:2px solid var(--pin-accent);outline-offset:1px}</style>
-
-<NoteListPopover
-  open={notesOpen}
-  items={noteListItems}
-  onShow={showNoteById}
-  onHide={hideNoteById}
-  onDelete={deleteNoteById}
-  onRefresh={refreshNoteList}
-  onClose={() => (notesOpen = false)}
-  onAction={lifecycle}
-  {undoId}
-/>
+<style>.color-input{position:fixed;left:8px;top:8px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}.reminder-tag{align-self:flex-start;border:0;border-radius:999px;background:var(--pin-active);color:var(--pin-accent);font:inherit;font-size:11px;padding:2px 9px;margin:8px 14px 0;cursor:pointer;transition:background var(--motion-fast)}.reminder-tag:hover{background:color-mix(in srgb,var(--pin-accent) 18%,transparent)}.reminder-tag:focus-visible{outline:2px solid var(--pin-accent);outline-offset:1px}.reminder-due-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;margin:8px 12px 0;padding:5px 8px;border-radius:var(--radius);background:var(--pin-active);color:var(--pin-accent);font-size:11px}.reminder-due-bar button{border:0;border-radius:var(--radius-sm);background:transparent;color:inherit;font:inherit;padding:2px 6px;cursor:pointer;transition:background var(--motion-fast),transform var(--motion-fast)}.reminder-due-bar button:hover{background:color-mix(in srgb,var(--pin-accent) 16%,transparent)}.reminder-due-bar button:active{transform:scale(.96)}.reminder-due-bar .due-label{font-weight:600;padding-left:2px}.reminder-due-bar .due-actions{display:flex;align-items:center;gap:2px}.reminder-due-bar .dismiss{color:var(--pin-muted)}</style>
 
 <TemplateDialog
   open={templatesOpen}

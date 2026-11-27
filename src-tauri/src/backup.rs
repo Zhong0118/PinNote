@@ -175,9 +175,10 @@ fn safe_relative(path: &str) -> Option<PathBuf> {
     ok.then(|| rel.to_path_buf())
 }
 
-/// Write the Markdown files the center prepared into a new folder inside `dir`.
+/// Write the Markdown files the center prepared into a new folder inside `dir`,
+/// copying any local `assets/<file>` images referenced by the notes alongside them.
 #[tauri::command]
-pub fn export_notes(dir: String, folder: String, files: Vec<Value>) -> Result<String, String> {
+pub fn export_notes(app: AppHandle, dir: String, folder: String, files: Vec<Value>) -> Result<String, String> {
     let name = safe_relative(&folder)
         .filter(|p| p.components().count() == 1)
         .ok_or("导出文件夹名无效")?;
@@ -189,15 +190,124 @@ pub fn export_notes(dir: String, folder: String, files: Vec<Value>) -> Result<St
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("无法创建文件夹：{e}"))?;
         }
+        let body = file["content"].as_str().unwrap_or("");
         use std::io::Write;
         std::fs::File::create_new(&target)
-            .and_then(|mut f| f.write_all(file["content"].as_str().unwrap_or("").as_bytes()))
+            .and_then(|mut f| f.write_all(body.as_bytes()))
             .map_err(|e| format!("无法写入 {}：{e}", target.display()))?;
+        if let Some(parent) = target.parent() {
+            copy_referenced_assets(&app, body, parent);
+        }
     }
     Ok(base.to_string_lossy().to_string())
 }
 
+pub fn asset_mime(name: &str) -> Option<&'static str> {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())?;
+    match ext.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        _ => None,
+    }
+}
+
+pub fn resolve_asset_file(app: &AppHandle, name: &str) -> Option<(PathBuf, &'static str)> {
+    let clean = safe_relative(name).filter(|p| p.components().count() == 1)?;
+    let mime = asset_mime(name)?;
+    let path = data_dir(app).ok()?.join("assets").join(clean);
+    path.is_file().then_some((path, mime))
+}
+
+/// Extract safe `assets/<filename>` names referenced in Markdown text.
+pub fn extract_asset_names(markdown: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = markdown;
+    while let Some(pos) = rest.find("assets/") {
+        let after = &rest[pos + "assets/".len()..];
+        let end = after
+            .find(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_' | '.'))
+            .unwrap_or(after.len());
+        let candidate = &after[..end];
+        if !candidate.is_empty()
+            && safe_relative(candidate).is_some_and(|p| p.components().count() == 1)
+            && asset_mime(candidate).is_some()
+            && !names.iter().any(|n| n == candidate)
+        {
+            names.push(candidate.to_string());
+        }
+        rest = &after[end..];
+    }
+    names
+}
+
+pub fn copy_referenced_assets(app: &AppHandle, markdown: &str, target_dir: &Path) {
+    let names = extract_asset_names(markdown);
+    if names.is_empty() {
+        return;
+    }
+    let dest_dir = target_dir.join("assets");
+    for name in names {
+        if let Some((src, _)) = resolve_asset_file(app, &name) {
+            if std::fs::create_dir_all(&dest_dir).is_ok() {
+                let dst = dest_dir.join(&name);
+                if !dst.exists() {
+                    let _ = std::fs::copy(src, dst);
+                }
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn save_note_image(app: AppHandle, ext: String, bytes: Vec<u8>) -> Result<String, String> {
+    let clean_ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    let normalized = match clean_ext.as_str() {
+        "png" => "png",
+        "jpg" | "jpeg" => "jpg",
+        "webp" => "webp",
+        "gif" => "gif",
+        _ => return Err("仅支持 png / jpg / webp / gif 图片".into()),
+    };
+    if bytes.is_empty() {
+        return Err("图片数据为空".into());
+    }
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err("图片超过 10 MB 上限".into());
+    }
+    let dir = data_dir(&app)?.join("assets");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建图片目录：{e}"))?;
+    let filename = format!("{}.{normalized}", uuid::Uuid::new_v4());
+    let path = dir.join(&filename);
+    std::fs::write(&path, bytes).map_err(|e| format!("无法保存图片：{e}"))?;
+    Ok(format!("assets/{filename}"))
+}
+
+#[tauri::command]
+pub fn import_image_file(app: AppHandle, path: String) -> Result<String, String> {
+    let src = PathBuf::from(&path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_string();
+    let meta = std::fs::metadata(&src).map_err(|e| format!("无法读取图片：{e}"))?;
+    if meta.len() > 10 * 1024 * 1024 {
+        return Err("图片超过 10 MB 上限".into());
+    }
+    let bytes = std::fs::read(&src).map_err(|e| format!("无法读取图片：{e}"))?;
+    save_note_image(app, ext, bytes)
+}
+
 static HIDE_FROM_CAPTURE: AtomicBool = AtomicBool::new(false);
+
+pub fn is_capture_protected() -> bool {
+    HIDE_FROM_CAPTURE.load(Ordering::Relaxed)
+}
 
 /// Ask the system to keep PinNote windows out of screenshots and screen sharing. Windows
 /// honours this; on macOS some capture tools may still record them.
@@ -207,6 +317,7 @@ pub fn set_capture_protection(app: AppHandle, enabled: bool) {
     for window in app.webview_windows().values() {
         let _ = window.set_content_protected(enabled);
     }
+    crate::refresh_tray_now(&app);
 }
 
 /// Windows created later (desktop notes, previews, the handle) follow the setting too.
@@ -242,5 +353,13 @@ mod tests {
         for bad in ["", "../x.md", "/etc/x", "a/../../x", "C:x.md", "a\\b.md"] {
             assert!(safe_relative(bad).is_none(), "{bad}");
         }
+    }
+    #[test]
+    fn extracts_only_safe_image_asset_references() {
+        let md = "![图1](assets/abc-123.png) 与 ![重复](assets/abc-123.png) 以及 ![非法](assets/../secret.png) 和 ![非图](assets/doc.txt) 和 ![图2](assets/shot_2.webp)";
+        assert_eq!(
+            extract_asset_names(md),
+            vec!["abc-123.png".to_string(), "shot_2.webp".to_string()]
+        );
     }
 }

@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 import { validateManifest } from '../scripts/verify-update-manifest.mjs';
+
+test('the Windows installer keeps the identity used by released PinNote builds', () => {
+  const common = JSON.parse(readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+  const override = new URL('../src-tauri/tauri.windows.conf.json', import.meta.url);
+  const windows = existsSync(override) ? JSON.parse(readFileSync(override, 'utf8')) : {};
+  assert.equal(windows.productName ?? common.productName, 'PinNote');
+  assert.equal(windows.identifier ?? common.identifier, 'com.pinnote.app');
+});
 
 function fixture() {
   const names = ['PinNote_universal.app.tar.gz', 'PinNote_x64-setup.exe', 'PinNote_x64.msi'];

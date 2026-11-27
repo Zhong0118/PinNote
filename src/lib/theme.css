@@ -33,18 +33,33 @@
   --tab-current-shadow: 0 0 0 .5px #0000001f, 0 1px 2px #00000012;
   --scrollbar: #0000002e;
   --scrollbar-hover: #00000059;
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  /* Frosted material for menus and popovers: translucent surface over a blurred backdrop. */
-  --material: color-mix(in srgb, var(--surface-raised) 62%, transparent);
-  --material-blur: saturate(190%) blur(36px);
-  /* The bright rim along the top of a glass surface. */
-  --glass-edge: #ffffffa6;
-  --material-shadow: var(--menu-shadow), inset 0 1px 0 var(--glass-edge), inset 0 0 0 .5px #ffffff4d;
+  --radius-sm: 4px;
+  --radius: 7px;
+  --radius-lg: 11px;
+  /* Frosted material for menus, popovers and floating glass panes. */
+  --material: color-mix(in srgb, var(--surface-raised) 56%, transparent);
+  --material-blur: saturate(210%) blur(40px);
+  /* Luminous top/left specular bevels + gentle diagonal glass refraction sheen. */
+  --glass-edge: #ffffffd6;
+  --glass-rim: #ffffff78;
+  --glass-divider-light: #ffffff85;
+  --glass-sheen: linear-gradient(138deg, #ffffff38 0%, #ffffff0d 38%, transparent 66%, #ffffff14 100%);
+  --material-shadow: var(--px-shadow), 0 2px 6px #00000012, 0 14px 36px #00000022, 0 0 0 1px var(--hairline), inset 0 1px 0 var(--glass-edge), inset 1px 0 0 var(--glass-rim);
+  /* Pixel detail sits on a 2px grid. Glass keeps its bevel and soft depth. */
+  --px-dot-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect x='0' y='0' width='2' height='2' fill='%23000000' fill-opacity='0.065'/%3E%3C/svg%3E");
+  --paper-grid: var(--px-dot-bg);
+  --px-shadow: 2px 2px 0 #00000014;
+  --px-shadow-accent: 0 2px 0 color-mix(in srgb, var(--accent) 65%, var(--text));
+  --px-radius: 2px;
+  --px-selected: color-mix(in srgb, var(--accent) 13%, var(--surface-raised));
+  --px-selected-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 65%, var(--border)), inset 0 -2px 0 var(--accent);
+  --px-swatch-edge: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent), 0 4px 0 var(--accent);
+  --px-rule: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
+  --px-cut: polygon(2px 0, calc(100% - 2px) 0, calc(100% - 2px) 2px, 100% 2px, 100% calc(100% - 2px), calc(100% - 2px) calc(100% - 2px), calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 2px), 0 calc(100% - 2px), 0 2px, 2px 2px);
+  --px-check-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'%3E%3Cpath d='M1 6h2v2h2v2H3V8H1zM5 6h2V4h2V2h2v2H9v2H7v2H5z'/%3E%3C/svg%3E");
   /* Quiet fills for search fields and segmented tracks, readable on solid or frosted ground. */
   --fill: color-mix(in srgb, var(--text) 6%, transparent);
-  --fill-strong: color-mix(in srgb, var(--text) 10%, transparent);
+  --fill-strong: color-mix(in srgb, var(--text) 11%, transparent);
   --motion-fast: 140ms;
   --motion: 220ms;
   --ease-out: cubic-bezier(.2, .85, .25, 1);
@@ -52,6 +67,7 @@
   --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
   --motion-celebrate: 400ms;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-pixel: "SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -86,11 +102,55 @@
   --tab-current-shadow: 0 0 0 .5px #ffffff1a, 0 1px 2px #00000040;
   --scrollbar: #ffffff2e;
   --scrollbar-hover: #ffffff5c;
-  --glass-edge: #ffffff24;
-  --material-shadow: var(--menu-shadow), inset 0 1px 0 var(--glass-edge), inset 0 0 0 .5px #ffffff14;
+  --glass-edge: #ffffff40;
+  --glass-rim: #ffffff24;
+  --glass-divider-light: #ffffff1a;
+  --glass-sheen: linear-gradient(138deg, #ffffff16 0%, #ffffff05 38%, transparent 66%, #ffffff08 100%);
+  --px-dot-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect x='0' y='0' width='2' height='2' fill='%23ffffff' fill-opacity='0.06'/%3E%3C/svg%3E");
+  --px-shadow: 2px 2px 0 #00000048;
+  --material-shadow: var(--px-shadow), 0 2px 8px #00000050, 0 16px 38px #00000088, 0 0 0 1px var(--hairline), inset 0 1px 0 var(--glass-edge), inset 1px 0 0 var(--glass-rim);
 }
+:root[data-paper-grid="off"] { --paper-grid: none; }
+
+input[type="checkbox"][role="switch"] {
+  appearance: none; box-sizing: border-box; position: relative; flex: 0 0 auto;
+  width: 34px; height: 20px; margin: 0; border: 1px solid var(--border); border-radius: var(--px-radius);
+  background: var(--surface-sunken); cursor: pointer;
+  transition: background-color var(--motion-fast), border-color var(--motion-fast);
+}
+input[type="checkbox"][role="switch"]::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  background: var(--muted); box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--muted) 65%, var(--surface-sunken));
+  transition: transform var(--motion-fast) steps(4, end), background-color var(--motion-fast);
+}
+input[type="checkbox"][role="switch"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"][role="switch"]:checked::after {
+  transform: translateX(14px); background: var(--on-accent); box-shadow: none;
+}
+input[type="checkbox"][role="switch"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (forced-colors: active) {
+  input[type="checkbox"][role="switch"] { appearance: auto; }
+  input[type="checkbox"][role="switch"]::after { content: none; }
+}
+
+.pixel-check {
+  --box-fill: color-mix(in srgb, var(--box-accent, var(--accent)) 65%, var(--text-strong));
+  display: grid; place-items: center; flex: 0 0 14px; width: 14px; height: 14px; margin-top: 2px;
+  box-sizing: border-box; border: 2px solid var(--box-fill); border-radius: 2px;
+  transition: background-color var(--motion-fast), transform var(--motion-fast) var(--ease-out);
+}
+.pixel-check.checked { background-color: var(--box-fill); }
+.pixel-check::after {
+  content: ""; width: 10px; height: 10px; background: var(--surface);
+  -webkit-mask: var(--px-check-mask) center / contain no-repeat;
+  mask: var(--px-check-mask) center / contain no-repeat;
+  clip-path: inset(0 100% 0 0); transition: clip-path var(--motion-fast) steps(5, end);
+}
+.pixel-check.checked::after { clip-path: inset(0); }
+button:active > .pixel-check { transform: scale(.9); }
+
 /* "Reduce transparency" in the system: menus and popovers go solid. */
-@media (prefers-reduced-transparency: reduce) { :root, :root[data-theme="dark"] { --material: var(--surface-raised); --material-blur: none; --glass-edge: transparent; } }
+@media (prefers-reduced-transparency: reduce) { :root, :root[data-theme="dark"] { --material: var(--surface-raised); --material-blur: none; --glass-edge: transparent; --glass-rim: transparent; --glass-divider-light: transparent; --glass-sheen: none; } }
 /* Scrollbars: a slim rounded thumb on a clear track, in every window. The 10px gutter is the
    hit area; transparent borders keep the visible thumb at 4px, widening to 6px under the pointer.
    Only the -webkit- pseudo-elements are used: in Chromium (WebView2) setting the standard
@@ -104,7 +164,7 @@
 
 /* Reduce motion: the app setting or the system preference. */
 :root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after {
-  animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
+  animation-duration: 0s !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; transition-delay: 0s !important;
 }
 
 /* Focus rings follow keyboard use only (see +layout.svelte); text fields keep their caret. */

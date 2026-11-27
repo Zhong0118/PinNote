@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "PinNote",
+        "title": "驻墨 InkPin",
         "url": "center",
         "width": 960,
         "height": 660,

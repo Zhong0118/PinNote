@@ -3,11 +3,15 @@
   // locally from the notes and the activity log (see journal.rs); nothing leaves the device.
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { ArrowLeft, StickyNote, PenLine, CircleCheck, Flame, Hash } from 'lucide-svelte';
+  import { ArrowLeft, StickyNote, PenLine, CircleCheck, Hash } from 'lucide-svelte';
   import type { PinNote } from '$lib/notesStore';
   import { dailyActivity, streaks, heatmap, recent, tagCounts, dayKey, notesOnDay, heatTotals, type Activity, type HeatCell } from '$lib/library';
   import { plainExcerpt } from '$lib/excerpt';
   import { confetti } from '$lib/celebrate';
+  import { celebrationsEnabled } from '$lib/theme';
+  import { overlay } from '$lib/motion';
+  import { displayTitle } from '$lib/noteAppearance';
+  import PixelMark from './PixelMark.svelte';
   let { notes, openTodos, onClose, onTag, onOpen }:
     { notes: PinNote[]; openTodos: (n: PinNote) => number; onClose: () => void; onTag: (tag: string) => void; onOpen: (id: string) => void } = $props();
   let activity = $state<Activity>({});
@@ -22,14 +26,15 @@
   const days = $derived(dailyActivity(activity, live));
   const run = $derived(streaks(days, now));
   // Reaching a 7- or 30-day streak gets one small burst, once per streak and milestone.
-  let lead = $state<HTMLElement>();
+  let streakCard = $state<HTMLDivElement>();
   $effect(() => {
     const milestone = run.current >= 30 ? 30 : run.current >= 7 ? 7 : 0;
-    if (!milestone || !lead) return;
+    if (!milestone || !streakCard || !celebrationsEnabled()) return;
     const key = `${milestone}:${dayKey(now - (run.current - 1) * 86_400_000)}`;
     try { if (localStorage.getItem('pinnote.streak-celebrated') === key) return; localStorage.setItem('pinnote.streak-celebrated', key); } catch { return; }
-    const r = lead.getBoundingClientRect();
-    setTimeout(() => confetti(r.left + 90, r.top + 8, { count: milestone === 30 ? 80 : 48 }), 300);
+    const r = streakCard.getBoundingClientRect();
+    const timer = setTimeout(() => confetti(r.left + r.width / 2, r.top + 12, { count: milestone === 30 ? 52 : 32, pixel: true }), 300);
+    return () => clearTimeout(timer);
   });
   const WEEKS = 26, GAP = 3, LABELS = 24;
   const grid = $derived(heatmap(days, now, WEEKS));
@@ -87,11 +92,11 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
-<section class="stats" aria-label="记录概览">
+<section class="stats" aria-label="记录概览" transition:overlay>
+  <div class="drag-strip" data-tauri-drag-region aria-hidden="true"></div>
   <div class="content">
     <button class="back" onclick={onClose}><ArrowLeft size={15} />返回便签</button>
     <h2>记录概览</h2>
-    <p class="lead" bind:this={lead}>{run.current ? `已连续记录 ${run.current} 天，继续保持。` : today ? '今天已经开始记录了。' : '今天还没有记录，写下第一件事吧。'}</p>
 
     <div class="cards">
       <div class="card"><span class="icon"><StickyNote size={15} /></span><b>{activeNotes.length}</b><span>张便签</span>
@@ -100,7 +105,7 @@
         <small>今天 {total(today)} 次</small></div>
       <div class="card"><span class="icon"><CircleCheck size={15} /></span><b>{monthDone}</b><span>本月完成待办</span>
         <small>{open ? `还有 ${open} 项未完成` : '没有未完成的待办'}</small></div>
-      <div class="card"><span class="icon"><Flame size={15} /></span><b>{run.current}</b><span>天连续记录</span>
+      <div class="card" bind:this={streakCard}><span class="icon"><PixelMark variant="ink" size={16} /></span><b>{run.current}</b><span>天连续记录</span>
         <small>最长 {run.longest} 天</small></div>
     </div>
 
@@ -127,13 +132,13 @@
             <ul class="touched">
               {#each touched.slice(0, 6) as hit (hit.note.id)}
                 <li><button onclick={() => onOpen(hit.note.id)}><span class="kind" class:new={hit.created}>{hit.created ? '新建' : '编辑'}</span>
-                  <b>{hit.note.title || '未命名便签'}</b><small>{plainExcerpt(hit.note.content, 40, { title: hit.note.title }).replace(/\s*\n+\s*/g, ' ')}</small>
+                  <b>{displayTitle(hit.note.title, hit.note.content)}</b><small>{plainExcerpt(hit.note.content, 40, { title: hit.note.title }).replace(/\s*\n+\s*/g, ' ')}</small>
                   {#if hit.note.lifecycle === 'archived'}<span class="archived">已归档</span>{/if}</button></li>
               {/each}
             </ul>
             {#if touched.length > 6}<small class="more">还有 {touched.length - 6} 张</small>{/if}
-          {:else}<p class="quiet">{selected.day.edits + selected.day.created + selected.day.done ? '这一天的便签后来又编辑过，显示在更晚的日期里。' : '这一天没有记录。'}</p>{/if}
-          {#if estimated}<small class="more">这一天在开始逐日记录之前，数字按便签的创建和最后编辑时间估算。</small>{/if}
+          {:else}<p class="quiet">{selected.day.edits + selected.day.created + selected.day.done ? '便签后来有改动，已计入更新的日期' : '当天没有记录'}</p>{/if}
+          {#if estimated}<small class="more">按便签的创建和最后编辑时间估算</small>{/if}
         </div>
       {/if}
       <p class="note">{since ? `从 ${since.getMonth() + 1}月${since.getDate()}日起逐日记录编辑、新建和勾选待办；更早的日子按便签的创建和最后编辑时间估算。` : '从现在起逐日记录编辑、新建和勾选待办；更早的日子按便签的创建和最后编辑时间估算。'}统计只在本机进行。</p>
@@ -154,20 +159,21 @@
 </section>
 
 <style>
-  .stats { position: absolute; inset: 0; z-index: 40; overflow: auto; background: var(--surface); color: var(--text); animation: stats-in var(--motion) var(--ease-out); }
-  @keyframes stats-in { from { opacity: 0; transform: translateY(4px); } }
+  .stats { position: absolute; inset: 0; z-index: 40; overflow: auto; background: var(--surface); color: var(--text); }
+  :global(:root[data-glass]) .stats { background: color-mix(in srgb, var(--surface) var(--glass-page, 85%), transparent); box-shadow: inset 0 1px 0 var(--glass-edge); }
+  .drag-strip { position: sticky; top: 0; height: 36px; margin-bottom: -36px; z-index: 2; }
   .content { max-width: 760px; margin: 0 auto; padding: 44px 32px 32px; }
   .back { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 14px -8px; padding: 5px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
   .back:hover { background: var(--hover); color: var(--text); }
   h2 { margin: 0; font-size: 20px; font-weight: 600; color: var(--text-strong); }
-  .lead { margin: 4px 0 20px; color: var(--muted); }
-  .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  .card { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon icon" "num num" "label label" "sub sub"; padding: 14px; border-radius: var(--radius-lg); background: var(--surface-muted); box-shadow: inset 0 0 0 .5px var(--hairline); }
+  .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; padding: 1px; margin-top: 14px;
+    background: var(--border); border-radius: var(--px-radius); box-shadow: var(--px-shadow); }
+  .card { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon icon" "num num" "label label" "sub sub"; padding: 14px; background: var(--surface-muted); }
   .card .icon { grid-area: icon; display: grid; place-items: center; width: 26px; height: 26px; margin-bottom: 8px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); }
-  .card b { grid-area: num; font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+  .card b { grid-area: num; font: 600 24px/1.2 var(--font-pixel); color: var(--text-strong); font-variant-numeric: tabular-nums; }
   .card > span:not(.icon) { grid-area: label; font-size: 12px; color: var(--text); }
   .card small { grid-area: sub; margin-top: 4px; font-size: 11px; color: var(--muted); }
-  .panel { margin-top: 14px; padding: 16px; border-radius: var(--radius-lg); background: var(--surface-muted); box-shadow: inset 0 0 0 .5px var(--hairline); }
+  .panel { margin-top: 14px; padding: 16px; border-radius: var(--px-radius); background: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--border); }
   .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-strong); }
   .legend { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11px; }
@@ -180,7 +186,8 @@
   .weekdays { grid-area: days; display: grid; grid-template-rows: repeat(7, var(--cell)); gap: 3px; min-width: 12px; font-size: 9.5px; line-height: var(--cell); color: var(--muted); }
   .grid { grid-area: grid; display: grid; grid-auto-flow: column; grid-auto-columns: var(--cell); gap: 3px; }
   .week { display: grid; grid-template-rows: repeat(7, var(--cell)); gap: 3px; }
-  i, .cell { display: block; width: var(--cell, 11px); height: var(--cell, 11px); border-radius: 3px; }
+  i, .cell { display: block; width: var(--cell, 11px); height: var(--cell, 11px); border-radius: 0; }
+  .l1, .l2, .l3, .l4 { box-shadow: inset 0 1px 0 #ffffff24; }
   .legend i { --cell: 11px; }
   .cell { padding: 0; border: 0; cursor: pointer; transition: transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast); }
   .cell:not(:disabled):hover { transform: scale(1.25); box-shadow: 0 0 0 1.5px var(--surface-muted), 0 0 0 2.5px var(--accent); position: relative; z-index: 1; }
@@ -214,9 +221,12 @@
   .l3 { background: color-mix(in srgb, var(--accent) 74%, var(--surface-muted)); }
   .l4 { background: var(--accent); }
   .future { opacity: .35; }
-  .today:not(.chosen) { box-shadow: inset 0 0 0 1.5px var(--text-strong); animation: today 1.6s ease-in-out 3; }
-  /* Today breathes a few times when the overview opens, then rests. */
-  @keyframes today { 50% { box-shadow: inset 0 0 0 1.5px var(--text-strong), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); } }
+  .today { box-shadow: inset 0 0 0 1.5px var(--text-strong); animation: today 1.6s ease-in-out 3; }
+  .today.chosen { box-shadow: 0 0 0 1.5px var(--surface-muted), 0 0 0 3px var(--text-strong); animation: today-chosen 1.6s ease-in-out 3; }
+  /* Today pulses a few times when the overview opens, then rests. */
+  @keyframes today { 50% { box-shadow: inset 0 0 0 1.5px var(--text-strong), 0 0 0 3px color-mix(in srgb, var(--accent) 38%, transparent); } }
+  @keyframes today-chosen { 50% { box-shadow: 0 0 0 1.5px var(--surface-muted), 0 0 0 3px var(--text-strong), 0 0 0 6px color-mix(in srgb, var(--accent) 32%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .today, .today.chosen { animation: none; } }
   .note { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
   .tags { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
   .tags li { display: grid; grid-template-columns: 140px 1fr 32px; align-items: center; gap: 10px; }

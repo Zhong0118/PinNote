@@ -9,7 +9,8 @@
     "settings",
     "note-*",
     "settings-*",
-    "center-dock"
+    "center-dock",
+    "quick-capture"
   ],
   "permissions": [
     "core:default",
@@ -43,6 +44,7 @@
     "core:window:allow-set-title-bar-style",
     "core:window:allow-set-theme",
     "core:window:allow-set-shadow",
-    "core:window:allow-set-effects"
+    "core:window:allow-set-effects",
+    "core:window:allow-set-ignore-cursor-events"
   ]
 }

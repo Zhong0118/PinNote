@@ -6,6 +6,7 @@ import type { ShortcutConfig } from "./settings";
 export type ShortcutHandlers = {
   toggleWindow: () => void;
   newNote: () => void;
+  quickCapture?: () => void;
 };
 
 let needsCleanup = false;
@@ -40,13 +41,16 @@ export function registerGlobalShortcuts(
       if (request !== revision) return cancelled;
       const toggleWindow = normalizeShortcut(snapshot.toggleWindow);
       const newNote = normalizeShortcut(snapshot.newNote);
+      const quickCapture = handlers.quickCapture && snapshot.quickCapture ? normalizeShortcut(snapshot.quickCapture) : "";
       const toggleIdentity = shortcutIdentity(toggleWindow);
       const newNoteIdentity = shortcutIdentity(newNote);
+      const quickIdentity = quickCapture ? shortcutIdentity(quickCapture) : "";
       const pressed = new Set<string>();
+      const bindings = quickCapture ? [toggleWindow, newNote, quickCapture] : [toggleWindow, newNote];
 
       // Bulk registration can fail after registering only the first shortcut.
       needsCleanup = true;
-      await register([toggleWindow, newNote], (event) => {
+      await register(bindings, (event) => {
         if (!active || request !== revision) return;
         const identity = shortcutIdentity(event.shortcut);
         if (event.state === "Released") {
@@ -57,6 +61,7 @@ export function registerGlobalShortcuts(
         pressed.add(identity);
         if (identity === toggleIdentity) handlers.toggleWindow();
         if (identity === newNoteIdentity) handlers.newNote();
+        if (quickIdentity && identity === quickIdentity) handlers.quickCapture?.();
       });
       if (request !== revision) return cancelled;
       active = true;

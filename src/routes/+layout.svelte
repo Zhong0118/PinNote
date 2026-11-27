@@ -1,5 +1,6 @@
 <script lang="ts">
   import '$lib/theme.css';
+  import appIcon from '../../src-tauri/icons/32x32.png?inline';
   import { onMount } from 'svelte';
   import { initAppearance } from '$lib/theme';
   let { children } = $props();
@@ -14,4 +15,5 @@
     return () => { stop?.(); removeEventListener('keydown', key, true); removeEventListener('pointerdown', pointer, true); };
   });
 </script>
+<svelte:head><link rel="icon" href={appIcon} /></svelte:head>
 {@render children()}
