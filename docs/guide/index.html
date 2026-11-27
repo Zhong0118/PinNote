@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>InkPin 使用指南</title>
+<meta name="description" content="在 macOS 和 Windows 上安装或升级 InkPin，写第一张便签，试用贴边收纳，备份和导出本机便签。">
+<meta name="color-scheme" content="light dark">
+<link rel="canonical" href="https://zhong0118.github.io/PinNote/guide/">
+<link rel="icon" type="image/png" sizes="192x192" href="../media/inkpin-icon.png">
+<link rel="apple-touch-icon" href="../media/inkpin-icon.png">
+<script>
+  try { var t = localStorage.getItem('pinnote-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark'; } catch (e) {}
+</script>
+<link rel="stylesheet" href="../site.css">
+<script type="module" src="../js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+<header class="site-head">
+  <div class="wrap head-row">
+    <a class="brand" href="../" aria-label="InkPin 首页"><img src="../media/inkpin-icon.png" width="32" height="32" alt=""><span>InkPin</span></a>
+    <nav class="head-nav" aria-label="站点导航"><a href="../#experience">贴边演示</a><a href="../#themes">外观</a></nav>
+    <div class="head-actions">
+      <a class="guide-link" href="./" aria-current="page">指南</a>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-pressed="false" aria-label="深色模式">
+        <svg class="ic only-light" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        <svg class="ic only-dark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M5 19l2-2m10-10 2-2"/></svg>
+      </button>
+      <a class="btn btn-small" href="../#download">下载</a>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="guide-hero">
+    <div class="wrap">
+      <h1>InkPin 使用指南</h1>
+      <p>从安装到第一张贴边便签。已经在用旧版的用户可以直接看升级和数据位置。</p>
+    </div>
+  </div>
+  <div class="wrap guide-layout">
+    <nav class="guide-toc" aria-label="指南目录">
+      <a href="#installation">安装</a>
+      <a href="#upgrade">从旧版升级</a>
+      <a href="#first-note">写第一张便签</a>
+      <a href="#docking">收进屏幕边缘</a>
+      <a href="#backup">备份、恢复和导出</a>
+    </nav>
+    <article class="guide-content">
+      <section id="installation" aria-labelledby="installation-title">
+        <h2 id="installation-title">安装</h2>
+        <h3>macOS</h3>
+        <p>在<a href="../#download">下载区</a>选择通用 DMG，打开后把 InkPin 拖到「应用程序」。通用版支持 Apple Silicon 和 Intel。若系统拦截首次打开，请查看<a href="../#faq-mac">macOS 首次打开说明</a>。</p>
+        <p>也可以用 Homebrew。<code>pinnote</code> 是配方名，装好后在「应用程序」里找 InkPin。</p>
+        <pre><code>brew install --cask zhong0118/tap/pinnote</code></pre>
+        <p>如果 Homebrew 要求先信任配方，运行下面的命令，再重新安装。</p>
+        <pre><code>brew trust --cask zhong0118/tap/pinnote</code></pre>
+        <h3>Windows</h3>
+        <p>在<a href="../#download">下载区</a>切到 Windows，下载 x64 EXE 安装程序。需要 MSI 时可以选同一栏的 MSI 安装包。界面里显示 InkPin，1.4.0 的安装包文件使用 PinNote 名称。</p>
+      </section>
+      <section id="upgrade" aria-labelledby="upgrade-title">
+        <h2 id="upgrade-title">从旧版升级</h2>
+        <p>升级前可在「设置 → 数据与更新」手动创建一份备份。平时通过 Homebrew 安装的用户可以运行以下命令。</p>
+        <pre><code>brew update
+brew upgrade --cask --greedy zhong0118/tap/pinnote</code></pre>
+        <p>手动安装的用户可在托盘选择「检查更新」，也可以退出应用后从官网下载新版。如果 macOS 的「应用程序」里同时出现 <code>PinNote.app</code> 和 <code>InkPin.app</code>，先启动新版确认便签，再把旧应用移出「应用程序」。</p>
+        <p>升级后，便签中心、归档和回收站仍读取原来的本机数据目录。</p>
+      </section>
+      <section id="first-note" aria-labelledby="first-note-title">
+        <h2 id="first-note-title">写第一张便签</h2>
+        <ol>
+          <li>在 Mac 按 <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>Space</kbd>，在 Windows 按 <kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>Space</kbd>，打开快速速记。</li>
+          <li>输入 <code>[] 检查安装包 #发布 @30m</code>。<code>[]</code> 创建一个待办，<code>#发布</code> 加上标签，<code>@30m</code> 设置 30 分钟后的提醒。</li>
+          <li>按 <kbd>Enter</kbd> 存进便签中心。按 Mac 的 <kbd>⌘</kbd> <kbd>Enter</kbd> 或 Windows 的 <kbd>Ctrl</kbd> <kbd>Enter</kbd>，直接把便签贴到桌面。</li>
+        </ol>
+        <p>设置提醒需要系统通知权限。权限关闭时便签仍会保存，开启权限后可回到便签中补设提醒。</p>
+        <figure>
+          <img class="only-light" src="../media/quick-light.webp" width="1060" height="292" alt="InkPin 速记窗口识别了发布标签和 30 分钟提醒" loading="lazy" decoding="async">
+          <img class="only-dark" src="../media/quick-dark.webp" width="1060" height="292" alt="深色速记窗口显示识别出的标签和提醒" loading="lazy" decoding="async">
+        </figure>
+      </section>
+      <section id="docking" aria-labelledby="docking-title">
+        <h2 id="docking-title">收进屏幕边缘</h2>
+        <ol>
+          <li>在便签中心选择一张便签，点「放到桌面」。标题栏上的置顶按钮可以让便签留在其他窗口上方。</li>
+          <li>点击收起按钮可缩成胶囊。也可以把窗口或胶囊拖到屏幕左右边缘，松开后会收成标签。</li>
+          <li>将光标停在标签上看摘要和待办，点击展开。结束后可再次收起，或将便签收回中心。</li>
+        </ol>
+        <p><a href="../#experience">在网页上试试贴边收纳</a></p>
+      </section>
+      <section id="backup" aria-labelledby="backup-title">
+        <h2 id="backup-title">备份、恢复和导出</h2>
+        <p>在便签中心打开「设置 → 数据与更新」。可以打开数据目录、立即备份、从备份恢复，或把可导出的便签存成 Markdown 文件。</p>
+        <ul>
+          <li>macOS 数据目录 <code>~/Library/Application Support/com.pinnote.app</code></li>
+          <li>Windows 数据目录 <code>%APPDATA%\com.pinnote.app</code></li>
+        </ul>
+        <p>换电脑时可先退出 InkPin，再复制整个目录。若只需文稿，可以选择「导出全部」。</p>
+        <p><a href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md">查看完整使用手册</a></p>
+      </section>
+    </article>
+  </div>
+</main>
+<footer class="site-foot">
+  <div class="wrap foot-row">
+    <div class="foot-brand"><img src="../media/inkpin-icon.png" width="24" height="24" alt="">InkPin</div>
+    <nav class="foot-nav" aria-label="项目链接">
+      <a href="../">首页</a>
+      <a href="../#download">下载</a>
+      <a href="https://github.com/Zhong0118/PinNote">GitHub</a>
+      <a href="https://github.com/Zhong0118/PinNote/issues">反馈问题</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

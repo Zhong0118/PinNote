@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128.png" alt="驻墨的像素便签图标" width="64" height="64" />
+  <img src="docs/media/inkpin-icon.png" alt="InkPin 像素便签图标" width="64" height="64" />
 </p>
 
-<h1 align="center">驻墨 InkPin</h1>
+<h1 align="center">InkPin</h1>
 
 <p align="center">macOS 和 Windows 上的本地 Markdown 便签。把正在用的便签贴在桌面，腾位置时就收到屏幕边缘。</p>
 <p align="center">
   <a href="https://github.com/Zhong0118/PinNote/releases/latest"><strong>下载安装</strong></a> ·
-  <a href="docs/usage.md">使用手册</a> ·
+  <a href="https://zhong0118.github.io/PinNote/guide/">使用指南</a> ·
   <a href="RELEASE_NOTES.md">更新记录</a> ·
   <a href="https://zhong0118.github.io/PinNote/">产品站</a>
 </p>
