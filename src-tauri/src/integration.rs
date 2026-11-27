@@ -17,7 +17,7 @@ fn config(app: &AppHandle) -> Result<Value, String> {
 
 pub fn tool(app: &AppHandle, request: &Value, settings: &Value) -> Result<Value, String> {
     if settings["enabled"] != true {
-        return Err("INTEGRATION_DISABLED: 请在 PinNote 设置中启用集成".into());
+        return Err("INTEGRATION_DISABLED: 请在 InkPin 设置中启用集成".into());
     }
     let name = request["name"].as_str().ok_or("Missing tool name")?;
     let args = &request["arguments"];

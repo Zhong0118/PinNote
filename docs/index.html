@@ -8,7 +8,7 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#111521" media="(prefers-color-scheme: dark)">
-<link rel="canonical" href="https://zhong0118.github.io/PinNote/">
+<link rel="canonical" href="https://zhong0118.github.io/InkPin/">
 <link rel="icon" type="image/png" sizes="256x256" href="./media/inkpin-app-icon.png">
 <link rel="apple-touch-icon" href="./media/inkpin-app-icon.png">
 <meta property="og:type" content="website">
@@ -16,8 +16,8 @@
 <meta property="og:locale" content="zh_CN">
 <meta property="og:title" content="InkPin｜桌面便签">
 <meta property="og:description" content="用快捷键记下待办和提醒，把便签贴在桌面，写完收进屏幕边缘。支持 macOS 和 Windows。">
-<meta property="og:url" content="https://zhong0118.github.io/PinNote/">
-<meta property="og:image" content="https://zhong0118.github.io/PinNote/media/inkpin-share.png">
+<meta property="og:url" content="https://zhong0118.github.io/InkPin/">
+<meta property="og:image" content="https://zhong0118.github.io/InkPin/media/inkpin-share.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="InkPin 的像素图标、便签中心和桌面便签">
@@ -86,7 +86,7 @@
     <div class="head-actions">
       <a class="guide-link" href="./guide/">指南</a>
       <button class="icon-btn" id="theme-toggle" type="button" aria-pressed="false" aria-label="深色模式"><svg class="ic only-light" aria-hidden="true"><use href="#i-moon"/></svg><svg class="ic only-dark" aria-hidden="true"><use href="#i-sun"/></svg></button>
-      <a class="icon-btn head-github" href="https://github.com/Zhong0118/PinNote" aria-label="GitHub 上的 InkPin"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg></a>
+      <a class="icon-btn head-github" href="https://github.com/Zhong0118/InkPin" aria-label="GitHub 上的 InkPin"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg></a>
       <a class="btn btn-small" href="#download">下载</a>
     </div>
   </div>
@@ -100,7 +100,7 @@
       <div class="hero-copy">
         <p class="hero-kind">本地 Markdown 桌面便签</p>
         <h1 id="hero-title">InkPin</h1>
-        <p class="release-line"><a href="https://github.com/Zhong0118/PinNote/releases/tag/v1.4.0" data-release-version>1.4.0</a><span>macOS / Windows</span><span>开源</span></p>
+        <p class="release-line"><a href="https://github.com/Zhong0118/InkPin/releases/tag/v1.4.0" data-release-version>1.4.0</a><span>macOS / Windows</span><span>开源</span></p>
       </div>
       <div class="hero-intro">
         <p class="hero-tagline">便签放在手边<br>用完收进屏幕边缘</p>
@@ -177,7 +177,7 @@
       </ol>
       <div class="desk-demo">
         <div class="demo-bar">
-          <span class="demo-label">交互演示 · 网页模拟</span>
+          <span class="demo-label">试用 1.4.0 贴边便签</span>
           <div class="demo-bar-actions">
             <button class="icon-btn small" type="button" data-step-prev aria-label="上一步"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
             <span class="step-count" data-step-count aria-live="polite">1 / 6</span>
@@ -187,9 +187,15 @@
         </div>
         <div class="desk" id="desk" data-hint="">
           <div class="mini-center" id="mini-center" aria-label="便签中心（演示）">
-            <div class="mini-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>便签中心</span></div>
+            <div class="mini-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>InkPin 便签中心</span></div>
             <div class="mini-body">
-              <ul class="mini-list" id="mini-list" aria-label="便签列表"></ul>
+              <div class="mini-side">
+                <ul class="mini-list" id="mini-list" aria-label="便签列表"></ul>
+                <div class="sample-footer" aria-hidden="true">
+                  <span><svg class="ic"><use href="#i-archive"/></svg>归档</span>
+                  <span><svg class="ic"><use href="#i-trash"/></svg>回收站</span>
+                </div>
+              </div>
               <div class="mini-editor" id="mini-editor" aria-live="polite"></div>
             </div>
           </div>
@@ -210,7 +216,7 @@
               <span class="dot" aria-hidden="true"></span><span class="dn-name">本周计划</span>
               <button class="dn-btn pinned" type="button" aria-label="已置顶" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button>
             </div>
-            <div class="dn-tab" data-face="tab"><span class="dn-tab-text">本周计划</span></div>
+            <div class="dn-tab" data-face="tab"><i class="pixel-grip" aria-hidden="true"></i><span class="dn-tab-text">本周计划</span></div>
           </div>
           <div class="desk-preview" id="desk-preview" role="tooltip" hidden>
             <b>本周计划</b>
@@ -249,7 +255,7 @@
     </div>
     <div class="cc-demo">
       <div class="demo-bar">
-        <span class="demo-label">交互演示 · 网页模拟</span>
+        <span class="demo-label">试用 1.4.0 窗口收纳</span>
         <div class="demo-bar-actions">
           <div class="seg" role="radiogroup" aria-label="演示平台">
             <button type="button" role="radio" aria-checked="true" data-platform="mac">macOS</button>
@@ -263,7 +269,7 @@
         <div class="cc-window" id="cc-window" aria-label="便签中心窗口（演示）">
           <div class="cc-titlebar">
             <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="cc-title">本周计划</span>
+            <span class="cc-title">便签中心</span>
             <div class="cc-tools">
               <button type="button" class="cc-btn" data-cc="left" aria-label="收起到左侧边缘"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
               <button type="button" class="cc-btn" data-cc="right" aria-label="收起到右侧边缘"><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button>
@@ -271,13 +277,17 @@
             </div>
           </div>
           <div class="cc-body" aria-hidden="true">
-            <div class="cc-side"><i></i><i></i><i></i><i></i></div>
-            <div class="cc-main"><b></b><i></i><i></i><i class="short"></i></div>
+            <img class="only-light" src="./media/center-hero-light.webp" width="1440" height="990" alt="" loading="lazy" decoding="async">
+            <img class="only-dark" src="./media/center-hero-dark.webp" width="1440" height="990" alt="" loading="lazy" decoding="async">
           </div>
         </div>
-        <button type="button" class="cc-handle" id="cc-handle" hidden aria-label="便签中心把手：点一下恢复，上下拖动换位置，向内拖出恢复到指针处"><svg class="ic" aria-hidden="true"><use href="#i-notebook"/></svg><span>便签</span></button>
+        <button type="button" class="cc-handle" id="cc-handle" hidden aria-label="便签中心把手：点一下恢复，上下拖动换位置，向内拖出恢复到指针处">
+          <i class="pixel-grip" aria-hidden="true"></i>
+          <img src="./media/inkpin-app-icon.png" width="14" height="14" alt="">
+          <span>便签</span>
+        </button>
         <div class="cc-bar" id="cc-bar" hidden>
-          <svg class="ic" aria-hidden="true"><use href="#i-notebook"/></svg><b>便签中心</b><span>本周计划</span>
+          <img src="./media/inkpin-app-icon.png" width="17" height="17" alt=""><b>InkPin</b><span>本周计划</span>
           <button type="button" class="cc-btn" aria-label="新建便签（演示中不可用）" disabled><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button>
           <button type="button" class="cc-btn" data-cc="restore" aria-label="展开便签中心"><svg class="ic" aria-hidden="true"><use href="#i-expand"/></svg></button>
         </div>
@@ -295,10 +305,14 @@
     </div>
     <div class="app-demo">
       <div class="demo-bar">
-        <span class="demo-label">交互演示 · 按真实界面重绘，示例数据</span>
+        <span class="demo-label">试用 1.4.0 便签中心</span>
         <div class="demo-bar-actions"><button class="text-btn" type="button" data-reset>重置演示</button></div>
       </div>
       <div class="app" id="app">
+        <div class="app-chrome" aria-hidden="true">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span>InkPin 便签中心</span>
+        </div>
         <aside class="app-side">
           <label class="app-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span class="sr">搜索标题、正文和标签</span><input id="app-search" type="search" placeholder="搜索便签" autocomplete="off"></label>
           <div class="app-scope">
@@ -314,6 +328,10 @@
           </div>
           <div class="app-active-filters" id="app-active-filters"></div>
           <ul class="app-list" id="app-list" aria-label="便签列表"></ul>
+          <div class="sample-footer" aria-hidden="true">
+            <span><svg class="ic"><use href="#i-archive"/></svg>归档</span>
+            <span><svg class="ic"><use href="#i-trash"/></svg>回收站</span>
+          </div>
         </aside>
         <div class="app-main">
           <div class="app-tabs" role="tablist" id="app-tabs" aria-label="工作标签页"></div>
@@ -408,28 +426,28 @@
     <div class="dl-panels">
       <div class="platform-panels">
         <div class="dl-panel" role="tabpanel" id="panel-mac" aria-labelledby="tab-mac">
-          <a class="dl-file primary" data-asset="dmg" href="https://github.com/Zhong0118/PinNote/releases/download/v1.4.0/InkPin_1.4.0_universal.dmg">
+          <a class="dl-file primary" data-asset="dmg" href="https://github.com/Zhong0118/InkPin/releases/download/v1.4.0/InkPin_1.4.0_universal.dmg">
             <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
             <span><b>通用 DMG 安装包</b><small>Apple Silicon 和 Intel 通用 · 打开后拖进「应用程序」</small></span>
             <em data-asset-meta>12.9 MB</em>
           </a>
           <div class="brew">
             <p>Homebrew 安装</p>
-            <div class="cmd"><code id="brew-cmd">brew install --cask zhong0118/tap/pinnote</code><button class="copy-btn" type="button" data-copy="#brew-cmd"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span></button></div>
+            <div class="cmd"><code id="brew-cmd">brew install --cask zhong0118/tap/inkpin</code><button class="copy-btn" type="button" data-copy="#brew-cmd"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span></button></div>
             <p>从旧版升级（先运行 <code>brew update</code>）</p>
-            <div class="cmd"><code id="brew-upgrade">brew upgrade --cask --greedy zhong0118/tap/pinnote</code><button class="copy-btn" type="button" data-copy="#brew-upgrade"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span></button></div>
-            <p class="fine"><code>pinnote</code> 是 InkPin 的 Homebrew 安装名。如果 Homebrew 要求信任配方，运行 <code>brew trust --cask zhong0118/tap/pinnote</code>。</p>
+            <div class="cmd"><code id="brew-upgrade">brew upgrade --cask --greedy zhong0118/tap/inkpin</code><button class="copy-btn" type="button" data-copy="#brew-upgrade"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span></button></div>
+            <p class="fine">如需信任配方，请运行 <code>brew trust --cask zhong0118/tap/inkpin</code>。旧配方 <code>pinnote</code> 可按<a href="./guide/#upgrade">升级指南</a>迁移。</p>
             <p class="sr" id="copy-status" role="status"></p>
           </div>
           <p class="fine">macOS 安装包使用 ad-hoc 签名，没有做 Apple 公证，第一次打开时系统会拦一下，处理方法见 <a href="#faq-mac">常见问题</a>。</p>
         </div>
         <div class="dl-panel" role="tabpanel" id="panel-win" aria-labelledby="tab-win" hidden>
-          <a class="dl-file primary" data-asset="exe" href="https://github.com/Zhong0118/PinNote/releases/download/v1.4.0/PinNote_1.4.0_x64-setup.exe">
+          <a class="dl-file primary" data-asset="exe" href="https://github.com/Zhong0118/InkPin/releases/download/v1.4.0/InkPin_1.4.0_x64-setup.exe">
             <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
             <span><b>安装程序 EXE</b><small>Windows x64 · 推荐</small></span>
             <em data-asset-meta>3.7 MB</em>
           </a>
-          <a class="dl-file" data-asset="msi" href="https://github.com/Zhong0118/PinNote/releases/download/v1.4.0/PinNote_1.4.0_x64_en-US.msi">
+          <a class="dl-file" data-asset="msi" href="https://github.com/Zhong0118/InkPin/releases/download/v1.4.0/InkPin_1.4.0_x64_en-US.msi">
             <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
             <span><b>MSI 安装包</b><small>Windows x64 · 适合统一部署</small></span>
             <em data-asset-meta>5.3 MB</em>
@@ -437,8 +455,8 @@
           <p class="fine">需要系统带有 WebView2（Windows 10 和 11 一般已经自带）。</p>
         </div>
       </div>
-      <noscript><p><a href="https://github.com/Zhong0118/PinNote/releases/latest">下载 Windows 版</a></p></noscript>
-      <a class="text-link" href="https://github.com/Zhong0118/PinNote/releases/latest">全部安装包和更新说明<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
+      <noscript><p><a href="https://github.com/Zhong0118/InkPin/releases/latest">下载 Windows 版</a></p></noscript>
+      <a class="text-link" href="https://github.com/Zhong0118/InkPin/releases/latest">全部安装包和更新说明<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
     </div>
   </div>
 </section>
@@ -467,7 +485,7 @@
         </div>
         <aside class="ai-side">
           <h3>实际提供的工具</h3>
-          <p class="fine"><a href="https://github.com/Zhong0118/PinNote/blob/main/scripts/pinnote-mcp.mjs">查看集成脚本源码</a></p>
+          <p class="fine"><a href="https://github.com/Zhong0118/InkPin/blob/main/scripts/pinnote-mcp.mjs">查看集成脚本源码</a></p>
           <div class="tool-group">
             <h4>启用后即可用</h4>
             <ul class="tools"><li><code>search_notes</code>搜索标题和正文</li><li><code>read_note</code>读取一张便签和它的版本号</li></ul>
@@ -485,7 +503,7 @@
           </div>
           <p class="fine">写入时要带上读到的版本号，便签在此期间被改过就会拒绝。每次 agent 修改都会记在设置里，可以撤销或恢复到修改前的版本。</p>
           <img class="settings-shot" src="./media/settings-integration.webp" width="1440" height="859" alt="InkPin 1.4.0 设置中的本地 MCP 权限" loading="lazy" decoding="async">
-          <a class="text-link" href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md#本地-mcp">配置 MCP 客户端<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
+          <a class="text-link" href="https://github.com/Zhong0118/InkPin/blob/main/docs/usage.md#本地-mcp">配置 MCP 客户端<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
         </aside>
       </div>
     </details>
@@ -514,10 +532,10 @@
   <div class="wrap foot-row">
     <div class="foot-brand"><img src="./media/inkpin-app-icon.png" width="24" height="24" alt="">InkPin <span class="fine">MIT 许可</span></div>
     <nav class="foot-nav" aria-label="项目链接">
-      <a href="https://github.com/Zhong0118/PinNote">GitHub</a>
-      <a href="https://github.com/Zhong0118/PinNote/releases/latest">版本记录</a>
+      <a href="https://github.com/Zhong0118/InkPin">GitHub</a>
+      <a href="https://github.com/Zhong0118/InkPin/releases/latest">版本记录</a>
       <a href="./guide/">使用指南</a>
-      <a href="https://github.com/Zhong0118/PinNote/issues">反馈问题</a>
+      <a href="https://github.com/Zhong0118/InkPin/issues">反馈问题</a>
     </nav>
   </div>
 </footer>

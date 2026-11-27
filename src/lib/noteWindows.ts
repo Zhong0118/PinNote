@@ -34,7 +34,7 @@ export async function openNoteWindow(note: PinNote, options: { offset?: boolean;
 
   const created = new WebviewWindow(label, {
     url: `/?noteId=${encodeURIComponent(note.id)}`,
-    title: note.title || "PinNote",
+    title: note.title || "InkPin",
     width: note.window.collapsed ? (note.window.edge ? EDGE_TAB : CAPSULE).width : note.window.width,
     height: note.window.collapsed ? (note.window.edge ? EDGE_TAB : CAPSULE).height : note.window.height,
     x,

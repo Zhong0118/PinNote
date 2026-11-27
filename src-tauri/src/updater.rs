@@ -134,7 +134,7 @@ async fn message(app: &AppHandle, text: impl Into<String>, confirm: bool) -> boo
     let dialog = app
         .dialog()
         .message(text)
-        .title("PinNote")
+        .title("InkPin")
         .kind(MessageDialogKind::Info);
     let dialog = if confirm {
         dialog.buttons(MessageDialogButtons::OkCancelCustom(

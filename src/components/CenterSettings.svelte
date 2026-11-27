@@ -68,7 +68,7 @@
   }
   async function restore(backup: Backup) {
     const when = shortTime(backup.at);
-    if (!window.confirm(`用 ${when} 的备份（${backup.notes} 张便签）替换当前全部便签？\n\n当前的全部便签会先另存为一份备份，然后 PinNote 会重新启动。`)) return;
+    if (!window.confirm(`用 ${when} 的备份（${backup.notes} 张便签）替换当前全部便签？\n\n当前的全部便签会先另存为一份备份，然后 InkPin 会重新启动。`)) return;
     restoring = backup.name; backupStatus = '正在保存所有便签，随后恢复并重新启动…';
     try { await invoke('restore_backup', { name: backup.name }); }
     catch (error) { backupStatus = `没有恢复：${error}`; restoring = ''; }

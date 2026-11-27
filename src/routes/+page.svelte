@@ -1154,7 +1154,7 @@
 <svelte:window onkeydown={handleKeydown} onpointerenter={() => (pointerInside = true)} onpointerleave={() => (pointerInside = false)} />
 
 <svelte:head>
-  <meta name="description" content="PinNote Markdown sticky note" />
+  <meta name="description" content="InkPin Markdown sticky note" />
 </svelte:head>
 
 <WindowChrome

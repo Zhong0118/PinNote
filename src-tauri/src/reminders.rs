@@ -45,7 +45,7 @@ fn dispatch(app: &AppHandle) -> Result<(), String> {
         let error = app
             .notification()
             .builder()
-            .title(note["title"].as_str().unwrap_or("PinNote"))
+            .title(note["title"].as_str().unwrap_or("InkPin"))
             .body("便签提醒到期 · 在便签中心打开或稍后提醒")
             .show()
             .err()

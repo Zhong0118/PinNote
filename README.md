@@ -6,13 +6,13 @@
 
 <p align="center">macOS 和 Windows 上的本地 Markdown 便签。把正在用的便签贴在桌面，腾位置时就收到屏幕边缘。</p>
 <p align="center">
-  <a href="https://github.com/Zhong0118/PinNote/releases/latest"><strong>下载安装</strong></a> ·
-  <a href="https://zhong0118.github.io/PinNote/guide/">使用指南</a> ·
+  <a href="https://github.com/Zhong0118/InkPin/releases/latest"><strong>下载安装</strong></a> ·
+  <a href="https://zhong0118.github.io/InkPin/guide/">使用指南</a> ·
   <a href="RELEASE_NOTES.md">更新记录</a> ·
-  <a href="https://zhong0118.github.io/PinNote/">产品站</a>
+  <a href="https://zhong0118.github.io/InkPin/">产品站</a>
 </p>
 
-> 下文和截图展示 1.4.0。安装包的版本以 [Releases](https://github.com/Zhong0118/PinNote/releases/latest) 为准。
+> 下文和截图展示 1.4.0。安装包的版本以 [Releases](https://github.com/Zhong0118/InkPin/releases/latest) 为准。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/readme/center-dark.png" />
@@ -51,10 +51,10 @@
 macOS 也可通过 Homebrew 安装发布版：
 
 ```sh
-brew install --cask zhong0118/tap/pinnote
+brew install --cask zhong0118/tap/inkpin
 ```
 
-通过 Homebrew 装过旧版时，先运行 `brew update`，再运行 `brew upgrade --cask --greedy zhong0118/tap/pinnote`。升级后应用名为 InkPin，便签仍使用原来的数据目录。若 Homebrew 要求先信任配方，运行 `brew trust --cask zhong0118/tap/pinnote`。
+通过 Homebrew 安装的用户可先运行 `brew update`，再运行 `brew upgrade --cask --greedy zhong0118/tap/inkpin`。从旧配方 `pinnote` 迁移时，先运行 `brew trust --cask zhong0118/tap/inkpin`，再运行 `brew migrate --cask pinnote`。
 
 macOS 安装包使用 ad-hoc 签名，尚未通过 Apple 公证。应用内的「检查更新」可以从托盘打开。
 
@@ -69,8 +69,8 @@ macOS 安装包使用 ad-hoc 签名，尚未通过 Apple 公证。应用内的�
 使用 Tauri 2、Rust、SvelteKit 和 Milkdown。需要 Node.js 22+、pnpm 9、Rust stable 和 [Tauri 平台前置环境](https://v2.tauri.app/start/prerequisites/)。
 
 ```sh
-git clone https://github.com/Zhong0118/PinNote.git
-cd PinNote
+git clone https://github.com/Zhong0118/InkPin.git
+cd InkPin
 pnpm install --frozen-lockfile
 pnpm tauri dev
 ```
@@ -91,4 +91,4 @@ pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --loc
 
 </details>
 
-MIT · [报告问题](https://github.com/Zhong0118/PinNote/issues)
+MIT · [报告问题](https://github.com/Zhong0118/InkPin/issues)

@@ -83,7 +83,7 @@ test('export puts archived notes in a folder, skips the trash and never reuses a
     { title: 'a/b', lifecycle: 'archived', content: 'c' }, { title: '旧', lifecycle: 'trash', content: 'd' }, { title: '', lifecycle: 'active', content: 'e' },
   ]);
   assert.deepEqual(plain(files.map(f => f.path)), ['周会.md', '周会 (2).md', '归档/a-b.md', '未命名便签.md']);
-  assert.match(lib.exportFolderName(new Date(2026, 0, 2, 3, 4).getTime()), /^PinNote 导出 2026-01-02 0304$/);
+  assert.match(lib.exportFolderName(new Date(2026, 0, 2, 3, 4).getTime()), /^InkPin 导出 2026-01-02 0304$/);
 });
 
 test('trash countdown rounds up, never shows zero, and is off when the trash is kept', () => {

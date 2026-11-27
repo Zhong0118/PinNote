@@ -57,7 +57,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ5REQ2NEZDNTAwNTVERDYKUldUV1hRVlEvR1RkMlU5YlNtenJYK2VBVDZ6cDRwUjl4N0dBSjVCRmNKblFSMTdBUk95Ym0xNTgK",
       "endpoints": [
-        "https://github.com/Zhong0118/PinNote/releases/latest/download/latest.json"
+        "https://github.com/Zhong0118/InkPin/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

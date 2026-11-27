@@ -174,7 +174,7 @@ export function trashDaysLeft(trashedAt: number | undefined, days: number, now: 
 
 export const exportFolderName = (now = Date.now()) => {
   const d = new Date(now);
-  return `PinNote 导出 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;
+  return `InkPin 导出 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;
 };
 
 /** One Markdown file per note: active notes at the top level, archived ones in 归档/. The trash is left out. */

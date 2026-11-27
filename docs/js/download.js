@@ -1,8 +1,8 @@
 // The HTML includes working 1.4.0 links for offline API access. GitHub supplies newer assets.
-const API = 'https://api.github.com/repos/Zhong0118/PinNote/releases/latest';
-const RELEASES = 'https://github.com/Zhong0118/PinNote/releases/latest';
-const CACHE = 'inkpin-site-release';
-const PATTERNS = { dmg: /_universal\.dmg$/i, exe: /_x64-setup\.exe$/i, msi: /_x64_[^.]*\.msi$/i };
+const API = 'https://api.github.com/repos/Zhong0118/InkPin/releases/latest';
+const RELEASES = 'https://github.com/Zhong0118/InkPin/releases/latest';
+const CACHE = 'inkpin-site-release-v2';
+const PATTERNS = { dmg: /_universal\.dmg$/i, exe: /_x64-setup\.exe$/i, msi: /_x64(?:_[^.]+)?\.msi$/i };
 
 function detectPlatform() {
   const p = (navigator.userAgentData?.platform || navigator.platform || '').toLowerCase();
@@ -42,13 +42,16 @@ async function loadRelease() {
 }
 
 const mb = n => (n / 1048576).toFixed(1) + ' MB';
-const safeUrl = u => (/^https:\/\/github\.com\/Zhong0118\/PinNote\//.test(u) ? u : RELEASES);
+const safeUrl = u => (/^https:\/\/github\.com\/Zhong0118\/(InkPin|PinNote)\//i.test(u) ? u : RELEASES);
 
 function applyRelease(r, platform) {
   const version = String(r.tag || '').replace(/^v/, '');
   if (!version) return;
   const found = {};
-  for (const [kind, re] of Object.entries(PATTERNS)) found[kind] = r.assets.find(a => re.test(a.name));
+  for (const [kind, re] of Object.entries(PATTERNS)) {
+    const matching = r.assets.filter(a => re.test(a.name));
+    found[kind] = matching.find(a => a.name.startsWith('InkPin_')) ?? matching[0];
+  }
   for (const a of document.querySelectorAll('[data-asset]')) {
     const asset = found[a.dataset.asset];
     a.href = asset ? safeUrl(asset.url) : safeUrl(r.url);

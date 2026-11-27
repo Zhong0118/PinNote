@@ -181,7 +181,7 @@ export class CenterForm {
   async #showDock(kind: 'bar' | 'handle', bounds: Bounds) {
     let dock = await WebviewWindow.getByLabel('center-dock');
     if (!dock) {
-      dock = new WebviewWindow('center-dock', { url: '/dock', title: 'PinNote', width: bounds.width, height: bounds.height, decorations: false,
+      dock = new WebviewWindow('center-dock', { url: '/dock', title: 'InkPin', width: bounds.width, height: bounds.height, decorations: false,
         transparent: true, backgroundColor: '#00000000', shadow: false, resizable: false, alwaysOnTop: this.pinned, skipTaskbar: true,
         visible: false, focus: false, visibleOnAllWorkspaces: mac });
       await new Promise<void>((resolve, reject) => { dock!.once('tauri://created', () => resolve()); dock!.once('tauri://error', e => reject(e.payload)); });

@@ -79,6 +79,8 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+          # Keep the Windows installer identity for upgrades while branding the downloadable files.
+          assetNamePattern: ${{ matrix.platform == 'windows-latest' && 'InkPin_[version]_[arch][setup][ext]' || '' }}
 
       - name: Verify macOS bundle signature
         if: matrix.platform == 'macos-latest'
