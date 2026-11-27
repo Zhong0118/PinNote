@@ -9,10 +9,12 @@ import { initDownload } from './download.js';
 // Site theme: follows the system until the visitor picks one; the choice covers every section.
 const root = document.documentElement;
 const toggle = document.getElementById('theme-toggle');
+const heroImages = document.querySelectorAll('[data-theme-source]');
 function syncToggle() {
   const dark = root.dataset.theme === 'dark';
   toggle.setAttribute('aria-pressed', String(dark));
   toggle.setAttribute('aria-label', dark ? '切换到浅色模式' : '切换到深色模式');
+  for (const source of heroImages) source.media = dark ? 'all' : 'not all';
 }
 toggle.addEventListener('click', () => {
   root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -30,7 +32,10 @@ for (const init of [initDesk, initCenterCollapse, initDaily, initMcp, initHeatma
   try { init(); } catch (error) { console.error(error); }
 }
 
-function openFaqFromHash() { const t = location.hash && document.querySelector(location.hash); if (t?.tagName === 'DETAILS') t.open = true; }
+function openFaqFromHash() {
+  const target = document.getElementById(location.hash.slice(1));
+  if (target?.tagName === 'DETAILS') target.open = true;
+}
 window.addEventListener('hashchange', openFaqFromHash);
 openFaqFromHash();
 

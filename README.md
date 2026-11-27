@@ -54,6 +54,8 @@ macOS 也可通过 Homebrew 安装发布版：
 brew install --cask zhong0118/tap/pinnote
 ```
 
+通过 Homebrew 装过旧版时，先运行 `brew update`，再运行 `brew upgrade --cask --greedy zhong0118/tap/pinnote`。升级后应用名为 InkPin，便签仍使用原来的数据目录。若 Homebrew 要求先信任配方，运行 `brew trust --cask zhong0118/tap/pinnote`。
+
 macOS 安装包使用 ad-hoc 签名，尚未通过 Apple 公证。应用内的「检查更新」可以从托盘打开。
 
 ## 数据与导出

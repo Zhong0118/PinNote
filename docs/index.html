@@ -3,30 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PinNote · macOS 与 Windows 上的本地 Markdown 桌面便签</title>
-<meta name="description" content="PinNote 是 macOS 与 Windows 上的本地 Markdown 桌面便签。需要时放在手边，不用时收进屏幕边缘，在便签中心整理，也可以连接你授权的 AI 工具。">
+<title>驻墨 InkPin｜能贴边收纳的桌面便签</title>
+<meta name="description" content="驻墨 InkPin 是 macOS 和 Windows 上的本地 Markdown 便签。用快捷键记下待办和提醒，把常用便签贴在桌面，写完收进屏幕边缘。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#18181b" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#111521" media="(prefers-color-scheme: dark)">
 <link rel="canonical" href="https://zhong0118.github.io/PinNote/">
 <link rel="icon" type="image/png" sizes="128x128" href="./media/icon.png">
 <link rel="apple-touch-icon" href="./media/icon.png">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="PinNote">
+<meta property="og:site_name" content="驻墨 InkPin">
 <meta property="og:locale" content="zh_CN">
-<meta property="og:title" content="PinNote · 本地 Markdown 桌面便签">
-<meta property="og:description" content="需要时放在手边，不用时收进屏幕边缘，在便签中心整理，也可以连接你授权的 AI 工具。macOS 与 Windows。">
+<meta property="og:title" content="驻墨 InkPin｜能贴边收纳的桌面便签">
+<meta property="og:description" content="驻墨 InkPin 是 macOS 和 Windows 上的本地 Markdown 便签。用快捷键记下待办和提醒，把常用便签贴在桌面，写完收进屏幕边缘。">
 <meta property="og:url" content="https://zhong0118.github.io/PinNote/">
 <meta property="og:image" content="https://zhong0118.github.io/PinNote/media/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="PinNote 便签中心、桌面便签和贴边标签">
+<meta property="og:image:alt" content="驻墨 InkPin 1.4.0 的便签中心">
 <meta name="twitter:card" content="summary_large_image">
 <script>
   // Apply the saved site theme before first paint.
   try { var t = localStorage.getItem('pinnote-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark'; } catch (e) {}
 </script>
-<link rel="preload" as="image" href="./media/center-hero-light.webp" fetchpriority="high">
 <link rel="stylesheet" href="./site.css">
 <script type="module" src="./js/main.js"></script>
 </head>
@@ -76,18 +75,17 @@
 
 <header class="site-head">
   <div class="wrap head-row">
-    <a class="brand" href="./" aria-label="PinNote 首页"><img src="./media/icon.png" width="28" height="28" alt="">PinNote</a>
+    <a class="brand" href="./" aria-label="驻墨 InkPin 首页"><img src="./media/icon.png" width="32" height="32" alt=""><span>驻墨 <small>InkPin</small></span></a>
     <nav class="head-nav" aria-label="页面导航">
-      <a href="#experience">怎么用</a>
-      <a href="#center-collapse">中心收起</a>
-      <a href="#daily">日常整理</a>
-      <a href="#ai">AI 工具</a>
-      <a href="#data">数据</a>
-      <a href="#faq">常见问题</a>
+      <a href="#capture">快速速记</a>
+      <a href="#experience">贴边演示</a>
+      <a href="#daily">便签中心</a>
+      <a href="#themes">外观</a>
+      <a href="#data">本地数据</a>
     </nav>
     <div class="head-actions">
-      <button class="icon-btn" id="theme-toggle" type="button" aria-pressed="false" aria-label="深色模式"><svg class="ic only-light"><use href="#i-moon"/></svg><svg class="ic only-dark"><use href="#i-sun"/></svg></button>
-      <a class="icon-btn" href="https://github.com/Zhong0118/PinNote" aria-label="GitHub 上的 PinNote"><svg class="ic"><use href="#i-github"/></svg></a>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-pressed="false" aria-label="深色模式"><svg class="ic only-light" aria-hidden="true"><use href="#i-moon"/></svg><svg class="ic only-dark" aria-hidden="true"><use href="#i-sun"/></svg></button>
+      <a class="icon-btn" href="https://github.com/Zhong0118/PinNote" aria-label="GitHub 上的驻墨 InkPin"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg></a>
       <a class="btn btn-small" href="#download">下载</a>
     </div>
   </div>
@@ -98,26 +96,52 @@
 <section class="hero" aria-labelledby="hero-title">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <h1 id="hero-title">便签放在手边，<br>不用时收进屏幕边缘</h1>
-      <p class="lede">PinNote 是 macOS 和 Windows 上的本地 Markdown 桌面便签。需要时把它放在手边，不用时收进屏幕边缘，在便签中心整理，也可以连接你授权的 AI 工具。</p>
+      <h1 id="hero-title">随手记下<br>用完收进屏幕边缘</h1>
+      <p class="lede">驻墨是贴在桌面上的 Markdown 便签。用快捷键记下待办和提醒，把手头要用的便签置顶，整理时回到便签中心。</p>
       <div class="cta-row">
-        <a class="btn btn-primary" id="hero-download" href="https://github.com/Zhong0118/PinNote/releases/latest"><svg class="ic"><use href="#i-download"/></svg><span>下载 PinNote</span></a>
-        <a class="btn btn-quiet" href="#experience">看看怎么用</a>
+        <a class="btn btn-primary" id="hero-download" href="#download"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg><span>下载驻墨</span></a>
+        <a class="btn btn-quiet" href="#experience">试试贴边收纳</a>
       </div>
-      <p class="release-line" data-release-line>macOS（Apple Silicon 和 Intel）· Windows x64 · 免费开源</p>
+      <p class="release-line"><a href="https://github.com/Zhong0118/PinNote/releases/tag/v1.4.0" data-release-version>1.4.0</a><span>macOS / Windows</span><span>开源 · 本地存储</span></p>
     </div>
     <figure class="hero-stage">
-      <div class="desk-shot" role="img" aria-label="PinNote 示意：左侧是便签中心，正在编辑「官网改版讨论」；右上是展开在桌面的「本周计划」便签；右侧屏幕边缘有「周末采购」贴边标签，下方是收成胶囊的「阅读摘录」。">
-        <img class="shot-center only-light" src="./media/center-hero-light.webp" width="1600" height="1047" alt="" fetchpriority="high" decoding="async">
-        <img class="shot-center only-dark" src="./media/center-hero-dark.webp" width="1600" height="1047" alt="" loading="lazy" decoding="async">
-        <img class="shot-note only-light" src="./media/note-plan-light.webp" width="680" height="800" alt="" decoding="async">
-        <img class="shot-note only-dark" src="./media/note-plan-dark.webp" width="680" height="800" alt="" loading="lazy" decoding="async">
-        <img class="shot-capsule only-light" src="./media/capsule-read-light.webp" width="360" height="80" alt="" decoding="async">
-        <img class="shot-capsule only-dark" src="./media/capsule-read-dark.webp" width="360" height="80" alt="" loading="lazy" decoding="async">
-        <img class="shot-tab only-light" src="./media/edge-shop-light.webp" width="56" height="128" alt="" decoding="async">
-        <img class="shot-tab only-dark" src="./media/edge-shop-dark.webp" width="56" height="128" alt="" loading="lazy" decoding="async">
-      </div>
-      <figcaption>合成示意。各窗口截自 PinNote 1.3.8 源码构建（浏览器渲染，示例数据），摆放位置按版面调整。</figcaption>
+      <a class="desk-shot" href="#experience" aria-label="体验便签贴边收纳">
+        <picture>
+          <source data-theme-source media="(prefers-color-scheme: dark)" srcset="./media/center-hero-dark.webp">
+          <img class="shot-center" src="./media/center-hero-light.webp" width="1440" height="990" alt="驻墨 1.4.0 便签中心的侧边栏和 Markdown 待办编辑器" fetchpriority="high" decoding="async">
+        </picture>
+        <picture>
+          <source data-theme-source media="(prefers-color-scheme: dark)" srcset="./media/note-plan-dark.webp">
+          <img class="shot-note" src="./media/note-plan-light.webp" width="640" height="612" alt="独立的桌面便签" decoding="async">
+        </picture>
+        <picture>
+          <source data-theme-source media="(prefers-color-scheme: dark)" srcset="./media/capsule-read-dark.webp">
+          <img class="shot-capsule" src="./media/capsule-read-light.webp" width="360" height="80" alt="收成胶囊的便签" decoding="async">
+        </picture>
+        <picture>
+          <source data-theme-source media="(prefers-color-scheme: dark)" srcset="./media/dock-handle-dark.webp">
+          <img class="shot-tab" src="./media/dock-handle-light.webp" width="60" height="192" alt="屏幕边缘的便签中心把手" decoding="async">
+        </picture>
+      </a>
+      <figcaption><span>驻墨桌面 / 1.4.0</span><a href="#themes">查看深浅色外观</a></figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="capture" class="section capture" aria-labelledby="capture-title">
+  <div class="wrap capture-grid">
+    <div class="capture-copy">
+      <h2 id="capture-title">想到就记</h2>
+      <p>从任何窗口按快捷键打开速记。输入一行，驻墨会识别待办、标签和提醒。按 Enter 存入便签中心，也可以直接贴到桌面。</p>
+      <dl class="capture-keys">
+        <div><dt>Mac</dt><dd><kbd>⌘</kbd><kbd>⌥</kbd><kbd>Space</kbd></dd></div>
+        <div><dt>Windows</dt><dd><kbd>Alt</kbd><kbd>Shift</kbd><kbd>Space</kbd></dd></div>
+      </dl>
+    </div>
+    <figure class="capture-figure">
+      <img class="only-light" src="./media/quick-light.webp" width="1060" height="292" alt="1.4.0 快速速记窗口，输入检查安装包后识别发布标签和 30 分钟提醒" loading="lazy" decoding="async">
+      <img class="only-dark" src="./media/quick-dark.webp" width="1060" height="292" alt="1.4.0 深色速记窗口，显示已识别的标签和提醒" loading="lazy" decoding="async">
+      <figcaption>设置提醒需要系统通知权限。权限关闭时，驻墨仍会保存便签，并提示去哪里开启通知。</figcaption>
     </figure>
   </div>
 </section>
@@ -125,14 +149,14 @@
 <section id="experience" class="section" aria-labelledby="exp-title">
   <div class="wrap">
     <div class="section-head">
-      <h2 id="exp-title">一张便签，从中心到屏幕边缘</h2>
-      <p>同一张「本周计划」：在中心写，放到桌面，收成胶囊或贴边标签，悬停看一眼，点开继续写，最后收回中心。可以拖动便签，也可以用按钮和键盘。</p>
+      <h2 id="exp-title">把便签贴到桌面</h2>
+      <p>试试把「本周计划」放到桌面、收成胶囊，或者拖去屏幕边缘。鼠标停在贴边标签上就能预览，点开可以继续写。</p>
     </div>
     <div class="exp-grid">
       <ol class="steps" id="desk-steps" aria-label="演示步骤">
         <li><button type="button" data-step="0"><b>在中心写下</b><span>新建便签，正文支持 Markdown 和待办。</span></button></li>
         <li><button type="button" data-step="1"><b>放到桌面</b><span>成为独立窗口，可以置顶。它展开时由它负责编辑，中心只读。</span></button></li>
-        <li><button type="button" data-step="2"><b>收起</b><span>两种形态：胶囊 180 × 40，留在原位；贴边标签收进屏幕左右边缘的槽位。</span></button></li>
+        <li><button type="button" data-step="2"><b>收起</b><span>收成胶囊留在原位，或者贴到屏幕左右两侧。</span></button></li>
         <li><button type="button" data-step="3"><b>悬停预览</b><span>指针停在标签上，弹出只读摘要和待办进度。</span></button></li>
         <li><button type="button" data-step="4"><b>点开继续写</b><span>从边缘向内展开；再收起回到原来的槽位。</span></button></li>
         <li><button type="button" data-step="5"><b>回到中心，或拖回桌面</b><span>收回中心；或者把标签向内拖离边缘，它会变回自由的胶囊。</span></button></li>
@@ -141,9 +165,9 @@
         <div class="demo-bar">
           <span class="demo-label">交互演示 · 网页模拟</span>
           <div class="demo-bar-actions">
-            <button class="icon-btn small" type="button" data-step-prev aria-label="上一步"><svg class="ic"><use href="#i-prev"/></svg></button>
+            <button class="icon-btn small" type="button" data-step-prev aria-label="上一步"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
             <span class="step-count" data-step-count aria-live="polite">1 / 6</span>
-            <button class="icon-btn small" type="button" data-step-next aria-label="下一步"><svg class="ic"><use href="#i-next"/></svg></button>
+            <button class="icon-btn small" type="button" data-step-next aria-label="下一步"><svg class="ic" aria-hidden="true"><use href="#i-next"/></svg></button>
             <button class="text-btn" type="button" data-reset>重置演示</button>
           </div>
         </div>
@@ -163,14 +187,14 @@
               <div class="dn-title" data-drag>
                 <span class="dot" aria-hidden="true"></span>
                 <span class="dn-name">本周计划</span>
-                <button class="dn-btn pinned" type="button" aria-label="已置顶" aria-pressed="true" tabindex="-1"><svg class="ic"><use href="#i-pin"/></svg></button>
-                <button class="dn-btn" type="button" data-act="collapse" aria-label="收成胶囊"><svg class="ic"><use href="#i-shrink"/></svg></button>
+                <button class="dn-btn pinned" type="button" aria-label="已置顶" aria-pressed="true" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button>
+                <button class="dn-btn" type="button" data-act="collapse" aria-label="收成胶囊"><svg class="ic" aria-hidden="true"><use href="#i-shrink"/></svg></button>
               </div>
               <div class="dn-content md" data-note-body></div>
             </div>
             <div class="dn-capsule" data-face="capsule">
               <span class="dot" aria-hidden="true"></span><span class="dn-name">本周计划</span>
-              <button class="dn-btn pinned" type="button" aria-label="已置顶" tabindex="-1"><svg class="ic"><use href="#i-pin"/></svg></button>
+              <button class="dn-btn pinned" type="button" aria-label="已置顶" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button>
             </div>
             <div class="dn-tab" data-face="tab"><span class="dn-tab-text">本周计划</span></div>
           </div>
@@ -193,11 +217,11 @@
     <div class="cc-copy">
       <h2 id="cc-title">便签中心也能收起</h2>
       <p>中心标题栏右上角有三个按钮：收起到左侧边缘、收起到右侧边缘、收起为小条。</p>
-      <img class="titlebar-shot only-light" src="./media/titlebar-light.webp" width="380" height="88" alt="便签中心标题栏右上角：浅色/深色开关、置顶、收起到左侧边缘、收起到右侧边缘、收起为小条" loading="lazy" decoding="async">
-      <img class="titlebar-shot only-dark" src="./media/titlebar-dark.webp" width="380" height="88" alt="便签中心标题栏（深色）：浅色/深色开关、置顶、收起到左侧、收起到右侧、收起为小条" loading="lazy" decoding="async">
+      <img class="titlebar-shot only-light" src="./media/titlebar-light.webp" width="330" height="58" alt="便签中心标题栏右上角：浅色/深色开关、置顶、收起到左侧边缘、收起到右侧边缘、收起为小条" loading="lazy" decoding="async">
+      <img class="titlebar-shot only-dark" src="./media/titlebar-dark.webp" width="330" height="58" alt="便签中心标题栏（深色）：浅色/深色开关、置顶、收起到左侧、收起到右侧、收起为小条" loading="lazy" decoding="async">
       <figure class="cc-real">
-        <img class="only-light" src="./media/dock-handle-light.webp" width="48" height="192" alt="收在右侧边缘的便签中心把手" loading="lazy" decoding="async">
-        <img class="only-dark" src="./media/dock-handle-dark.webp" width="48" height="192" alt="收在右侧边缘的便签中心把手（深色）" loading="lazy" decoding="async">
+        <img class="only-light" src="./media/dock-handle-light.webp" width="60" height="192" alt="收在右侧边缘的便签中心把手" loading="lazy" decoding="async">
+        <img class="only-dark" src="./media/dock-handle-dark.webp" width="60" height="192" alt="收在右侧边缘的便签中心把手（深色）" loading="lazy" decoding="async">
         <img class="only-light" src="./media/dock-bar-light.webp" width="640" height="80" alt="收成小条的便签中心，显示当前便签「本周计划」以及新建和展开按钮" loading="lazy" decoding="async">
         <img class="only-dark" src="./media/dock-bar-dark.webp" width="640" height="80" alt="收成小条的便签中心（深色）" loading="lazy" decoding="async">
         <figcaption>实际的把手和小条</figcaption>
@@ -217,8 +241,8 @@
             <button type="button" role="radio" aria-checked="true" data-platform="mac">macOS</button>
             <button type="button" role="radio" aria-checked="false" data-platform="win">Windows</button>
           </div>
-          <button class="icon-btn small" type="button" id="cc-play" aria-label="暂停自动演示"><svg class="ic"><use href="#i-pause"/></svg></button>
-          <button class="icon-btn small" type="button" id="cc-replay" aria-label="从头播放"><svg class="ic"><use href="#i-replay"/></svg></button>
+          <button class="icon-btn small" type="button" id="cc-play" aria-label="暂停自动演示"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg></button>
+          <button class="icon-btn small" type="button" id="cc-replay" aria-label="从头播放"><svg class="ic" aria-hidden="true"><use href="#i-replay"/></svg></button>
         </div>
       </div>
       <div class="screen" id="cc-screen">
@@ -227,9 +251,9 @@
             <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="cc-title">本周计划</span>
             <div class="cc-tools">
-              <button type="button" class="cc-btn" data-cc="left" aria-label="收起到左侧边缘"><svg class="ic"><use href="#i-left"/></svg></button>
-              <button type="button" class="cc-btn" data-cc="right" aria-label="收起到右侧边缘"><svg class="ic"><use href="#i-right"/></svg></button>
-              <button type="button" class="cc-btn" data-cc="bar" aria-label="收起为小条"><svg class="ic"><use href="#i-shrink"/></svg></button>
+              <button type="button" class="cc-btn" data-cc="left" aria-label="收起到左侧边缘"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
+              <button type="button" class="cc-btn" data-cc="right" aria-label="收起到右侧边缘"><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button>
+              <button type="button" class="cc-btn" data-cc="bar" aria-label="收起为小条"><svg class="ic" aria-hidden="true"><use href="#i-shrink"/></svg></button>
             </div>
           </div>
           <div class="cc-body" aria-hidden="true">
@@ -237,11 +261,11 @@
             <div class="cc-main"><b></b><i></i><i></i><i class="short"></i></div>
           </div>
         </div>
-        <button type="button" class="cc-handle" id="cc-handle" hidden aria-label="便签中心把手：点一下恢复，上下拖动换位置，向内拖出恢复到指针处"><svg class="ic"><use href="#i-notebook"/></svg><span>便签</span></button>
+        <button type="button" class="cc-handle" id="cc-handle" hidden aria-label="便签中心把手：点一下恢复，上下拖动换位置，向内拖出恢复到指针处"><svg class="ic" aria-hidden="true"><use href="#i-notebook"/></svg><span>便签</span></button>
         <div class="cc-bar" id="cc-bar" hidden>
           <svg class="ic" aria-hidden="true"><use href="#i-notebook"/></svg><b>便签中心</b><span>本周计划</span>
-          <button type="button" class="cc-btn" aria-label="新建便签（演示中不可用）" disabled><svg class="ic"><use href="#i-plus"/></svg></button>
-          <button type="button" class="cc-btn" data-cc="restore" aria-label="展开便签中心"><svg class="ic"><use href="#i-expand"/></svg></button>
+          <button type="button" class="cc-btn" aria-label="新建便签（演示中不可用）" disabled><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button>
+          <button type="button" class="cc-btn" data-cc="restore" aria-label="展开便签中心"><svg class="ic" aria-hidden="true"><use href="#i-expand"/></svg></button>
         </div>
       </div>
       <p class="demo-note" id="cc-status" aria-live="polite"></p>
@@ -252,8 +276,8 @@
 <section id="daily" class="section" aria-labelledby="daily-title">
   <div class="wrap">
     <div class="section-head">
-      <h2 id="daily-title">在便签中心里整理</h2>
-      <p>列表、工作标签页、编辑器和工具栏都在一个窗口里。试着搜索「官网」，勾掉一项待办，或者用筛选只看有提醒的便签。</p>
+      <h2 id="daily-title">用便签中心整理</h2>
+      <p>搜索标题、正文和标签，在标签页之间切换。试着搜「官网」，或者勾掉一项待办。</p>
     </div>
     <div class="app-demo">
       <div class="demo-bar">
@@ -268,7 +292,7 @@
               <button type="button" role="radio" aria-checked="true" data-scope="all">全部便签</button>
               <button type="button" role="radio" aria-checked="false" data-scope="desktop">桌面便签</button>
             </div>
-            <button type="button" class="icon-btn small" id="app-filter-btn" aria-expanded="false" aria-controls="app-filters" aria-label="快速筛选"><svg class="ic"><use href="#i-filter"/></svg></button>
+            <button type="button" class="icon-btn small" id="app-filter-btn" aria-expanded="false" aria-controls="app-filters" aria-label="快速筛选"><svg class="ic" aria-hidden="true"><use href="#i-filter"/></svg></button>
           </div>
           <div class="app-filters" id="app-filters" hidden>
             <p class="sr">多个条件同时满足才显示</p>
@@ -283,56 +307,33 @@
         </div>
       </div>
       <dl class="legend">
-        <div><dt>工作标签页</dt><dd>顶部的标签页是正在用的便签，关掉只是不再打开，便签还在。</dd></div>
+        <div><dt>工作标签页</dt><dd>把这几天常用的便签留在标签页，关掉标签页后仍能在列表里找到。</dd></div>
         <div><dt>标签</dt><dd>标题下的 #工作、#官网 是内容标签，用来筛选，最多 12 个。</dd></div>
-        <div><dt>提醒</dt><dd>每张便签一个一次性提醒，不是每项待办各一个。</dd></div>
+        <div><dt>提醒</dt><dd>每张便签可设一个一次性提醒。</dd></div>
       </dl>
     </div>
   </div>
 </section>
 
-<section id="ai" class="section section-tint" aria-labelledby="ai-title">
+<section id="themes" class="section" aria-labelledby="themes-title">
   <div class="wrap">
     <div class="section-head">
-      <h2 id="ai-title">连接你授权的 AI 工具</h2>
-      <p>PinNote 带一个本地 MCP 服务。默认关闭；启用后默认只读，修改便签需要你单独打开写入权限。便签留在本机，但 AI 工具读到的内容，会交给你配置的那个客户端处理。</p>
+      <h2 id="themes-title">方格纸和像素控件</h2>
+      <p>1.4.0 用方角选框、像素待办和进度条标出当前状态。点阵纸纹可以关闭，深浅色也能跟随系统。Mac 上还可调节窗口的毛玻璃透明度。</p>
     </div>
-    <div class="ai-grid">
-      <div class="ai-demo">
-        <div class="demo-bar">
-          <span class="demo-label">流程示意 · 不调用任何模型，不需要 API Key</span>
-          <div class="demo-bar-actions"><button class="text-btn" type="button" data-reset>重置演示</button></div>
-        </div>
-        <div class="ai-perm" aria-label="PinNote 设置 → 集成（演示）">
-          <label class="switch-row"><span>启用本地 MCP</span><input type="checkbox" role="switch" id="mcp-enabled"></label>
-          <label class="switch-row"><span>允许 agent 修改便签</span><input type="checkbox" role="switch" id="mcp-write"></label>
-          <p class="fine">读写范围：普通便签（归档和回收站不在范围内）</p>
-        </div>
-        <div class="chat" id="ai-chat" aria-live="polite"></div>
-        <div class="ai-actions"><button class="btn btn-primary" type="button" id="ai-next">发送请求</button></div>
+    <div class="theme-compare">
+      <figure><img src="./media/center-hero-light.webp" width="1440" height="990" alt="浅色主题的驻墨 1.4.0 便签中心" loading="lazy" decoding="async"><figcaption>浅色</figcaption></figure>
+      <figure><img src="./media/center-hero-dark.webp" width="1440" height="990" alt="深色主题的驻墨 1.4.0 便签中心" loading="lazy" decoding="async"><figcaption>深色</figcaption></figure>
+    </div>
+    <div class="theme-details">
+      <div class="swatches" aria-label="便签颜色">
+        <span style="--sw:#ffffff">纯白</span><span style="--sw:#bce4d1">薄荷</span><span style="--sw:#f2c9c5">浅粉</span><span style="--sw:#c1dcf7">浅蓝</span><span style="--sw:#ddcef0">淡紫</span><span style="--sw:#454545">深色</span><span class="custom" style="--sw:conic-gradient(#ef4444,#f59e0b,#22c55e,#3b82f6,#a855f7,#ef4444)">自定义</span>
       </div>
-      <aside class="ai-side">
-        <h3>实际提供的工具</h3>
-        <p class="fine">来自 <a href="https://github.com/Zhong0118/PinNote/blob/main/scripts/pinnote-mcp.mjs">scripts/pinnote-mcp.mjs</a>。</p>
-        <div class="tool-group">
-          <h4>启用后即可用</h4>
-          <ul class="tools"><li><code>search_notes</code>搜索标题和正文</li><li><code>read_note</code>读取一张便签和它的版本号</li></ul>
-        </div>
-        <div class="tool-group">
-          <h4>需要写入权限</h4>
-          <ul class="tools">
-            <li><code>create_note</code>新建在中心，不打开窗口</li>
-            <li><code>append_note</code>在末尾追加</li>
-            <li><code>update_note</code>修改标题或正文</li>
-            <li><code>archive_note</code><code>trash_note</code><code>restore_note</code>归档、移到回收站、恢复</li>
-            <li><code>set_reminder</code><code>cancel_reminder</code>设置或取消提醒</li>
-            <li><code>open_note</code>在桌面打开（只在你明确要求时）</li>
-          </ul>
-        </div>
-        <p class="fine">写入时要带上读到的版本号，便签在此期间被改过就会拒绝。每次 agent 修改都会记在设置里，可以撤销或恢复到修改前的版本。</p>
-        <img class="settings-shot" src="./media/settings-integration.webp" width="1400" height="760" alt="PinNote 设置的集成页：启用本地 MCP 和允许 agent 修改便签两个开关都处于关闭状态，读写范围为普通便签" loading="lazy" decoding="async">
-        <a class="text-link" href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md#本地-mcp">配置 MCP 客户端<svg class="ic"><use href="#i-external"/></svg></a>
-      </aside>
+      <div class="note-pair">
+        <img class="only-light" src="./media/note-plan-light.webp" width="640" height="612" alt="浅色主题下的独立桌面便签「本周发布清单」" loading="lazy" decoding="async">
+        <img class="only-dark" src="./media/note-plan-dark.webp" width="640" height="612" alt="深色模式下的同一张桌面便签" loading="lazy" decoding="async">
+        <p class="fine">一张便签可以单独选纸色。换成深色模式时，驻墨会保留每张便签的颜色。</p>
+      </div>
     </div>
   </div>
 </section>
@@ -341,19 +342,19 @@
   <div class="wrap">
     <div class="section-head">
       <h2 id="data-title">找回旧内容，带走全部便签</h2>
-      <p>便签只存在这台电脑上，不做云同步。下面五样东西各管一件事，别把它们混在一起。</p>
+      <p>便签保存在这台电脑。需要换电脑时，可导出 Markdown 或备份整个数据目录。</p>
     </div>
     <div class="data-grid">
       <dl class="data-list">
-        <div class="data-row"><dt><svg class="ic"><use href="#i-archive"/></svg>归档</dt><dd>收起用完但还想留着的便签。会被导出、计入统计，提醒暂停，随时恢复。</dd></div>
-        <div class="data-row"><dt><svg class="ic"><use href="#i-trash"/></svg>回收站</dt><dd>删除前的缓冲。默认 30 天后自动永久删除，可以改成 60 天、90 天或永不。自动清空在每日备份之后进行。</dd></div>
-        <div class="data-row"><dt><svg class="ic"><use href="#i-history"/></svg>历史版本</dt><dd>停下 10 分钟以上再继续编辑时，保留之前的内容。每张便签最多 20 个版本；恢复前，当前内容也会存成一个版本。</dd></div>
-        <div class="data-row"><dt><svg class="ic"><use href="#i-database"/></svg>自动备份</dt><dd>应用运行时每天备份一次全部便签（内容没变就不备份），保留最近 14 份。恢复前先把当前内容另存一份，再替换并重启。</dd></div>
-        <div class="data-row"><dt><svg class="ic"><use href="#i-file-down"/></svg>导出 Markdown</dt><dd>导出一张，或导出全部：新建一个文件夹，每张便签一个 .md 文件，归档的放在「归档」子文件夹，回收站不导出。</dd></div>
+        <div class="data-row"><dt><svg class="ic" aria-hidden="true"><use href="#i-archive"/></svg>归档</dt><dd>收起用完但还想留着的便签。会被导出、计入统计，提醒暂停，随时恢复。</dd></div>
+        <div class="data-row"><dt><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg>回收站</dt><dd>删除前的缓冲。默认 30 天后自动永久删除，可以改成 60 天、90 天或永不。自动清空在每日备份之后进行。</dd></div>
+        <div class="data-row"><dt><svg class="ic" aria-hidden="true"><use href="#i-history"/></svg>历史版本</dt><dd>停下 10 分钟以上再继续编辑时，保留之前的内容。每张便签最多 20 个版本；恢复前，当前内容也会存成一个版本。</dd></div>
+        <div class="data-row"><dt><svg class="ic" aria-hidden="true"><use href="#i-database"/></svg>自动备份</dt><dd>应用运行时每天备份一次全部便签（内容没变就不备份），保留最近 14 份。恢复前先把当前内容另存一份，再替换并重启。</dd></div>
+        <div class="data-row"><dt><svg class="ic" aria-hidden="true"><use href="#i-file-down"/></svg>导出 Markdown</dt><dd>导出一张，或导出全部：新建一个文件夹，每张便签一个 .md 文件，归档的放在「归档」子文件夹，回收站不导出。</dd></div>
       </dl>
       <figure class="data-fig">
-        <img src="./media/settings-data.webp" width="1400" height="940" alt="PinNote 设置的数据与更新页：数据目录、导出全部、回收站自动清空（30 天、60 天、90 天、永不）、自动备份（保留最近 14 份）" loading="lazy" decoding="async">
-        <figcaption>设置 → 数据与更新。导出得到的是一份副本，PinNote 不会读取或同步某个 Markdown 文件夹。保存失败时会保留草稿并提示，重要内容仍建议另外备份。</figcaption>
+        <img src="./media/settings-data.webp" width="1440" height="859" alt="驻墨 1.4.0 设置的数据与更新页，提供导出、备份和恢复入口" loading="lazy" decoding="async">
+        <figcaption>在「数据与更新」里，可以打开数据目录或手动备份。</figcaption>
       </figure>
     </div>
   </div>
@@ -378,68 +379,101 @@
   </div>
 </section>
 
-<section id="themes" class="section" aria-labelledby="themes-title">
-  <div class="wrap">
-    <div class="section-head">
-      <h2 id="themes-title">浅色、深色和便签自己的颜色</h2>
-      <p>外观可以跟随系统，也可以固定浅色或深色，所有窗口同步切换。便签颜色属于便签本身：深色模式下按它的色调显示，不改写颜色和内容。</p>
-    </div>
-    <div class="theme-compare">
-      <figure><img src="./media/center-plan-light.webp" width="1600" height="1029" alt="浅色主题下的便签中心，打开着「本周计划」" loading="lazy" decoding="async"><figcaption>浅色</figcaption></figure>
-      <figure><img src="./media/center-plan-dark.webp" width="1600" height="1029" alt="深色主题下的同一界面" loading="lazy" decoding="async"><figcaption>深色</figcaption></figure>
-    </div>
-    <div class="theme-details">
-      <div class="swatches" aria-label="便签颜色">
-        <span style="--sw:#ffffff">纯白</span><span style="--sw:#bce4d1">薄荷</span><span style="--sw:#f2c9c5">浅粉</span><span style="--sw:#c1dcf7">浅蓝</span><span style="--sw:#ddcef0">淡紫</span><span style="--sw:#454545">深色</span><span class="custom" style="--sw:conic-gradient(#ef4444,#f59e0b,#22c55e,#3b82f6,#a855f7,#ef4444)">自定义</span>
-      </div>
-      <div class="note-pair">
-        <img class="only-light" src="./media/note-plan-light.webp" width="680" height="800" alt="浅蓝色的桌面便签「本周计划」，标题栏的置顶按钮为蓝色实心，表示已置顶" loading="lazy" decoding="async">
-        <img class="only-dark" src="./media/note-plan-dark.webp" width="680" height="800" alt="深色模式下的同一张桌面便签" loading="lazy" decoding="async">
-        <p class="fine">桌面便签标题栏只有颜色圆点、标题、置顶、收起和更多。置顶开启时按钮是蓝色实心。点颜色圆点换色，也可以用系统取色器自定义。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
 <section id="download" class="section section-ink" aria-labelledby="dl-title">
   <div class="wrap dl-grid">
     <div class="dl-copy">
-      <h2 id="dl-title">下载 PinNote</h2>
-      <p data-release-summary>安装包发布在 GitHub Release。</p>
+      <h2 id="dl-title">下载驻墨</h2>
+      <p data-release-summary>1.4.0 · macOS 通用版和 Windows x64</p>
       <div class="seg seg-inverse" role="tablist" aria-label="选择平台">
         <button type="button" role="tab" id="tab-mac" aria-controls="panel-mac" aria-selected="true" data-platform-tab="mac">macOS</button>
-        <button type="button" role="tab" id="tab-win" aria-controls="panel-win" aria-selected="false" data-platform-tab="win">Windows</button>
+        <button type="button" role="tab" id="tab-win" aria-controls="panel-win" aria-selected="false" tabindex="-1" data-platform-tab="win">Windows</button>
       </div>
       <p class="fine" data-platform-detect></p>
     </div>
     <div class="dl-panels">
-      <div class="dl-panel" role="tabpanel" id="panel-mac" aria-labelledby="tab-mac">
-        <a class="dl-file primary" data-asset="dmg" href="https://github.com/Zhong0118/PinNote/releases/latest">
-          <svg class="ic"><use href="#i-download"/></svg>
-          <span><b>Universal DMG</b><small>Apple Silicon 和 Intel 通用 · 打开后拖进「应用程序」</small></span>
-          <em data-asset-meta>Release 页面</em>
-        </a>
-        <div class="brew">
-          <p>或者用 Homebrew 安装：</p>
-          <div class="cmd"><code id="brew-cmd">brew install --cask zhong0118/tap/pinnote</code><button class="copy-btn" type="button" data-copy="#brew-cmd"><svg class="ic"><use href="#i-copy"/></svg><span>复制</span></button></div>
+      <div class="platform-panels">
+        <div class="dl-panel" role="tabpanel" id="panel-mac" aria-labelledby="tab-mac">
+          <a class="dl-file primary" data-asset="dmg" href="https://github.com/Zhong0118/PinNote/releases/download/v1.4.0/InkPin_1.4.0_universal.dmg">
+            <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
+            <span><b>通用 DMG 安装包</b><small>Apple Silicon 和 Intel 通用 · 打开后拖进「应用程序」</small></span>
+            <em data-asset-meta>12.9 MB</em>
+          </a>
+          <div class="brew">
+            <p>Homebrew 安装</p>
+            <div class="cmd"><code id="brew-cmd">brew install --cask zhong0118/tap/pinnote</code><button class="copy-btn" type="button" data-copy="#brew-cmd"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span></button></div>
+            <p>从旧版升级（先运行 <code>brew update</code>）</p>
+            <div class="cmd"><code id="brew-upgrade">brew upgrade --cask --greedy zhong0118/tap/pinnote</code><button class="copy-btn" type="button" data-copy="#brew-upgrade"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>复制</span></button></div>
+            <p class="fine">如果 Homebrew 要求先信任配方，运行 <code>brew trust --cask zhong0118/tap/pinnote</code>。</p>
+            <p class="sr" id="copy-status" role="status"></p>
+          </div>
+          <p class="fine">macOS 安装包使用 ad-hoc 签名，没有做 Apple 公证，第一次打开时系统会拦一下，处理方法见 <a href="#faq-mac">常见问题</a>。</p>
         </div>
-        <p class="fine">macOS 安装包使用 ad-hoc 签名，没有做 Apple 公证，第一次打开时系统会拦一下，处理方法见 <a href="#faq-mac">常见问题</a>。</p>
+        <div class="dl-panel" role="tabpanel" id="panel-win" aria-labelledby="tab-win" hidden>
+          <a class="dl-file primary" data-asset="exe" href="https://github.com/Zhong0118/PinNote/releases/download/v1.4.0/PinNote_1.4.0_x64-setup.exe">
+            <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
+            <span><b>安装程序 EXE</b><small>Windows x64 · 推荐</small></span>
+            <em data-asset-meta>3.7 MB</em>
+          </a>
+          <a class="dl-file" data-asset="msi" href="https://github.com/Zhong0118/PinNote/releases/download/v1.4.0/PinNote_1.4.0_x64_en-US.msi">
+            <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
+            <span><b>MSI 安装包</b><small>Windows x64 · 适合统一部署</small></span>
+            <em data-asset-meta>5.3 MB</em>
+          </a>
+          <p class="fine">需要系统带有 WebView2（Windows 10 和 11 一般已经自带）。</p>
+        </div>
       </div>
-      <div class="dl-panel" role="tabpanel" id="panel-win" aria-labelledby="tab-win" hidden>
-        <a class="dl-file primary" data-asset="exe" href="https://github.com/Zhong0118/PinNote/releases/latest">
-          <svg class="ic"><use href="#i-download"/></svg>
-          <span><b>安装程序 EXE</b><small>Windows x64 · 推荐</small></span>
-          <em data-asset-meta>Release 页面</em>
-        </a>
-        <a class="dl-file" data-asset="msi" href="https://github.com/Zhong0118/PinNote/releases/latest">
-          <svg class="ic"><use href="#i-download"/></svg>
-          <span><b>MSI 安装包</b><small>Windows x64 · 适合统一部署</small></span>
-          <em data-asset-meta>Release 页面</em>
-        </a>
-        <p class="fine">需要系统带有 WebView2（Windows 10 和 11 一般已经自带）。</p>
-      </div>
-      <a class="text-link" href="https://github.com/Zhong0118/PinNote/releases/latest">全部安装包和更新说明<svg class="ic"><use href="#i-external"/></svg></a>
+      <noscript><p><a href="https://github.com/Zhong0118/PinNote/releases/latest">下载 Windows 版</a></p></noscript>
+      <a class="text-link" href="https://github.com/Zhong0118/PinNote/releases/latest">全部安装包和更新说明<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
     </div>
+  </div>
+</section>
+
+<section id="ai" class="section integration" aria-labelledby="ai-title">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="ai-title">本地 MCP</h2>
+      <p>驻墨可连接你配置的 MCP 客户端。集成默认关闭，开启后默认只读。客户端读取的内容由该客户端处理。</p>
+    </div>
+    <details class="integration-demo">
+      <summary>查看权限演示与工具列表</summary>
+      <div class="ai-grid">
+        <div class="ai-demo">
+          <div class="demo-bar">
+            <span class="demo-label">权限演示 · 使用示例便签</span>
+            <div class="demo-bar-actions"><button class="text-btn" type="button" data-reset>重置演示</button></div>
+          </div>
+          <div class="ai-perm" aria-label="驻墨设置 → 集成（演示）">
+            <label class="switch-row"><span>启用本地 MCP</span><input type="checkbox" role="switch" id="mcp-enabled"></label>
+            <label class="switch-row"><span>允许 agent 修改便签</span><input type="checkbox" role="switch" id="mcp-write"></label>
+            <p class="fine">读写范围：普通便签（归档和回收站不在范围内）</p>
+          </div>
+          <div class="chat" id="ai-chat" aria-live="polite"></div>
+          <div class="ai-actions"><button class="btn btn-primary" type="button" id="ai-next">发送请求</button></div>
+        </div>
+        <aside class="ai-side">
+          <h3>实际提供的工具</h3>
+          <p class="fine">来自 <a href="https://github.com/Zhong0118/PinNote/blob/main/scripts/pinnote-mcp.mjs">scripts/pinnote-mcp.mjs</a>。</p>
+          <div class="tool-group">
+            <h4>启用后即可用</h4>
+            <ul class="tools"><li><code>search_notes</code>搜索标题和正文</li><li><code>read_note</code>读取一张便签和它的版本号</li></ul>
+          </div>
+          <div class="tool-group">
+            <h4>需要写入权限</h4>
+            <ul class="tools">
+              <li><code>create_note</code>新建在中心，不打开窗口</li>
+              <li><code>append_note</code>在末尾追加</li>
+              <li><code>update_note</code>修改标题或正文</li>
+              <li><code>archive_note</code><code>trash_note</code><code>restore_note</code>归档、移到回收站、恢复</li>
+              <li><code>set_reminder</code><code>cancel_reminder</code>设置或取消提醒</li>
+              <li><code>open_note</code>在桌面打开（只在你明确要求时）</li>
+            </ul>
+          </div>
+          <p class="fine">写入时要带上读到的版本号，便签在此期间被改过就会拒绝。每次 agent 修改都会记在设置里，可以撤销或恢复到修改前的版本。</p>
+          <img class="settings-shot" src="./media/settings-integration.webp" width="1440" height="859" alt="驻墨 1.4.0 设置中的本地 MCP 权限" loading="lazy" decoding="async">
+          <a class="text-link" href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md#本地-mcp">配置 MCP 客户端<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
+        </aside>
+      </div>
+    </details>
   </div>
 </section>
 
@@ -447,14 +481,14 @@
   <div class="wrap faq-grid">
     <h2 id="faq-title">常见问题</h2>
     <div class="faq">
-      <details><summary>便签会同步到其他电脑吗？</summary><p>不会。PinNote 不做云同步，便签只保存在当前电脑。想在另一台电脑上用，可以导出 Markdown，或在退出应用后复制整个数据目录。</p></details>
+      <details><summary>便签会同步到其他电脑吗？</summary><p>便签保存在当前电脑。想换电脑时，可以导出 Markdown，或在退出应用后复制整个数据目录。</p></details>
       <details><summary>数据存在哪里？</summary><p>在系统的应用数据目录里，macOS 是 <code>~/Library/Application Support/com.pinnote.app</code>，Windows 是 <code>%APPDATA%\com.pinnote.app</code>。在「设置 → 数据与更新 → 数据目录」可以直接打开。</p></details>
       <details><summary>怎么导出和恢复？</summary><p>「设置 → 数据与更新」里可以导出全部便签为 Markdown 文件，也可以立即备份，或从最近 14 份自动备份中选一份恢复。单张便签的旧内容在更多菜单的「历史版本」里。</p></details>
-      <details><summary>提醒什么时候会响？</summary><p>PinNote 需要在后台运行（关掉中心后它还在托盘里）。后台每 15 秒检查一次到期提醒，到点发系统通知；打开便签、延后 10 分钟、清除提醒在便签中心里操作。完全退出期间到期的提醒，会在下次启动时补发一次。系统通知权限或勿扰模式可能让通知不显示。</p></details>
+      <details><summary>提醒什么时候会响？</summary><p>请允许系统通知，并让驻墨在后台运行。关掉便签中心后应用仍在托盘里。完全退出期间到期的提醒，会在下次启动时补发一次。</p></details>
       <details><summary>MCP 默认开着吗？</summary><p>没有。本地 MCP 默认关闭；在「设置 → 集成」启用后，默认只读，只能读普通便签。追加、修改、归档、设置提醒等操作需要你再打开「允许 agent 修改便签」。服务只监听本机 127.0.0.1。</p></details>
-      <details id="faq-mac"><summary>macOS 提示无法验证开发者，怎么办？</summary><p>PinNote 的 macOS 安装包使用 ad-hoc 签名，没有经过 Apple 公证，所以第一次打开时系统会阻止。打开「系统设置 → 隐私与安全性」，在下方找到 PinNote，点「仍要打开」。不同 macOS 版本的提示文字略有差别。</p></details>
-      <details><summary>共享屏幕时能把便签藏起来吗？</summary><p>可以在「设置 → 窗口与便签」打开「共享屏幕时隐藏」，PinNote 会请求系统不要把它的窗口放进截图、录屏和屏幕共享。Windows 上可靠；macOS 上取决于录制软件，基于 ScreenCaptureKit 的较新工具仍可能录到，开会前最好先试一次。</p></details>
-      <details><summary>怎么更新？</summary><p>在托盘菜单选「检查更新」，会下载新版并校验签名，先保存便签再安装重启。应用也会每 24 小时自动检查一次。</p></details>
+      <details id="faq-mac"><summary>macOS 提示无法验证开发者，怎么办？</summary><p>驻墨的 macOS 安装包尚未通过 Apple 公证。遇到拦截时，可在「系统设置 → 隐私与安全性」找到 InkPin，点「仍要打开」。</p></details>
+      <details><summary>共享屏幕时能把便签藏起来吗？</summary><p>可以在「设置 → 窗口与便签」打开「共享屏幕时隐藏」，驻墨会请求系统隐藏便签窗口。Windows 上可靠；macOS 上取决于录制软件，基于 ScreenCaptureKit 的较新工具仍可能录到，开会前最好先试一次。</p></details>
+      <details><summary>怎么更新？</summary><p>手动安装的用户可以从托盘菜单选择「检查更新」。通过 Homebrew 安装的用户可以运行上面的升级命令。1.4.0 起 macOS 应用名为 InkPin，仍使用原来的数据目录。</p></details>
     </div>
   </div>
 </section>
@@ -463,10 +497,10 @@
 
 <footer class="site-foot">
   <div class="wrap foot-row">
-    <div class="foot-brand"><img src="./media/icon.png" width="24" height="24" alt="">PinNote <span class="fine">MIT 许可</span></div>
+    <div class="foot-brand"><img src="./media/icon.png" width="24" height="24" alt="">驻墨 InkPin <span class="fine">MIT 许可</span></div>
     <nav class="foot-nav" aria-label="项目链接">
       <a href="https://github.com/Zhong0118/PinNote">GitHub</a>
-      <a href="https://github.com/Zhong0118/PinNote/releases/latest">Release</a>
+      <a href="https://github.com/Zhong0118/PinNote/releases/latest">版本记录</a>
       <a href="https://github.com/Zhong0118/PinNote/blob/main/docs/usage.md">使用手册</a>
       <a href="https://github.com/Zhong0118/PinNote/issues">反馈问题</a>
     </nav>

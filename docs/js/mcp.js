@@ -32,13 +32,13 @@ function call(name, args, result, { error = false } = {}) {
 function add(...items) { chat.append(...items); items.at(-1)?.scrollIntoView?.({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }
 function setButton(label, disabled = false) { nextBtn.textContent = label; nextBtn.disabled = disabled; }
 
-const disabledError = 'INTEGRATION_DISABLED: 请在 PinNote 设置中启用集成';
+const disabledError = 'INTEGRATION_DISABLED: 请在驻墨设置中启用集成';
 const brief = n => ({ id: n.id, title: n.title, revision: n.revision, lifecycle: n.lifecycle, placement: n.id === 'plan' ? (store.state.desk.form === 'center' ? 'center' : 'desktop') : n.placement });
 
 function step() {
   const plan = store.note('plan'), meet = store.note('meet');
   if (phase === 'start') {
-    if (!enabled.checked) { add(call('search_notes', { query: '官网' }, disabledError, { error: true }), agentMessage('PinNote 的本地 MCP 还没有启用。打开上方的「启用本地 MCP」后再试。')); setButton('重试'); return; }
+    if (!enabled.checked) { add(call('search_notes', { query: '官网' }, disabledError, { error: true }), agentMessage('驻墨的本地 MCP 还没有启用。打开上方的「启用本地 MCP」后再试。')); setButton('重试'); return; }
     searchStep(); return;
   }
   if (phase === 'retry-search') {
@@ -61,7 +61,7 @@ function step() {
     const args = { id: 'plan', content: APPEND.replace(/\n/g, '\\n'), expectedRevision: readRevision };
     if (!enabled.checked) { add(call('append_note', args, disabledError, { error: true })); return; }
     if (!write.checked) {
-      add(call('append_note', args, 'READ_ONLY: 未启用写入权限', { error: true }), agentMessage('写入被拒绝：PinNote 现在只允许读取。要继续，请打开「允许 agent 修改便签」。'));
+      add(call('append_note', args, 'READ_ONLY: 未启用写入权限', { error: true }), agentMessage('写入被拒绝：驻墨现在只允许读取。要继续，请打开「允许 agent 修改便签」。'));
       setButton('重试写入'); return;
     }
     if (plan.revision !== readRevision) {
