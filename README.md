@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/inkpin-icon.png" alt="InkPin 像素便签图标" width="64" height="64" />
+  <img src="src-tauri/icons/128x128@2x.png" alt="InkPin 像素便签图标" width="64" height="64" />
 </p>
 
 <h1 align="center">InkPin</h1>
